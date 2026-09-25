@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.16)
+project(cov_cpp LANGUAGES CXX)
+add_executable(cov_cpp main.cpp)
+enable_testing()
+add_test(NAME choose COMMAND cov_cpp)

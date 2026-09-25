@@ -1,0 +1,36 @@
+# scorecard / ca configuration.
+# pack = "rust"   # rust, node, python, bash, go, java, csharp, php, cpp, or command
+# Set this when the repo contains more than one manifest. Same as --pack.
+# Copy to analyzer.toml in the crate you analyze, or to ~/.config/ca/analyzer.toml.
+# CLI flags override the matching settings.
+
+[gates]
+# `spec` and `mutation` run only when `--spec` or `--mutation` asks for them.
+fail_on = ["types", "tests", "crap", "secrets", "lint"]
+crap_threshold = 30
+# Every src function at or above this CC with 0% coverage fails the crap
+# gate (`complexity.untested`). This is the whole src tree until --diff exists.
+new_fn_untested_cc = 15
+
+[scope]
+# Only src/**/*.rs is scanned. Paths are relative to the crate root.
+exclude = ["target/**", "generated/**"]
+
+[mutation]
+mode = "off"
+max_mutants = 50
+budget_seconds = 180
+
+[llm]
+enabled = false
+endpoint = "http://127.0.0.1:11434/v1"
+model = "qwen2.5-coder"
+
+[engines]
+coverage = true
+sca = true
+
+[commands]
+# Empty skips lint. Non-zero exit is `lint.failed`.
+# Add `lint` to `gates.fail_on` to make that exit fail the process.
+lint = "cargo clippy -- -D warnings"

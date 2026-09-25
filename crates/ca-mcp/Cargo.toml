@@ -1,0 +1,16 @@
+[package]
+name = "ca-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "MCP server for sc"
+
+[[bin]]
+name = "sc-mcp"
+path = "src/main.rs"
+
+[dependencies]
+ca-core = { path = "../ca-core" }
+ca-engines = { path = "../ca-engines" }
+serde_json = "1"

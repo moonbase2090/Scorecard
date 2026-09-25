@@ -1,0 +1,8 @@
+{
+  "name": "cov-node",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "test": "node test/choose.test.js"
+  }
+}

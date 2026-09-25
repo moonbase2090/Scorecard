@@ -1,0 +1,7 @@
+[package]
+name = "ca-mutation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Stub: cargo-mutants adapter (not implemented)"

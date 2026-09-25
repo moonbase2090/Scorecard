@@ -1,0 +1,13 @@
+[package]
+name = "ca-graph"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Rust source discovery and cyclomatic complexity"
+
+[dependencies]
+ca-core = { path = "../ca-core" }
+proc-macro2 = { version = "1", features = ["span-locations"] }
+serde = { version = "1", features = ["derive"] }
+syn = { version = "2", features = ["full", "visit"] }

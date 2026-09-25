@@ -1,0 +1,9 @@
+/target
+**/target
+**/*.profraw
+.ca/
+testdata/**/bin/
+testdata/**/obj/
+testdata/**/__pycache__/
+testdata/**/.phpunit.result.cache
+testdata/go_pack/go_pack

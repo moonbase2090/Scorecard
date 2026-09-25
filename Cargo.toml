@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/ca-cli",
+    "crates/ca-core",
+    "crates/ca-graph",
+    "crates/ca-engines",
+    "crates/ca-mutation",
+    "crates/ca-llm",
+    "crates/ca-mcp",
+    "crates/ca-sarif",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/moonbase2090/Scorecard"
