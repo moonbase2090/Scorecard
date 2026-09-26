@@ -4,13 +4,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-- Refresh the readme sample at `e274846`.
-- Name every pack in `--pack` help. `--budget-seconds` is the budget for pack commands.
-- Split the readme into `docs/packs.md`, `docs/config.md`, `docs/mcp.md`, and `docs/crap.md`.
-
 ## [0.1.0]
 
-- `sc` analyzes one language pack and prints a JSON, Markdown, SARIF, or HTML scorecard.
-- Rust enforces types, tests, CRAP, secrets, dependency checks, and lint. Other packs report a smaller enforced set and share the CRAP formula.
+Workspace version `0.1.0`. Not tagged. Not published to crates.io.
+
+### Added
+
+- `sc` analyzes one project tree and prints a JSON, Markdown, SARIF, or HTML scorecard. `--format all` writes that set. Exit 0 is a pass, exit 1 is a failed gate, and exit 2 is an analyzer error.
+- Packs: Rust, Node, Python, Bash, Go, Java, C#, PHP, and C++. `--pack` names one of `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, or `command` when several manifests match. `command` runs secrets plus a lint command you set.
+- Rust enforces types, tests, CRAP, secrets, and lint. Undeclared dependencies are advisory and do not fail the process. Other packs report a smaller enforced set and use the same CRAP formula. The default threshold is 30.
 - `sc-mcp` serves `analyze_paths`, `analyze_diff`, `explain`, and `list_findings` over stdio.
-- License is MPL-2.0. Nothing is published to crates.io yet.
+- `--mutation diff` or `--mutation full` runs `cargo-mutants` from `sc-engines`. Mutation stays off unless you ask.
+- `--llm on` calls an OpenAI-compatible endpoint. The default is `http://127.0.0.1:11434/v1`. If that endpoint is unchanged and `XAI_API_KEY` is set, the call uses SpaceXAI at `https://api.x.ai/v1` with model `grok-4.5`.
+- Docs for packs, config, MCP, and CRAP. The readme sample is `sc analyze testdata/good_crate --format md`.
+- License is MPL-2.0. MSRV is Rust 1.85.
