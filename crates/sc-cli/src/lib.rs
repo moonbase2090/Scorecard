@@ -46,7 +46,7 @@ struct AnalyzeArgs {
     /// Comma-separated gates that fail the run. Default: types,tests,crap,secrets,lint.
     #[arg(long, value_name = "LIST")]
     fail_on: Option<String>,
-    /// Pack override when a repo contains more than one manifest.
+    /// Pack override when several manifests match: rust, node, python, bash, go, java, csharp, php, cpp, or command.
     #[arg(long, value_name = "PACK")]
     pack: Option<String>,
     /// Score only the git diff against BASE. Omit BASE to use HEAD~1, else main.
@@ -70,7 +70,7 @@ struct AnalyzeArgs {
     /// What this change is supposed to accomplish. Stored on the scorecard.
     #[arg(long)]
     intent: Option<String>,
-    /// Wall-clock budget for cargo commands, in seconds.
+    /// Wall-clock budget for pack commands, in seconds.
     #[arg(long, default_value_t = 120)]
     budget_seconds: u64,
     /// Path to analyzer.toml. Default: ./analyzer.toml, then ~/.config/sc/analyzer.toml.

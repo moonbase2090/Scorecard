@@ -1,6 +1,6 @@
 # Examples
 
-## Good crate
+## Passing fixture
 
 From a checkout of this repository, with `sc` on `PATH`:
 

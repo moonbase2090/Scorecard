@@ -41,7 +41,7 @@ On a Rust tree, `sc` runs `cargo check`, `cargo test`, complexity, `cargo llvm-c
 ```text
 sc analyze [PATH] [--diff [BASE]] [--diff-head REV] [--paths FILE] [--spec PATH]
             [--format json|md|sarif|html|all] [--out PATH] [--fail-on LIST]
-            [--mutation off|diff|full] [--llm off|on] [--intent TEXT]
+            [--pack PACK] [--mutation off|diff|full] [--llm off|on] [--intent TEXT]
             [--budget-seconds N] [--config PATH]
 ```
 
@@ -50,6 +50,7 @@ sc analyze [PATH] [--diff [BASE]] [--diff-head REV] [--paths FILE] [--spec PATH]
 | `PATH` | `.` |
 | `--format` | `json` (`md`, `sarif`, `html`, or `all`) |
 | `--fail-on` | `types,tests,crap,secrets,lint` |
+| `--pack` | detect one pack. `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, or `command` |
 | `--mutation` | `off` |
 | `--llm` | `off` |
 | `--intent` | none |
