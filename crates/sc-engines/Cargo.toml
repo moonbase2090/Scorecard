@@ -3,6 +3,12 @@ name = "sc-engines"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
 publish = false
 description = "Deterministic compile, test, coverage, and CRAP engines"
 
@@ -10,7 +16,7 @@ description = "Deterministic compile, test, coverage, and CRAP engines"
 sc-core = { path = "../sc-core" }
 sc-graph = { path = "../sc-graph" }
 sc-llm = { path = "../sc-llm" }
-rustc-demangle = "0.1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sha2 = "0.10"
+rustc-demangle.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
