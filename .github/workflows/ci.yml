@@ -30,11 +30,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
       # Fixture tooling the test suite shells out to. ubuntu-latest already
       # ships node/npm, python3, go, JDK+maven+gradle, dotnet, and g++/cmake.
       - name: Install Rust coverage tooling
@@ -47,7 +47,7 @@ jobs:
           sudo npm install -g c8 bats
           sudo apt-get update && sudo apt-get install -y lcov
       # noble has no kcov package: build v43 from source, caching the binary.
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         id: kcov-cache
         with:
           path: /usr/local/bin/kcov
@@ -61,7 +61,7 @@ jobs:
           cmake --build /tmp/kcov-43/build -j"$(nproc)"
           sudo cmake --install /tmp/kcov-43/build --prefix /usr/local
           kcov --version
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@b604ade2a87db23f8871b7182e69ec5e75effb45 # v2
         with:
           php-version: "8.3"
           extensions: pcov
@@ -83,11 +83,11 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
       - name: fmt
         run: cargo fmt --check
       - name: clippy
@@ -100,9 +100,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
       - name: Install cargo-deny
         run: cargo install cargo-deny --locked --version 0.20.2
       - name: cargo-deny check
@@ -112,9 +112,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.85
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@077fee5b0788f1a772d4c6ce2814159cd1d6632b # 1.85
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
       - name: Check MSRV
         run: cargo check --workspace --locked --all-targets
 
@@ -128,9 +128,9 @@ jobs:
       contents: read
       actions: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
       # Dogfood runs the repo's own test suite, so it needs the same
       # fixture tooling as check-ubuntu (see that job for rationale).
       - name: Install Rust coverage tooling
@@ -142,7 +142,7 @@ jobs:
           pipx install ruff
           sudo npm install -g c8 bats
           sudo apt-get update && sudo apt-get install -y lcov
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         id: kcov-cache
         with:
           path: /usr/local/bin/kcov
@@ -156,7 +156,7 @@ jobs:
           cmake --build /tmp/kcov-43/build -j"$(nproc)"
           sudo cmake --install /tmp/kcov-43/build --prefix /usr/local
           kcov --version
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@b604ade2a87db23f8871b7182e69ec5e75effb45 # v2
         with:
           php-version: "8.3"
           extensions: pcov
@@ -170,7 +170,7 @@ jobs:
         run: ./target/release/sc analyze . --format all --out sc-report --budget-seconds 600
       - name: Upload reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: scorecard-dogfood
           path: |
