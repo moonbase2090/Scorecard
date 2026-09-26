@@ -246,7 +246,7 @@ fn collect(root: &Path, dir: &Path, depth: u32, exts: &[&str], out: &mut Vec<Str
         } else if path
             .extension()
             .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| exts.iter().any(|wanted| *wanted == ext))
+            .is_some_and(|ext| exts.contains(&ext))
         {
             if let Ok(rel) = path.strip_prefix(root) {
                 out.push(rel.to_string_lossy().replace('\\', "/"));

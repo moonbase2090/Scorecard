@@ -131,8 +131,7 @@ fn run_analyze(
     intent: Option<String>,
 ) -> Result<String, String> {
     let root = find_crate(cwd)?;
-    let config = sc_core::load_config_file(sc_core::resolve_config_path(None, &root).as_deref())
-        .map_err(|err| err)?;
+    let config = sc_core::load_config_file(sc_core::resolve_config_path(None, &root).as_deref())?;
     let output = analyze(AnalyzeRequest {
         root,
         repo: ".".into(),
