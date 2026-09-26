@@ -328,235 +328,270 @@ fn analyze_rust(request: AnalyzeRequest) -> AnalyzeOutput {
         Err(err) => (empty_selection(), Some(err)),
     };
 
-    let mut findings = Vec::new();
-    let mut runs = Vec::new();
+    let mut state = RustState::new();
     if let Some(err) = &select_error {
-        findings.push(unavailable("scope", err));
+        state.findings.push(unavailable("scope", err));
     }
-    let mut ran = vec!["complexity".to_string()];
-    let mut skipped = Vec::new();
-    let mut analyzer_error = select_error.is_some();
-    let types_pass;
-    let mut types_reason = String::new();
-    let tests_pass;
-    let mut tests_reason = String::new();
-    let mut coverage_data = None;
-    let mut line_rate = 0.0;
+    state.analyzer_error = select_error.is_some();
 
     let manifest = root.join("Cargo.toml");
     if !manifest.is_file() {
-        analyzer_error = true;
-        types_pass = false;
-        types_reason = "no Cargo.toml found".into();
-        tests_pass = false;
-        tests_reason = "no Cargo.toml found".into();
-        findings.push(unavailable(
-            "compile",
-            "no Cargo.toml found; cargo check was not run",
-        ));
-        findings.push(unavailable(
-            "tests",
-            "no Cargo.toml found; cargo test was not run",
-        ));
-        skipped.extend(["compile".into(), "tests".into(), "coverage".into()]);
+        missing_manifest(&mut state);
     } else {
-        match run_check(root, &manifest, deadline) {
-            Ok(captured) => {
-                note_run(
-                    &mut runs,
-                    "compile",
-                    "cargo check --message-format=json",
-                    captured.status.code(),
-                    captured.elapsed,
-                );
-                ran.push("compile".into());
-                let mut errors = parse_compiler_messages(root, &captured.stdout);
-                if !captured.status.success() && errors.is_empty() {
-                    errors.push(generic_compile_failure(&captured.stdout, &captured.stderr));
-                }
-                types_pass = errors.is_empty();
-                if !types_pass {
-                    types_reason = "compiler errors".into();
-                }
-                findings.extend(errors);
-            }
-            Err(CommandError::Timeout) => {
-                analyzer_error = true;
-                types_pass = false;
-                types_reason = "timed out".into();
-                note_run(
-                    &mut runs,
-                    "compile",
-                    "cargo check --message-format=json",
-                    None,
-                    Duration::ZERO,
-                );
-                findings.push(unavailable("compile", "cargo check timed out"));
-                skipped.push("compile".into());
-            }
-            Err(err) => {
-                analyzer_error = true;
-                types_pass = false;
-                types_reason = "toolchain unavailable".into();
-                findings.push(unavailable("compile", &err.message("cargo check")));
-                skipped.push("compile".into());
-            }
-        }
+        compile_phase(root, &manifest, deadline, &mut state);
 
-        if !types_pass {
-            tests_pass = false;
-            tests_reason = if analyzer_error {
-                types_reason.clone()
-            } else {
-                "blocked by compile errors".into()
-            };
-            if skipped.iter().any(|engine| engine == "compile") {
-                findings.push(unavailable(
-                    "tests",
-                    "cargo test was not run because cargo check did not start",
-                ));
-            }
-            skipped.extend(["tests".into(), "coverage".into()]);
-        } else {
-            let symbols: Vec<String> = selection
-                .crap_functions
-                .iter()
-                .map(|function| function.symbol.clone())
-                .collect();
-            let targeted = if selection.mode == "diff" {
-                targeted_test_names(root, &symbols)
-            } else {
-                Vec::new()
-            };
-            match run_test_set(root, &manifest, deadline, &targeted, &mut runs) {
-                Ok(captured) => {
-                    ran.push("tests".into());
-                    let failures =
-                        test_findings(root, &captured.stdout, &captured.stderr, captured.success);
-                    tests_pass = failures.is_empty();
-                    if !tests_pass {
-                        tests_reason = "test failures".into();
-                    }
-                    findings.extend(failures);
-                }
-                Err(CommandError::Timeout) => {
-                    analyzer_error = true;
-                    tests_pass = false;
-                    tests_reason = "timed out".into();
-                    findings.push(unavailable("tests", "cargo test timed out"));
-                    skipped.push("tests".into());
-                }
-                Err(err) => {
-                    analyzer_error = true;
-                    tests_pass = false;
-                    tests_reason = "toolchain unavailable".into();
-                    findings.push(unavailable("tests", &err.message("cargo test")));
-                    skipped.push("tests".into());
-                }
-            }
-
-            if tests_pass && request.config.engines.coverage {
-                match run_coverage(root, &manifest, deadline, &mut runs) {
-                    Ok(data) => {
-                        ran.push("coverage".into());
-                        let unmatched = unmatched_count(&selection.crap_functions, &data);
-                        if unmatched > 0 {
-                            findings.push(Finding {
-                                id: "coverage:unmatched".into(),
-                                rule: "coverage.unmatched".into(),
-                                engine: "coverage".into(),
-                                severity: "warning".into(),
-                                file: ".".into(),
-                                span: None,
-                                symbol: None,
-                                message: format!(
-                                    "{unmatched} analyzed function(s) had no llvm-cov record; coverage treated as 0"
-                                ),
-                                evidence: serde_json::json!({"unmatched": unmatched}),
-                                suggested_action: Some(
-                                    "Check that the function is compiled into the test binary"
-                                        .into(),
-                                ),
-                                disposition: String::new(),
-                            });
-                        }
-                        line_rate = data.line_rate;
-                        coverage_data = Some(data);
-                    }
-                    Err(err) => {
-                        skipped.push("coverage".into());
-                        findings.push(coverage_missing(&err));
-                    }
-                }
-            } else if !skipped.iter().any(|engine| engine == "coverage") {
-                skipped.push("coverage".into());
-            }
-        }
+        test_phase(root, &selection, &manifest, deadline, &mut state);
+        coverage_phase(
+            root,
+            &selection,
+            &manifest,
+            deadline,
+            request.config.engines.coverage,
+            &mut state,
+        );
     }
 
-    let report_lint = run_lint_engine(
-        root,
-        &request.config.commands.lint,
-        types_pass,
-        deadline,
-        LintSink {
-            ran: &mut ran,
-            skipped: &mut skipped,
-            findings: &mut findings,
-            runs: &mut runs,
-        },
-    );
+    assemble_rust_report(&request, &selection, threshold, deadline, state)
+}
 
-    let untested_cc = request.config.gates.new_fn_untested_cc;
-    let new_symbols = selection.new_symbols.clone();
-    let narrow_untested = selection.narrow_untested;
-    let crap = evaluate(
-        &selection.crap_functions,
-        coverage_data.as_ref(),
-        threshold,
-        untested_cc,
-        |function| {
-            !narrow_untested
-                || new_symbols.contains(&(function.file.clone(), function.symbol.clone()))
-        },
-    );
-    ran.push("crap".into());
-    let crap_pass = crap.over == 0 && crap.untested == 0;
-    let crap_reason = crap_gate_reason(crap.over, crap.untested, untested_cc);
-    findings.extend(crap.findings);
+struct RustState {
+    findings: Vec<Finding>,
+    runs: Vec<RunRecord>,
+    ran: Vec<String>,
+    skipped: Vec<String>,
+    analyzer_error: bool,
+    types_pass: bool,
+    types_reason: String,
+    tests_pass: bool,
+    tests_reason: String,
+    coverage_data: Option<crate::coverage::CoverageData>,
+    line_rate: f64,
+}
 
-    let hallucinated = import_findings(
-        root,
-        &selection,
-        request.config.engines.sca,
-        &mut ran,
-        &mut skipped,
-        &mut findings,
-    );
-    secret_and_perf(&selection, &mut ran, &mut findings);
-    let mut spec = spec_engine(&request, &selection, &mut ran, &mut skipped, &mut findings);
-    let mutation = mutation_engine(&request, &mut ran, &mut skipped, &mut findings);
-    llm_engine(&request, &mut spec, &mut ran, &mut skipped, &mut findings);
+impl RustState {
+    fn new() -> Self {
+        Self {
+            findings: Vec::new(),
+            runs: Vec::new(),
+            ran: vec!["complexity".to_string()],
+            skipped: Vec::new(),
+            analyzer_error: false,
+            types_pass: false,
+            types_reason: String::new(),
+            tests_pass: false,
+            tests_reason: String::new(),
+            coverage_data: None,
+            line_rate: 0.0,
+        }
+    }
+}
 
-    let coverage_changed = if selection.mode == "tree" {
-        line_rate
+fn missing_manifest(state: &mut RustState) {
+    state.analyzer_error = true;
+    state.types_pass = false;
+    state.types_reason = "no Cargo.toml found".into();
+    state.tests_pass = false;
+    state.tests_reason = "no Cargo.toml found".into();
+    state.findings.push(unavailable(
+        "compile",
+        "no Cargo.toml found; cargo check was not run",
+    ));
+    state.findings.push(unavailable(
+        "tests",
+        "no Cargo.toml found; cargo test was not run",
+    ));
+    state
+        .skipped
+        .extend(["compile".into(), "tests".into(), "coverage".into()]);
+}
+
+fn compile_phase(root: &Path, manifest: &Path, deadline: Instant, state: &mut RustState) {
+    match run_check(root, manifest, deadline) {
+        Ok(captured) => {
+            note_run(
+                &mut state.runs,
+                "compile",
+                "cargo check --message-format=json",
+                captured.status.code(),
+                captured.elapsed,
+            );
+            state.ran.push("compile".into());
+            let mut errors = parse_compiler_messages(root, &captured.stdout);
+            if !captured.status.success() && errors.is_empty() {
+                errors.push(generic_compile_failure(&captured.stdout, &captured.stderr));
+            }
+            state.types_pass = errors.is_empty();
+            if !state.types_pass {
+                state.types_reason = "compiler errors".into();
+            }
+            state.findings.extend(errors);
+        }
+        Err(CommandError::Timeout) => {
+            state.analyzer_error = true;
+            state.types_pass = false;
+            state.types_reason = "timed out".into();
+            note_run(
+                &mut state.runs,
+                "compile",
+                "cargo check --message-format=json",
+                None,
+                Duration::ZERO,
+            );
+            state
+                .findings
+                .push(unavailable("compile", "cargo check timed out"));
+            state.skipped.push("compile".into());
+        }
+        Err(err) => {
+            state.analyzer_error = true;
+            state.types_pass = false;
+            state.types_reason = "toolchain unavailable".into();
+            state
+                .findings
+                .push(unavailable("compile", &err.message("cargo check")));
+            state.skipped.push("compile".into());
+        }
+    }
+}
+
+fn test_phase(
+    root: &Path,
+    selection: &Selection,
+    manifest: &Path,
+    deadline: Instant,
+    state: &mut RustState,
+) {
+    if !state.types_pass {
+        state.tests_pass = false;
+        state.tests_reason = if state.analyzer_error {
+            state.types_reason.clone()
+        } else {
+            "blocked by compile errors".into()
+        };
+        if state.skipped.iter().any(|engine| engine == "compile") {
+            state.findings.push(unavailable(
+                "tests",
+                "cargo test was not run because cargo check did not start",
+            ));
+        }
+        state.skipped.extend(["tests".into(), "coverage".into()]);
+        return;
+    }
+    let symbols: Vec<String> = selection
+        .crap_functions
+        .iter()
+        .map(|function| function.symbol.clone())
+        .collect();
+    let targeted = if selection.mode == "diff" {
+        targeted_test_names(root, &symbols)
     } else {
-        mean_coverage(&selection.crap_functions, coverage_data.as_ref())
+        Vec::new()
     };
-    let metrics = Metrics {
-        loc_changed: selection.loc_changed,
-        files_changed: selection.files_changed,
-        coverage_changed,
-        crap_max: crap.crap_max,
-        crap_over_threshold: crap.over,
-        hallucinated_imports: hallucinated,
-    };
+    match run_test_set(root, manifest, deadline, &targeted, &mut state.runs) {
+        Ok(captured) => {
+            state.ran.push("tests".into());
+            let failures =
+                test_findings(root, &captured.stdout, &captured.stderr, captured.success);
+            state.tests_pass = failures.is_empty();
+            if !state.tests_pass {
+                state.tests_reason = "test failures".into();
+            }
+            state.findings.extend(failures);
+        }
+        Err(CommandError::Timeout) => {
+            state.analyzer_error = true;
+            state.tests_pass = false;
+            state.tests_reason = "timed out".into();
+            state
+                .findings
+                .push(unavailable("tests", "cargo test timed out"));
+            state.skipped.push("tests".into());
+        }
+        Err(err) => {
+            state.analyzer_error = true;
+            state.tests_pass = false;
+            state.tests_reason = "toolchain unavailable".into();
+            state
+                .findings
+                .push(unavailable("tests", &err.message("cargo test")));
+            state.skipped.push("tests".into());
+        }
+    }
+}
 
-    let mut gates = vec![
-        gate("types", types_pass, &types_reason),
-        gate("tests", tests_pass, &tests_reason),
-        gate("crap", crap_pass, &crap_reason),
-    ];
+fn coverage_phase(
+    root: &Path,
+    selection: &Selection,
+    manifest: &Path,
+    deadline: Instant,
+    coverage_enabled: bool,
+    state: &mut RustState,
+) {
+    if !state.tests_pass || !coverage_enabled {
+        if !state.skipped.iter().any(|engine| engine == "coverage") {
+            state.skipped.push("coverage".into());
+        }
+        return;
+    }
+    match run_coverage(root, manifest, deadline, &mut state.runs) {
+        Ok(data) => {
+            state.ran.push("coverage".into());
+            let unmatched = unmatched_count(&selection.crap_functions, &data);
+            if unmatched > 0 {
+                state.findings.push(Finding {
+                    id: "coverage:unmatched".into(),
+                    rule: "coverage.unmatched".into(),
+                    engine: "coverage".into(),
+                    severity: "warning".into(),
+                    file: ".".into(),
+                    span: None,
+                    symbol: None,
+                    message: format!(
+                        "{unmatched} analyzed function(s) had no llvm-cov record; coverage treated as 0"
+                    ),
+                    evidence: serde_json::json!({"unmatched": unmatched}),
+                    suggested_action: Some(
+                        "Check that the function is compiled into the test binary".into(),
+                    ),
+                    disposition: String::new(),
+                });
+            }
+            state.line_rate = data.line_rate;
+            state.coverage_data = Some(data);
+        }
+        Err(err) => {
+            state.skipped.push("coverage".into());
+            state.findings.push(coverage_missing(&err));
+        }
+    }
+}
+
+fn lint_gate(findings: &[Finding], fail_on: &[String]) -> Option<Gate> {
+    let lint_failed = findings.iter().any(|finding| finding.rule == "lint.failed");
+    let lint_missing = findings
+        .iter()
+        .any(|finding| finding.engine == "lint" && finding.rule == "engine.unavailable");
+    let required = fail_on.iter().any(|gate| gate == "lint");
+    let pass = !lint_failed && !(lint_missing && required);
+    let reason = if lint_failed {
+        "lint failed"
+    } else if lint_missing && required {
+        "lint unavailable"
+    } else {
+        ""
+    };
+    Some(gate("lint", pass, reason))
+}
+
+fn push_optional_gates(
+    gates: &mut Vec<Gate>,
+    request: &AnalyzeRequest,
+    state: &RustState,
+    spec: &SpecRun,
+    mutation: &MutationRun,
+    hallucinated: u64,
+    report_lint: bool,
+) {
     if request.config.engines.sca {
         gates.push(advisory_gate(
             "sca",
@@ -564,7 +599,8 @@ fn analyze_rust(request: AnalyzeRequest) -> AnalyzeOutput {
             "undeclared dependencies",
         ));
     }
-    let secret_errors = findings
+    let secret_errors = state
+        .findings
         .iter()
         .filter(|finding| finding.engine == "secrets" && finding.severity == "error")
         .count();
@@ -584,25 +620,113 @@ fn analyze_rust(request: AnalyzeRequest) -> AnalyzeOutput {
         gates.push(gate("mutation", mutation.pass, &mutation.reason));
     }
     if report_lint {
-        let lint_failed = findings.iter().any(|finding| finding.rule == "lint.failed");
-        let lint_missing = findings
-            .iter()
-            .any(|finding| finding.engine == "lint" && finding.rule == "engine.unavailable");
-        let required = request.fail_on.iter().any(|gate| gate == "lint");
-        let pass = !lint_failed && !(lint_missing && required);
-        let reason = if lint_failed {
-            "lint failed"
-        } else if lint_missing && required {
-            "lint unavailable"
-        } else {
-            ""
-        };
-        gates.push(gate("lint", pass, reason));
+        if let Some(lint) = lint_gate(&state.findings, &request.fail_on) {
+            gates.push(lint);
+        }
     }
+}
+
+fn assemble_rust_report(
+    request: &AnalyzeRequest,
+    selection: &Selection,
+    threshold: u32,
+    deadline: Instant,
+    mut state: RustState,
+) -> AnalyzeOutput {
+    let root = &request.root;
+    let report_lint = run_lint_engine(
+        root,
+        &request.config.commands.lint,
+        state.types_pass,
+        deadline,
+        LintSink {
+            ran: &mut state.ran,
+            skipped: &mut state.skipped,
+            findings: &mut state.findings,
+            runs: &mut state.runs,
+        },
+    );
+
+    let untested_cc = request.config.gates.new_fn_untested_cc;
+    let new_symbols = selection.new_symbols.clone();
+    let narrow_untested = selection.narrow_untested;
+    let crap = evaluate(
+        &selection.crap_functions,
+        state.coverage_data.as_ref(),
+        threshold,
+        untested_cc,
+        |function| {
+            !narrow_untested
+                || new_symbols.contains(&(function.file.clone(), function.symbol.clone()))
+        },
+    );
+    state.ran.push("crap".into());
+    let crap_pass = crap.over == 0 && crap.untested == 0;
+    let crap_reason = crap_gate_reason(crap.over, crap.untested, untested_cc);
+    state.findings.extend(crap.findings);
+
+    let hallucinated = import_findings(
+        root,
+        selection,
+        request.config.engines.sca,
+        &mut state.ran,
+        &mut state.skipped,
+        &mut state.findings,
+    );
+    secret_and_perf(selection, &mut state.ran, &mut state.findings);
+    let mut spec = spec_engine(
+        request,
+        selection,
+        &mut state.ran,
+        &mut state.skipped,
+        &mut state.findings,
+    );
+    let mutation = mutation_engine(
+        request,
+        &mut state.ran,
+        &mut state.skipped,
+        &mut state.findings,
+    );
+    llm_engine(
+        request,
+        &mut spec,
+        &mut state.ran,
+        &mut state.skipped,
+        &mut state.findings,
+    );
+
+    let coverage_changed = if selection.mode == "tree" {
+        state.line_rate
+    } else {
+        mean_coverage(&selection.crap_functions, state.coverage_data.as_ref())
+    };
+    let metrics = Metrics {
+        loc_changed: selection.loc_changed,
+        files_changed: selection.files_changed,
+        coverage_changed,
+        crap_max: crap.crap_max,
+        crap_over_threshold: crap.over,
+        hallucinated_imports: hallucinated,
+    };
+
+    let mut gates = vec![
+        gate("types", state.types_pass, &state.types_reason),
+        gate("tests", state.tests_pass, &state.tests_reason),
+        gate("crap", crap_pass, &crap_reason),
+    ];
+    push_optional_gates(
+        &mut gates,
+        request,
+        &state,
+        &spec,
+        &mutation,
+        hallucinated,
+        report_lint,
+    );
 
     finish(Draft {
         root: root.to_path_buf(),
-        repo: request.repo,
+        repo: request.repo.clone(),
         pack: "rust".into(),
         test_selection: if request.diff_base.is_some() {
             "rust-tests".into()
@@ -610,21 +734,21 @@ fn analyze_rust(request: AnalyzeRequest) -> AnalyzeOutput {
             "full-suite".into()
         },
         git: git_info(root),
-        mode: selection.mode,
-        paths: selection.paths,
-        fail_on: request.fail_on,
-        findings,
-        ran,
-        skipped,
+        mode: selection.mode.clone(),
+        paths: selection.paths.clone(),
+        fail_on: request.fail_on.clone(),
+        findings: state.findings,
+        ran: state.ran,
+        skipped: state.skipped,
         gates,
         metrics,
         threshold,
         worst: crap.worst,
         mutation: mutation.section,
         spec: spec.section,
-        intent: request.intent,
-        runs,
-        analyzer_error,
+        intent: request.intent.clone(),
+        runs: state.runs,
+        analyzer_error: state.analyzer_error,
     })
 }
 
