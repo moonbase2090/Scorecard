@@ -21,6 +21,7 @@ pub enum PackId {
 }
 
 impl PackId {
+    #[inline(never)]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Rust => "rust",
@@ -36,6 +37,7 @@ impl PackId {
         }
     }
 
+    #[inline(never)]
     pub fn parse(name: &str) -> Option<Self> {
         match name.trim().to_ascii_lowercase().as_str() {
             "rust" => Some(Self::Rust),
@@ -311,6 +313,27 @@ mod tests {
         assert_eq!(detect(&node, "").unwrap(), Detected::Pack(PackId::Node));
         let _ = fs::remove_dir_all(rust);
         let _ = fs::remove_dir_all(node);
+    }
+
+    #[test]
+    fn every_pack_name_parses_and_prints() {
+        let names = [
+            ("rust", PackId::Rust),
+            ("javascript", PackId::Node),
+            ("py", PackId::Python),
+            ("shell", PackId::Bash),
+            ("golang", PackId::Go),
+            ("java", PackId::Java),
+            ("c#", PackId::CSharp),
+            ("php", PackId::Php),
+            ("cxx", PackId::Cpp),
+            ("command", PackId::Command),
+        ];
+        for (name, id) in names {
+            assert_eq!(PackId::parse(name), Some(id));
+            assert!(!id.as_str().is_empty());
+        }
+        assert_eq!(PackId::parse("nope"), None);
     }
 
     #[test]

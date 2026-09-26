@@ -1,13 +1,6 @@
 # Dogfood config for this repository. `sc analyze .` loads it, including the
-# develop CI job, which does not pass `--config`. Other projects keep the
-# defaults in analyzer.toml.example: threshold 30, untested CC 15.
-#
-# Measured after workspace member src is scored: `mutation::execute` is CC 20
-# with no coverage, so its CRAP is 420. `pipeline::analyze_rust` is CC 41, so
-# full coverage would still score 41. A score equal to the threshold passes.
+# develop CI job, which does not pass `--config`.
+# CRAP uses the defaults: threshold 30, untested CC 15.
 
 [gates]
 fail_on = ["types", "tests", "crap", "secrets", "lint"]
-crap_threshold = 420
-# `mutation::execute` is CC 20 and uncovered. The default of 15 would still fail.
-new_fn_untested_cc = 21

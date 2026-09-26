@@ -25,6 +25,7 @@ pub fn cyclomatic_of_block(block: &Block) -> u32 {
     visitor.cc
 }
 
+#[inline(never)]
 fn collect_items(items: &[Item], file: &str, prefix: &str, out: &mut Vec<FunctionInfo>) {
     for item in items {
         match item {
@@ -261,6 +262,23 @@ mod tests {
             fns.iter().find(|f| f.symbol == "Foo::method").unwrap().cc,
             2
         );
+    }
+
+    #[test]
+    fn trait_defaults_and_modules_are_collected() {
+        let src = r#"
+trait Worker {
+    fn go(&self) { let _ = 1; }
+}
+mod inner {
+    pub fn hidden() {}
+}
+"#;
+        let file = syn::parse_file(src).unwrap();
+        let fns = functions_in_source(&file, "src/lib.rs");
+        let symbols: Vec<_> = fns.iter().map(|f| f.symbol.as_str()).collect();
+        assert!(symbols.contains(&"Worker::go"));
+        assert!(symbols.contains(&"inner::hidden"));
     }
 
     #[test]
