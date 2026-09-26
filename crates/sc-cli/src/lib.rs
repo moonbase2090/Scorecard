@@ -19,7 +19,7 @@ use sc_core::{
 };
 use sc_engines::{analyze, AnalyzeRequest, RunStatus};
 
-use format::{to_json, to_markdown};
+pub use format::{to_json, to_markdown};
 use report::to_html;
 
 #[derive(Parser)]
@@ -35,7 +35,7 @@ struct Cli {
 
 #[derive(Args)]
 struct AnalyzeArgs {
-    /// Crate directory (or a path to Cargo.toml). Defaults to `.`.
+    /// Project directory. Defaults to `.`.
     path: Option<PathBuf>,
     /// `json` (default), `md`, `sarif`, `html`, or `all`.
     #[arg(long, value_parser = ["json", "md", "sarif", "html", "all"], default_value = "json")]

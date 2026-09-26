@@ -1,10 +1,31 @@
 // SPDX-License-Identifier: MPL-2.0
 use sc_core::Scorecard;
 
+/// Render a scorecard as pretty JSON.
+///
+/// ```
+/// use sc_cli::to_json;
+/// use sc_core::Scorecard;
+/// let card = Scorecard::skeleton("demo", 30);
+/// let value: serde_json::Value = serde_json::from_str(&to_json(&card)).unwrap();
+/// assert_eq!(value["repo"], "demo");
+/// assert_eq!(value["verdict"], "fail");
+/// ```
 pub fn to_json(card: &Scorecard) -> String {
     serde_json::to_string_pretty(card).unwrap_or_else(|_| "{}".to_string())
 }
 
+/// Render a scorecard as Markdown.
+///
+/// ```
+/// use sc_cli::to_markdown;
+/// use sc_core::Scorecard;
+/// let card = Scorecard::skeleton(".", 30);
+/// let md = to_markdown(&card);
+/// assert!(md.starts_with("# scorecard\n"));
+/// assert!(md.contains("**Verdict:** fail"));
+/// assert!(md.contains("**Repo:** ."));
+/// ```
 pub fn to_markdown(card: &Scorecard) -> String {
     let mut out = String::new();
     let head = card.git.head.as_deref().unwrap_or("none");
