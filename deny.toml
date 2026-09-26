@@ -1,0 +1,39 @@
+# cargo-deny: licenses, advisories, and sources for the release targets.
+# The allowlist below was surveyed against Cargo.lock on 2026-09-26:
+# MIT/Apache-2.0 dual (most crates), Unicode-3.0 (icu stack),
+# CDLA-Permissive-2.0 (webpki-roots CA data), Unlicense OR MIT
+# (memchr, aho-corasick, termcolor), ISC (ring, rustls), BSD-3-Clause.
+
+[graph]
+targets = [
+  { triple = "aarch64-apple-darwin" },
+  { triple = "x86_64-apple-darwin" },
+  { triple = "x86_64-unknown-linux-gnu" },
+  { triple = "aarch64-unknown-linux-gnu" },
+]
+
+[licenses]
+allow = [
+  "Apache-2.0",
+  "BSD-3-Clause",
+  "CDLA-Permissive-2.0",
+  "ISC",
+  "MIT",
+  "Unlicense",
+  "Unicode-3.0",
+]
+confidence-threshold = 0.8
+
+[licenses.private]
+ignore = true
+
+[advisories]
+db-path = "~/.cargo/advisory-dbs"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "warn"
+unmaintained = "workspace"
+unsound = "workspace"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
