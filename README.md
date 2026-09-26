@@ -4,7 +4,7 @@
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-blue.svg)](LICENSE)
 [![MSRV 1.85](https://img.shields.io/badge/MSRV-1.85-blue.svg)](https://github.com/moonbase2090/Scorecard/blob/develop/Cargo.toml)
 
-The CI badge is workflow `ci` on `develop`. `ci.yml` is not on `main`. License is MPL-2.0. The MSRV is Rust 1.85. The crates are not published, so there is no crates.io badge.
+The CI badge is workflow `ci` on `develop`. `ci.yml` is on `main` as well. License is MPL-2.0. The MSRV is Rust 1.85. The crates are not published, so there is no crates.io badge.
 
 `sc` is a local code-quality gate. It picks one language pack, runs that pack's tools, and prints a scorecard an agent can act on.
 
@@ -121,6 +121,7 @@ commit SHA.
 - [Config](docs/config.md)
 - [MCP](docs/mcp.md)
 - [CRAP](docs/crap.md)
+- [v0.1.0 readiness](docs/v0.1.0-readiness.md)
 
 ## License
 
