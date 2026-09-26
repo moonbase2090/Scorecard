@@ -3,8 +3,19 @@ name: ci
 on:
   pull_request:
     branches: [develop, main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".github/ISSUE_TEMPLATE/**"
   push:
     branches: [develop]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".github/ISSUE_TEMPLATE/**"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,17 +25,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-14]
+  # Every PR update runs here only (macOS runners bill 10x on this repo).
+  check-ubuntu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
       - name: fmt
         run: cargo fmt --check
       - name: clippy
@@ -32,19 +42,48 @@ jobs:
       - name: test
         run: cargo test --workspace --locked
 
-  dogfood:
-    runs-on: ubuntu-latest
-    permissions:
-      security-events: write
+  # macOS coverage runs on pushes to develop and manual dispatch, not PRs.
+  check-macos:
+    if: github.event_name != 'pull_request'
+    runs-on: macos-14
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: fmt
+        run: cargo fmt --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test
+        run: cargo test --workspace --locked
+
+  # Self-analysis on pushes to develop. Plain cargo/sc commands only, so
+  # this stays portable if CI moves off GitHub Actions later.
+  dogfood:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - name: Build sc
         run: cargo build --release --locked -p sc-cli
       - name: Analyze self
-        run: ./target/release/sc analyze . --format sarif --out scorecard.sarif
-      - name: Upload SARIF
+        run: ./target/release/sc analyze . --format all --out sc-report
+      - name: Upload reports
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: actions/upload-artifact@v4
         with:
-          sarif_file: scorecard.sarif
+          name: scorecard-dogfood
+          path: |
+            sc-report.sarif
+            sc-report.json
+            sc-report.html
+          if-no-files-found: warn
