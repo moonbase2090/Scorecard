@@ -1,0 +1,134 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [develop, main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".github/ISSUE_TEMPLATE/**"
+  push:
+    branches: [develop]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".github/ISSUE_TEMPLATE/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Every PR update runs here only (macOS runners bill 10x on this repo).
+  check-ubuntu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      # Fixture tooling the test suite shells out to. ubuntu-latest already
+      # ships node/npm, python3, go, JDK+maven+gradle, dotnet, and g++/cmake.
+      - name: Install Rust coverage tooling
+        run: |
+          rustup component add llvm-tools-preview
+          cargo install cargo-llvm-cov --locked
+      - name: Install lint and coverage tools
+        run: |
+          pipx install ruff
+          sudo npm install -g c8 bats
+          sudo apt-get update && sudo apt-get install -y lcov
+      # noble has no kcov package: build v43 from source, caching the binary.
+      - uses: actions/cache@v4
+        id: kcov-cache
+        with:
+          path: /usr/local/bin/kcov
+          key: kcov-v43-noble
+      - name: Build kcov from source
+        if: steps.kcov-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update && sudo apt-get install -y cmake g++ pkg-config libcurl4-openssl-dev zlib1g-dev libdw-dev libiberty-dev binutils-dev
+          curl -sSL https://github.com/SimonKagstrom/kcov/archive/refs/tags/v43.tar.gz | tar xz -C /tmp
+          cmake -S /tmp/kcov-43 -B /tmp/kcov-43/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/kcov-43/build -j"$(nproc)"
+          sudo cmake --install /tmp/kcov-43/build --prefix /usr/local
+          kcov --version
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: pcov
+          coverage: pcov
+          tools: phpunit, phpstan
+      - name: fmt
+        run: cargo fmt --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test
+        run: cargo test --workspace --locked
+
+  # macOS coverage runs on pushes to develop and manual dispatch, not PRs.
+  check-macos:
+    if: github.event_name != 'pull_request'
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install fixture tooling
+        run: |
+          rustup component add llvm-tools-preview
+          cargo install cargo-llvm-cov --locked
+          pipx install ruff
+          sudo npm install -g c8 bats
+          brew install kcov lcov
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: pcov
+          coverage: pcov
+          tools: phpunit, phpstan
+      - name: fmt
+        run: cargo fmt --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test
+        run: cargo test --workspace --locked
+
+  # Self-analysis on pushes to develop. Plain cargo/sc commands only, so
+  # this stays portable if CI moves off GitHub Actions later.
+  dogfood:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build sc
+        run: cargo build --release --locked -p sc-cli
+      - name: Analyze self
+        run: ./target/release/sc analyze . --format all --out sc-report
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scorecard-dogfood
+          path: |
+            sc-report.sarif
+            sc-report.json
+            sc-report.html
+          if-no-files-found: warn
