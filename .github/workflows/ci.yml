@@ -75,35 +75,25 @@ jobs:
         run: cargo test --workspace --locked
 
   # macOS coverage runs on pushes to develop and manual dispatch, not PRs.
+  # No fixture tooling here (setup-php hung 10+ min): build plus fmt,
+  # clippy, and the fixture-free lib unit tests only. Ubuntu covers
+  # the full fixture matrix.
   check-macos:
     if: github.event_name != 'pull_request'
     runs-on: macos-14
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Install fixture tooling
-        run: |
-          rustup component add llvm-tools-preview
-          cargo install cargo-llvm-cov --locked
-          pipx install ruff
-          sudo npm install -g c8 bats
-          brew install kcov lcov
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: "8.3"
-          extensions: pcov
-          coverage: pcov
-          tools: phpunit, phpstan
       - name: fmt
         run: cargo fmt --check
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: test
-        run: cargo test --workspace --locked
+      - name: test core
+        run: cargo test --workspace --locked --lib
 
   # Supply chain and MSRV stay Ubuntu-only and cached, like everything else.
   deny:
@@ -133,7 +123,7 @@ jobs:
   dogfood:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     permissions:
       contents: read
       actions: write
@@ -174,8 +164,10 @@ jobs:
           tools: phpunit, phpstan
       - name: Build sc
         run: cargo build --release --locked -p sc-cli
+      # The full instrumented suite is slower on runners than on a dev
+      # Mac; the 120s per-command default starves cargo test and clippy.
       - name: Analyze self
-        run: ./target/release/sc analyze . --format all --out sc-report
+        run: ./target/release/sc analyze . --format all --out sc-report --budget-seconds 600
       - name: Upload reports
         if: always()
         uses: actions/upload-artifact@v4
