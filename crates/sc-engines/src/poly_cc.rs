@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 //! Cyclomatic complexity for the non-Rust packs.
 //!
 //! Python uses the stdlib `ast` module. The other packs count decision points

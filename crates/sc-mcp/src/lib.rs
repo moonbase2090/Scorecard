@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 //! MCP server for four scorecard tools.
 //!
 //! `analyze_paths`, `analyze_diff`, `explain`, and `list_findings`.

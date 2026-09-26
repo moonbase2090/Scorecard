@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 use std::collections::BTreeSet;
 
 pub fn package_name(text: &str) -> Option<String> {

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 //! CLI for the `sc` scorecard gate.
 //!
 //! User-facing analyze output is the scorecard, rendered as JSON and/or Markdown.

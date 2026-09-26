@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 //! Python pack: compile, pytest, Ruff, and imports checked against pyproject.toml.
 //!
 //! CRAP uses the same formula as Rust. Line coverage comes from pytest-cov when

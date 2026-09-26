@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 //! Compile, test, and lint commands for the non-Rust, non-Python packs.
 //!
 //! A missing compiler is reported and does not fail the process. A command
