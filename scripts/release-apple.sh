@@ -36,8 +36,19 @@ lipo -info "$stage/sc-mcp" | grep -q x86_64
 lipo -info "$stage/sc-mcp" | grep -q arm64
 cp "$root/LICENSE" "$root/README.md" "$stage/"
 
-"$stage/sc" --version | grep -qx "sc $ver"
-"$stage/sc-mcp" --version | grep -qx "$ver"
+# A prerelease tag (v0.1.0-rc.2) may ship binaries that report the base
+# Cargo.toml version (0.1.0); a final tag must match exactly.
+base="${ver%%-*}"
+got=$("$stage/sc" --version)
+if [ "$got" != "sc $ver" ] && [ "$got" != "sc $base" ]; then
+  echo "error: sc --version is '$got', tag is $GITHUB_REF_NAME" >&2
+  exit 1
+fi
+got=$("$stage/sc-mcp" --version)
+if [ "$got" != "$ver" ] && [ "$got" != "$base" ]; then
+  echo "error: sc-mcp --version is '$got', tag is $GITHUB_REF_NAME" >&2
+  exit 1
+fi
 
 pack_arch() {
   triple=$1
@@ -54,11 +65,21 @@ pack_arch x86_64-apple-darwin
 dmg="$dist/sc-v${ver}-universal-apple-darwin.dmg"
 signed=false
 if [ -n "${APPLE_CERTIFICATE_P12:-}" ]; then
+  for v in APPLE_CERTIFICATE_PASSWORD APPLE_NOTARY_ISSUER APPLE_NOTARY_KEY_ID APPLE_NOTARY_KEY; do
+    eval "val=\${$v:-}"
+    if [ -z "$val" ]; then
+      echo "error: $v is not set" >&2
+      exit 1
+    fi
+  done
   security create-keychain -p "" "$keychain"
   security set-keychain-settings -lut 21600 "$keychain"
   security unlock-keychain -p "" "$keychain"
-  printf '%s' "$APPLE_CERTIFICATE_P12" | base64 --decode > "$work/cert.p12"
-  security import "$work/cert.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+  printf '%s' "$APPLE_CERTIFICATE_P12" | tr -d ' \r\n' | base64 --decode > "$work/cert.p12"
+  if ! security import "$work/cert.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign; then
+    echo "error: p12 import failed (check APPLE_CERTIFICATE_P12 and APPLE_CERTIFICATE_PASSWORD)" >&2
+    exit 1
+  fi
   security set-key-partition-list -S apple-tool:,apple: -s -k "" "$keychain" >/dev/null
   security list-keychains -d user -s "$keychain"
   identity=$(security find-identity -v -p codesigning "$keychain" | awk -F'"' '/Developer ID Application/{print $2; exit}')
@@ -70,12 +91,34 @@ if [ -n "${APPLE_CERTIFICATE_P12:-}" ]; then
   rm -f "$dmg"
   hdiutil create -volname "Scorecard $ver" -srcfolder "$stage" -ov -format UDZO "$dmg"
   codesign --force --timestamp --sign "$identity" "$dmg"
-  printf '%s' "$APPLE_NOTARY_KEY" > "$work/AuthKey.p8"
-  xcrun notarytool submit "$dmg" --wait \
+  # Accept the .p8 either as PEM text or base64 of the PEM file.
+  case "$APPLE_NOTARY_KEY" in
+    *"BEGIN PRIVATE KEY"*) printf '%s\n' "$APPLE_NOTARY_KEY" > "$work/AuthKey.p8" ;;
+    *) printf '%s' "$APPLE_NOTARY_KEY" | tr -d ' \r\n' | base64 --decode > "$work/AuthKey.p8" ;;
+  esac
+  set +e
+  xcrun notarytool submit "$dmg" --wait --output-format json \
     --issuer "$APPLE_NOTARY_ISSUER" \
     --key-id "$APPLE_NOTARY_KEY_ID" \
-    --key "$work/AuthKey.p8"
+    --key "$work/AuthKey.p8" > "$work/notary.json"
+  rc=$?
+  set -e
+  cat "$work/notary.json"
+  echo
+  sub_id=$(plutil -extract id raw -o - "$work/notary.json" 2>/dev/null || true)
+  status=$(plutil -extract status raw -o - "$work/notary.json" 2>/dev/null || true)
+  if [ "$rc" -ne 0 ] || [ "$status" != "Accepted" ]; then
+    echo "error: notarization failed (notarytool exit $rc, status ${status:-unknown})" >&2
+    if [ -n "$sub_id" ]; then
+      xcrun notarytool log "$sub_id" \
+        --issuer "$APPLE_NOTARY_ISSUER" \
+        --key-id "$APPLE_NOTARY_KEY_ID" \
+        --key "$work/AuthKey.p8" || true
+    fi
+    exit 1
+  fi
   xcrun stapler staple "$dmg"
+  xcrun stapler validate "$dmg"
   signed=true
 else
   rm -f "$dmg"

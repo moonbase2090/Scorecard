@@ -16,8 +16,11 @@ jobs:
   apple:
     runs-on: macos-14
     timeout-minutes: 60
+    # Job-level permissions replace the workflow default, so checkout of this
+    # private repo needs contents: read here. Artifact upload/download (v4)
+    # uses the runtime token and needs no actions: scope.
     permissions:
-      actions: write
+      contents: read
     outputs:
       signed: ${{ steps.package.outputs.signed }}
     steps:
@@ -49,8 +52,11 @@ jobs:
   linux:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Job-level permissions replace the workflow default, so checkout of this
+    # private repo needs contents: read here. Artifact upload/download (v4)
+    # uses the runtime token and needs no actions: scope.
     permissions:
-      actions: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -74,11 +80,16 @@ jobs:
         run: |
           set -eu
           ver="${GITHUB_REF_NAME#v}"
+          # A prerelease tag (v0.1.0-rc.2) may ship binaries that report the
+          # base Cargo.toml version (0.1.0); a final tag must match exactly.
+          base="${ver%%-*}"
           triple="${{ matrix.target }}"
           src="target/${triple}/release"
           if [ "$triple" = "x86_64-unknown-linux-gnu" ]; then
-            "$src/sc" --version | grep -qx "sc $ver"
-            "$src/sc-mcp" --version | grep -qx "$ver"
+            got=$("$src/sc" --version)
+            [ "$got" = "sc $ver" ] || [ "$got" = "sc $base" ] || { echo "error: sc --version is '$got', tag is $GITHUB_REF_NAME" >&2; exit 1; }
+            got=$("$src/sc-mcp" --version)
+            [ "$got" = "$ver" ] || [ "$got" = "$base" ] || { echo "error: sc-mcp --version is '$got', tag is $GITHUB_REF_NAME" >&2; exit 1; }
           else
             file "$src/sc" | grep -q 'ARM aarch64'
             file "$src/sc-mcp" | grep -q 'ARM aarch64'
@@ -100,7 +111,6 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write
-      actions: read
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -114,4 +124,8 @@ jobs:
           set -eu
           cd dist
           sha256sum * > SHA256SUMS
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$GITHUB_REF_NAME" *
+          set -- --repo "$GITHUB_REPOSITORY" --verify-tag --title "$GITHUB_REF_NAME"
+          case "$GITHUB_REF_NAME" in
+            *-*) set -- "$@" --prerelease ;;
+          esac
+          gh release create "$GITHUB_REF_NAME" "$@" *
