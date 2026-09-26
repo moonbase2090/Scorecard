@@ -35,6 +35,23 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      # Fixture tooling the test suite shells out to. ubuntu-latest already
+      # ships node/npm, python3, go, JDK+maven+gradle, dotnet, and g++/cmake.
+      - name: Install Rust coverage tooling
+        run: |
+          rustup component add llvm-tools-preview
+          cargo install cargo-llvm-cov --locked
+      - name: Install lint and coverage tools
+        run: |
+          pipx install ruff
+          npm install -g c8 bats
+          sudo apt-get update && sudo apt-get install -y kcov lcov
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: pcov
+          coverage: pcov
+          tools: phpunit, phpstan
       - name: fmt
         run: cargo fmt --check
       - name: clippy
@@ -53,6 +70,19 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Install fixture tooling
+        run: |
+          rustup component add llvm-tools-preview
+          cargo install cargo-llvm-cov --locked
+          pipx install ruff
+          npm install -g c8 bats
+          brew install kcov lcov
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: pcov
+          coverage: pcov
+          tools: phpunit, phpstan
       - name: fmt
         run: cargo fmt --check
       - name: clippy
