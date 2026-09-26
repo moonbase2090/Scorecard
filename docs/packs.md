@@ -40,7 +40,7 @@ On a Rust tree, `sc` runs `cargo check`, `cargo test`, complexity, `cargo llvm-c
 
 ```text
 sc analyze [PATH] [--diff [BASE]] [--diff-head REV] [--paths FILE] [--spec PATH]
-            [--format json|md|sarif|html|all] [--out PATH] [--fail-on LIST]
+            [--format json|pretty|md|sarif|html|all] [--out PATH] [--fail-on LIST]
             [--pack PACK] [--mutation off|diff|full] [--llm off|on] [--intent TEXT]
             [--budget-seconds N] [--config PATH]
 ```
@@ -48,7 +48,7 @@ sc analyze [PATH] [--diff [BASE]] [--diff-head REV] [--paths FILE] [--spec PATH]
 | Flag | Default |
 |---|---|
 | `PATH` | `.` |
-| `--format` | `json` (`md`, `sarif`, `html`, or `all`) |
+| `--format` | `pretty` on a terminal, otherwise `json`. Also `md`, `sarif`, `html`, `all`. |
 | `--fail-on` | `types,tests,crap,secrets,lint` |
 | `--pack` | detect one pack. `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, or `command` |
 | `--mutation` | `off` |
@@ -57,7 +57,7 @@ sc analyze [PATH] [--diff [BASE]] [--diff-head REV] [--paths FILE] [--spec PATH]
 | `--budget-seconds` | `120` |
 | `--config` | `analyzer.toml` in the tree, then `~/.config/sc/analyzer.toml` |
 
-`--format all` prints JSON, then Markdown, on stdout. With `--out`, JSON, Markdown, SARIF, and HTML are written as sibling `.json`, `.md`, `.sarif`, and `.html` files. `--format sarif` writes SARIF to stdout and to `--out`. `--format html` writes a self-contained visual report (no network requests) to stdout and to `--out`.
+`--format pretty` is the terminal layout. It is the default when stdout is a terminal. A pipe or a file stays JSON unless `--format` is set. `NO_COLOR` turns color off. `CLICOLOR_FORCE=1` turns it on. `--format all` prints JSON, then Markdown, on stdout. With `--out`, JSON, Markdown, SARIF, and HTML are written as sibling `.json`, `.md`, `.sarif`, and `.html` files. `--format sarif` writes SARIF to stdout and to `--out`. `--format html` writes a self-contained visual report (no network requests) to stdout and to `--out`.
 
 | Exit | Meaning |
 |---|---|

@@ -23,5 +23,7 @@ default = []
 sc-core = { path = "../sc-core" }
 sc-engines = { path = "../sc-engines" }
 sc-sarif = { path = "../sc-sarif" }
+anstyle = "1.0.14"
 clap.workspace = true
+libc = "0.2.189"
 serde_json.workspace = true

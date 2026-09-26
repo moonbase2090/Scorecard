@@ -1,0 +1,33 @@
+sc 0.1.0  testdata/failing_test  rust  2f0d4d9 clean  scope tree
+
+[1m[31mFAIL[0m
+
+gates
+  [32m✓[0m  types            enforced
+  [31m✗[0m  tests            enforced  test failures
+  [32m✓[0m  crap             enforced
+  [32m✓[0m  sca              advisory
+  [32m✓[0m  secrets          enforced
+  [32m✓[0m  lint             enforced
+
+scores
+[90m  correctness      0.75  [########..][0m
+[90m  efficiency       1.00  [##########][0m
+[90m  maintainability  1.00  [##########][0m
+[90m  security         1.00  [##########][0m
+
+worst crap  threshold 30
+  CRAP   CC   COV  SYMBOL            LOCATION
+     2    1    0%  add               src/lib.rs
+
+findings
+[1m[31merror[0m
+  test.failed
+  src/lib.rs:12  tests::it_adds
+  Fix the failing test or the behavior it checks
+
+engines run: compile, tests, complexity, crap, sca, secrets, perf, lint
+engines skipped: coverage, spec, mutation, llm
+duration: 0.2s
+exit 1: a gate failed
+
