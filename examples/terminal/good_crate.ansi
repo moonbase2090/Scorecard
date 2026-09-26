@@ -1,0 +1,30 @@
+sc 0.1.0  testdata/good_crate  rust  2f0d4d9 clean  scope tree
+
+[1m[32mPASS[0m
+
+gates
+  [32m✓[0m  types            enforced
+  [32m✓[0m  tests            enforced
+  [32m✓[0m  crap             enforced
+  [32m✓[0m  sca              advisory
+  [32m✓[0m  secrets          enforced
+  [32m✓[0m  lint             enforced
+
+scores
+[90m  correctness      1.00  [##########][0m
+[90m  efficiency       1.00  [##########][0m
+[90m  maintainability  1.00  [##########][0m
+[90m  security         1.00  [##########][0m
+
+worst crap  threshold 30
+  CRAP   CC   COV  SYMBOL            LOCATION
+     1    1  100%  add               src/lib.rs
+
+findings
+  (none)
+
+engines run: compile, tests, coverage, complexity, crap, sca, secrets, perf, lint
+engines skipped: spec, mutation, llm
+duration: 0.9s
+exit 0: gates passed
+

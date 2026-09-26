@@ -70,6 +70,42 @@ None.
 
 The Git line is the Scorecard checkout that contained the fixture, because `testdata/good_crate` is not its own repository.
 
+On a terminal, `sc analyze` prints the same scorecard as plain text. `--format pretty` forces that layout. A pipe stays JSON. This is `sc analyze testdata/good_crate --format pretty` on commit `2f0d4d9`, with color off:
+
+```text
+sc 0.1.0  testdata/good_crate  rust  2f0d4d9 clean  scope tree
+
+PASS
+
+gates
+  [ok]  types            enforced
+  [ok]  tests            enforced
+  [ok]  crap             enforced
+  [ok]  sca              advisory
+  [ok]  secrets          enforced
+  [ok]  lint             enforced
+
+scores
+  correctness      1.00  [##########]
+  efficiency       1.00  [##########]
+  maintainability  1.00  [##########]
+  security         1.00  [##########]
+
+worst crap  threshold 30
+  CRAP   CC   COV  SYMBOL            LOCATION
+     1    1  100%  add               src/lib.rs
+
+findings
+  (none)
+
+engines run: compile, tests, coverage, complexity, crap, sca, secrets, perf, lint
+engines skipped: spec, mutation, llm
+duration: 0.8s
+exit 0: gates passed
+```
+
+Colored captures of that command and of `testdata/failing_test` are in `examples/terminal/`.
+
 ## Install
 
 Rust 1.85 or newer.
