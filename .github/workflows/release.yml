@@ -1,0 +1,100 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  apple:
+    runs-on: macos-14
+    outputs:
+      signed: ${{ steps.package.outputs.signed }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - name: Build arm64 and x86_64
+        run: |
+          cargo build --release --locked -p sc-cli -p sc-mcp --target aarch64-apple-darwin
+          cargo build --release --locked -p sc-cli -p sc-mcp --target x86_64-apple-darwin
+      - name: Package universal disk image
+        id: package
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+        run: sh scripts/release-apple.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apple
+          path: dist/*
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install the arm64 linker
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Build
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+        run: cargo build --release --locked -p sc-cli -p sc-mcp --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          set -eu
+          ver="${GITHUB_REF_NAME#v}"
+          triple="${{ matrix.target }}"
+          src="target/${triple}/release"
+          if [ "$triple" = "x86_64-unknown-linux-gnu" ]; then
+            "$src/sc" --version | grep -qx "$ver"
+            "$src/sc-mcp" --version | grep -qx "$ver"
+          else
+            file "$src/sc" | grep -q 'ARM aarch64'
+            file "$src/sc-mcp" | grep -q 'ARM aarch64'
+          fi
+          tmp=$(mktemp -d)
+          cp "$src/sc" "$src/sc-mcp" LICENSE README.md "$tmp/"
+          mkdir -p dist
+          tar -C "$tmp" -czf "dist/sc-v${ver}-${triple}.tar.gz" sc sc-mcp LICENSE README.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: [apple, linux]
+    if: needs.apple.outputs.signed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "*"
+          merge-multiple: true
+          path: dist
+      - name: Checksums and GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          cd dist
+          sha256sum * > SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$GITHUB_REF_NAME" *
