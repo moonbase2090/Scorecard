@@ -45,7 +45,22 @@ jobs:
         run: |
           pipx install ruff
           sudo npm install -g c8 bats
-          sudo apt-get update && sudo apt-get install -y kcov lcov
+          sudo apt-get update && sudo apt-get install -y lcov
+      # noble has no kcov package: build v43 from source, caching the binary.
+      - uses: actions/cache@v4
+        id: kcov-cache
+        with:
+          path: /usr/local/bin/kcov
+          key: kcov-v43-noble
+      - name: Build kcov from source
+        if: steps.kcov-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update && sudo apt-get install -y cmake g++ pkg-config libcurl4-openssl-dev zlib1g-dev libdw-dev libiberty-dev binutils-dev
+          curl -sSL https://github.com/SimonKagstrom/kcov/archive/refs/tags/v43.tar.gz | tar xz -C /tmp
+          cmake -S /tmp/kcov-43 -B /tmp/kcov-43/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/kcov-43/build -j"$(nproc)"
+          sudo cmake --install /tmp/kcov-43/build --prefix /usr/local
+          kcov --version
       - uses: shivammathur/setup-php@v2
         with:
           php-version: "8.3"
