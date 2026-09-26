@@ -32,3 +32,9 @@ cargo test --workspace --locked
 
 Bugs and feature requests use the templates in `.github/ISSUE_TEMPLATE/`.
 Security issues are **not** handled here, see `SECURITY.md`.
+
+## Test fixtures
+
+`testdata/` holds `ghp_AAAA…` placeholder tokens for the secrets-gate
+tests. They are not real credentials; secret scanning skips them
+(see `.github/secret_scanning.yml`). Never replace them with live secrets.
