@@ -365,6 +365,55 @@ fn missing_path_exits_2() {
     assert!(rules(&card).contains(&"engine.unavailable"));
 }
 
+#[test]
+fn pretty_good_crate_matches_the_golden() {
+    let (code, stdout, stderr) = analyze_raw(&[
+        "testdata/good_crate",
+        "--format",
+        "pretty",
+        "--budget-seconds",
+        "180",
+    ]);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(scrub_pretty(&stdout), include_str!("golden/good_crate.pretty.txt"));
+}
+
+#[test]
+fn pretty_failing_test_matches_the_golden() {
+    let (code, stdout, stderr) = analyze_raw(&[
+        "testdata/failing_test",
+        "--format",
+        "pretty",
+        "--budget-seconds",
+        "180",
+    ]);
+    assert_eq!(code, 1, "{stderr}");
+    assert_eq!(
+        scrub_pretty(&stdout),
+        include_str!("golden/failing_test.pretty.txt")
+    );
+}
+
+fn scrub_pretty(text: &str) -> String {
+    let mut lines = Vec::new();
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix("sc ") {
+            let mut parts: Vec<&str> = rest.split("  ").collect();
+            if parts.len() >= 4 {
+                parts[3] = "GITSHA STATE";
+            }
+            lines.push(format!("sc {}", parts.join("  ")));
+        } else if line.starts_with("duration:") {
+            lines.push("duration: DURs".to_string());
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+    let mut out = lines.join("\n");
+    out.push('\n');
+    out
+}
+
 fn analyze_raw(args: &[&str]) -> (i32, String, String) {
     let _guard = FIXTURE_LOCK.lock().unwrap_or_else(|err| err.into_inner());
     let output = Command::new(env!("CARGO_BIN_EXE_sc"))
