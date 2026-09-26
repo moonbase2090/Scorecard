@@ -105,6 +105,29 @@ jobs:
       - name: test
         run: cargo test --workspace --locked
 
+  # Supply chain and MSRV stay Ubuntu-only and cached, like everything else.
+  deny:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked --version 0.20.2
+      - name: cargo-deny check
+        run: cargo deny check
+
+  msrv:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: Swatinem/rust-cache@v2
+      - name: Check MSRV
+        run: cargo check --workspace --locked --all-targets
+
   # Self-analysis on pushes to develop. Plain cargo/sc commands only, so
   # this stays portable if CI moves off GitHub Actions later.
   dogfood:
