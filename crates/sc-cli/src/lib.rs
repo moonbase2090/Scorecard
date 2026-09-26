@@ -11,12 +11,12 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use clap::{Args, Parser, Subcommand};
 use sc_core::{
     apply_disposition, compute_scores, load_config_file, normalize_gates, resolve_config_path,
     Finding, Gate, Scorecard, SCORECARD_VERSION,
 };
 use sc_engines::{analyze, AnalyzeRequest, RunStatus};
-use clap::{Parser, Subcommand};
 
 use format::{to_json, to_markdown};
 use report::to_html;
@@ -32,52 +32,56 @@ struct Cli {
     command: Commands,
 }
 
+#[derive(Args)]
+struct AnalyzeArgs {
+    /// Crate directory (or a path to Cargo.toml). Defaults to `.`.
+    path: Option<PathBuf>,
+    /// `json` (default), `md`, `sarif`, `html`, or `all`.
+    #[arg(long, value_parser = ["json", "md", "sarif", "html", "all"], default_value = "json")]
+    format: String,
+    /// Also write the report to this path.
+    #[arg(long)]
+    out: Option<PathBuf>,
+    /// Comma-separated gates that fail the run. Default: types,tests,crap,secrets,lint.
+    #[arg(long, value_name = "LIST")]
+    fail_on: Option<String>,
+    /// Pack override when a repo contains more than one manifest.
+    #[arg(long, value_name = "PACK")]
+    pack: Option<String>,
+    /// Score only the git diff against BASE. Omit BASE to use HEAD~1, else main.
+    #[arg(long, num_args = 0..=1, default_missing_value = "AUTO")]
+    diff: Option<String>,
+    /// Compare `--diff` BASE to this commit instead of the worktree.
+    #[arg(long)]
+    diff_head: Option<String>,
+    /// Newline-separated source paths. Mutually exclusive with `--diff`.
+    #[arg(long)]
+    paths: Option<PathBuf>,
+    /// Spec or task file. Public items and named files must exist.
+    #[arg(long)]
+    spec: Option<PathBuf>,
+    /// `off` (default), `diff`, or `full`.
+    #[arg(long, value_parser = ["off", "diff", "full"])]
+    mutation: Option<String>,
+    /// `off` (default) or `on`. On runs an OpenAI-compatible spec review.
+    #[arg(long, value_parser = ["off", "on"])]
+    llm: Option<String>,
+    /// What this change is supposed to accomplish. Stored on the scorecard.
+    #[arg(long)]
+    intent: Option<String>,
+    /// Wall-clock budget for cargo commands, in seconds.
+    #[arg(long, default_value_t = 120)]
+    budget_seconds: u64,
+    /// Path to analyzer.toml. Default: ./analyzer.toml, then ~/.config/sc/analyzer.toml.
+    #[arg(long)]
+    config: Option<PathBuf>,
+}
+
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum Commands {
     /// Analyze a Cargo crate and print a scorecard.
-    Analyze {
-        /// Crate directory (or a path to Cargo.toml). Defaults to `.`.
-        path: Option<PathBuf>,
-        /// `json` (default), `md`, `sarif`, `html`, or `all`.
-        #[arg(long, value_parser = ["json", "md", "sarif", "html", "all"], default_value = "json")]
-        format: String,
-        /// Also write the report to this path.
-        #[arg(long)]
-        out: Option<PathBuf>,
-        /// Comma-separated gates that fail the run. Default: types,tests,crap,secrets,lint.
-        #[arg(long, value_name = "LIST")]
-        fail_on: Option<String>,
-        /// Pack override when a repo contains more than one manifest.
-        #[arg(long, value_name = "PACK")]
-        pack: Option<String>,
-        /// Score only the git diff against BASE. Omit BASE to use HEAD~1, else main.
-        #[arg(long, num_args = 0..=1, default_missing_value = "AUTO")]
-        diff: Option<String>,
-        /// Compare `--diff` BASE to this commit instead of the worktree.
-        #[arg(long)]
-        diff_head: Option<String>,
-        /// Newline-separated source paths. Mutually exclusive with `--diff`.
-        #[arg(long)]
-        paths: Option<PathBuf>,
-        /// Spec or task file. Public items and named files must exist.
-        #[arg(long)]
-        spec: Option<PathBuf>,
-        /// `off` (default), `diff`, or `full`.
-        #[arg(long, value_parser = ["off", "diff", "full"])]
-        mutation: Option<String>,
-        /// `off` (default) or `on`. On runs an OpenAI-compatible spec review.
-        #[arg(long, value_parser = ["off", "on"])]
-        llm: Option<String>,
-        /// What this change is supposed to accomplish. Stored on the scorecard.
-        #[arg(long)]
-        intent: Option<String>,
-        /// Wall-clock budget for cargo commands, in seconds.
-        #[arg(long, default_value_t = 120)]
-        budget_seconds: u64,
-        /// Path to analyzer.toml. Default: ./analyzer.toml, then ~/.config/sc/analyzer.toml.
-        #[arg(long)]
-        config: Option<PathBuf>,
-    },
+    Analyze(AnalyzeArgs),
     /// Install the agent skill and register the sc-mcp server for this user.
     Setup,
 }
@@ -86,56 +90,28 @@ pub fn run() -> i32 {
     let cli = Cli::parse();
     match cli.command {
         Commands::Setup => setup::run(),
-        Commands::Analyze {
-            path,
-            format,
-            out,
-            fail_on,
-            pack,
-            diff,
-            diff_head,
-            paths,
-            spec,
-            mutation,
-            llm,
-            intent,
-            budget_seconds,
-            config,
-        } => analyze_cmd(
-            path,
-            &format,
-            out,
-            fail_on,
-            pack,
-            diff,
-            diff_head,
-            paths,
-            spec,
-            mutation,
-            llm,
-            intent,
-            budget_seconds,
-            config,
-        ),
+        Commands::Analyze(args) => analyze_cmd(args),
     }
 }
 
-fn analyze_cmd(
-    path: Option<PathBuf>,
-    format: &str,
-    out: Option<PathBuf>,
-    fail_on: Option<String>,
-    pack: Option<String>,
-    diff: Option<String>,
-    diff_head: Option<String>,
-    paths: Option<PathBuf>,
-    spec: Option<PathBuf>,
-    mutation: Option<String>,
-    llm: Option<String>,
-    intent: Option<String>,
-    budget_seconds: u64,
-    config: Option<PathBuf>,
-) -> i32 {
+fn analyze_cmd(args: AnalyzeArgs) -> i32 {
+    let AnalyzeArgs {
+        path,
+        format,
+        out,
+        fail_on,
+        pack,
+        diff,
+        diff_head,
+        paths,
+        spec,
+        mutation,
+        llm,
+        intent,
+        budget_seconds,
+        config,
+    } = args;
+    let format = format.as_str();
     let path = path.unwrap_or_else(|| PathBuf::from("."));
     let repo = display_repo(&path);
     let stdout = io::stdout();

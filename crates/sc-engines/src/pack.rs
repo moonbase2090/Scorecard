@@ -52,6 +52,8 @@ impl PackId {
     }
 
     /// Gates this pack can fail today. The others are reported and do not fail the process.
+    /// Referenced by the pack tests; the library lint build does not compile those tests.
+    #[cfg(test)]
     pub fn enforced_gates(self) -> &'static [&'static str] {
         match self {
             Self::Rust => &["types", "tests", "crap", "secrets", "lint"],
@@ -83,12 +85,14 @@ impl PackId {
     }
 }
 
+#[cfg(test)]
 pub struct PackFixture {
     pub id: PackId,
     pub pass_fixture: &'static str,
     pub fail_fixture: &'static str,
 }
 
+#[cfg(test)]
 pub const ROUND1: &[PackFixture] = &[
     PackFixture {
         id: PackId::Rust,
@@ -167,7 +171,7 @@ pub fn text_secrets(root: &Path) -> Vec<sc_core::Finding> {
     findings
 }
 
-fn collect_text(root: &Path, dir: &Path, depth: u32, out: &mut Vec<std::path::PathBuf>) {
+fn collect_text(_root: &Path, dir: &Path, depth: u32, out: &mut Vec<std::path::PathBuf>) {
     if depth > 4 || out.len() >= 200 {
         return;
     }
@@ -181,7 +185,7 @@ fn collect_text(root: &Path, dir: &Path, depth: u32, out: &mut Vec<std::path::Pa
             continue;
         }
         if path.is_dir() {
-            collect_text(root, &path, depth + 1, out);
+            collect_text(_root, &path, depth + 1, out);
         } else if matches!(
             path.extension().and_then(|ext| ext.to_str()),
             Some(

@@ -352,13 +352,8 @@ fn analyze_raw(args: &[&str]) -> (i32, String, String) {
 fn html_format_writes_a_self_contained_report() {
     let out = std::env::temp_dir().join(format!("sc-report-{}.html", std::process::id()));
     let out_s = out.to_string_lossy().to_string();
-    let (code, stdout, stderr) = analyze_raw(&[
-        "testdata/good_crate",
-        "--format",
-        "html",
-        "--out",
-        &out_s,
-    ]);
+    let (code, stdout, stderr) =
+        analyze_raw(&["testdata/good_crate", "--format", "html", "--out", &out_s]);
     assert_eq!(code, 0, "stderr={stderr}\n{stdout}");
     assert!(
         stdout.trim_start().starts_with("<!DOCTYPE html>"),
@@ -390,4 +385,3 @@ fn all_format_writes_an_html_sibling() {
         let _ = std::fs::remove_file(out.with_extension(ext));
     }
 }
-
