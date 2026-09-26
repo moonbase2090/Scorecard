@@ -80,7 +80,7 @@ struct AnalyzeArgs {
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum Commands {
-    /// Analyze a Cargo crate and print a scorecard.
+    /// Analyze a project tree and print a scorecard.
     Analyze(AnalyzeArgs),
     /// Install the agent skill and register the sc-mcp server for this user.
     Setup,
