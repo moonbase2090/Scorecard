@@ -91,6 +91,7 @@ On older toolchains the component is named `llvm-tools-preview`. If either tool 
 
 ## More
 
+- [Examples](examples/README.md)
 - [Packs](docs/packs.md)
 - [Config](docs/config.md)
 - [MCP](docs/mcp.md)
