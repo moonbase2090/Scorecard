@@ -20,7 +20,7 @@ Exit 0 means the configured gates passed. Exit 1 means a gate failed. Exit 2 mea
 
 ## Sample
 
-This is the output of `sc analyze testdata/good_crate --format md` on commit `8afb726`:
+This is the output of `sc analyze testdata/good_crate --format md` on commit `e274846`:
 
 ```markdown
 # scorecard
@@ -29,7 +29,7 @@ This is the output of `sc analyze testdata/good_crate --format md` on commit `8a
 
 **Repo:** testdata/good_crate
 
-**Git:** 8afb726b5c5438959f4273cbbbdaa902c02301cc (clean)
+**Git:** e274846a7f974c97d81b3977349b93217c4f4b49 (clean)
 
 **Scope:** tree of `src`. `loc_changed`, `files_changed`, and `coverage_changed` describe that tree.
 

@@ -1,7 +1,7 @@
 # Scorecard configuration.
 # pack = "rust"   # rust, node, python, bash, go, java, csharp, php, cpp, or command
 # Set this when the repo contains more than one manifest. Same as --pack.
-# Copy to analyzer.toml in the crate you analyze, or to ~/.config/sc/analyzer.toml.
+# Copy to analyzer.toml in the project you analyze, or to ~/.config/sc/analyzer.toml.
 # CLI flags override the matching settings.
 
 [gates]
@@ -13,7 +13,7 @@ crap_threshold = 30
 new_fn_untested_cc = 15
 
 [scope]
-# Only src/**/*.rs is scanned. Paths are relative to the crate root.
+# Rust complexity walks src/**/*.rs. Paths are relative to the project root.
 exclude = ["target/**", "generated/**"]
 
 [mutation]
