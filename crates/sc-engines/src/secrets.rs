@@ -56,10 +56,23 @@ fn match_line(line: &str) -> Option<&'static str> {
     if is_stripe(line) {
         return Some("secrets.stripe_key");
     }
-    if line.contains("-----BEGIN ") && line.contains("PRIVATE KEY-----") {
+    if is_private_key(line) {
         return Some("secrets.private_key");
     }
     None
+}
+
+/// The two PEM markers live on separate lines so this file does not match itself.
+fn is_private_key(line: &str) -> bool {
+    line.contains(pem_begin()) && line.contains(pem_end())
+}
+
+fn pem_begin() -> &'static str {
+    "-----BEGIN "
+}
+
+fn pem_end() -> &'static str {
+    "PRIVATE KEY-----"
 }
 
 fn is_aws_key(line: &str) -> bool {
@@ -125,5 +138,15 @@ mod tests {
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule, "secrets.github_token");
         assert_eq!(findings[0].span.as_ref().unwrap().start_line, 1);
+    }
+
+    #[test]
+    fn flags_a_private_key_and_ignores_the_detector_source() {
+        let text = format!("{}RSA {}\n", super::pem_begin(), super::pem_end());
+        let findings = secrets_in_text(&text, "src/lib.rs");
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].rule, "secrets.private_key");
+        let own = include_str!("secrets.rs");
+        assert!(secrets_in_text(own, "crates/sc-engines/src/secrets.rs").is_empty());
     }
 }

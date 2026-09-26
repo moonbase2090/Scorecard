@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use sc_core::Finding;
-use sc_graph::{source_files, FunctionInfo, ImportHit, PerfHit, PubItem};
+use sc_graph::{source_files_under, FunctionInfo, ImportHit, PerfHit, PubItem};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -24,7 +24,9 @@ pub struct AnalyzedFile {
 }
 
 pub fn analyze_tree(root: &Path, exclude: &[String]) -> Vec<AnalyzedFile> {
-    let paths = source_files(root, exclude);
+    let mut dirs = vec![root.join("src")];
+    dirs.extend(member_src_dirs(root));
+    let paths = source_files_under(root, &dirs, exclude);
     let rels: Vec<String> = paths
         .iter()
         .map(|path| {
@@ -62,6 +64,60 @@ pub fn analyze_rels(root: &Path, rels: &[String]) -> Vec<AnalyzedFile> {
     let _ = write_cache(&cache_path, &cache);
     out.sort_by(|a, b| a.rel.cmp(&b.rel));
     out
+}
+
+/// `src` directories of Cargo workspace members, from `cargo metadata`.
+///
+/// A missing manifest or a failed metadata call leaves discovery on `root/src`.
+fn member_src_dirs(root: &Path) -> Vec<PathBuf> {
+    if !root.join("Cargo.toml").is_file() {
+        return Vec::new();
+    }
+    let mut cmd = crate::command::cargo_command(root);
+    cmd.args([
+        "metadata",
+        "--no-deps",
+        "--offline",
+        "--format-version",
+        "1",
+    ]);
+    let Ok(captured) = crate::command::run_cmd(&mut cmd, std::time::Duration::from_secs(60)) else {
+        return Vec::new();
+    };
+    if !captured.status.success() {
+        return Vec::new();
+    }
+    let Ok(meta) = serde_json::from_str::<CargoMetadata>(&captured.stdout) else {
+        return Vec::new();
+    };
+    let members: std::collections::BTreeSet<&str> =
+        meta.workspace_members.iter().map(String::as_str).collect();
+    let mut dirs = Vec::new();
+    for package in &meta.packages {
+        if !members.contains(package.id.as_str()) {
+            continue;
+        }
+        let Some(dir) = Path::new(&package.manifest_path).parent() else {
+            continue;
+        };
+        let src = dir.join("src");
+        if src.is_dir() && !dirs.iter().any(|have: &PathBuf| have == &src) {
+            dirs.push(src);
+        }
+    }
+    dirs
+}
+
+#[derive(Deserialize)]
+struct CargoMetadata {
+    packages: Vec<CargoPackage>,
+    workspace_members: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct CargoPackage {
+    id: String,
+    manifest_path: String,
 }
 
 fn parse_file(rel: &str, text: &str) -> AnalyzedFile {
@@ -184,5 +240,52 @@ mod tests {
         let second = analyze_tree(&dir, &[]);
         assert_eq!(second[0].functions[0].symbol, "cached");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn workspace_members_are_read_from_their_src() {
+        let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/workspace_src");
+        let dir = std::env::temp_dir().join(format!("sc-ws-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        copy_fixture(&src, &dir);
+        let files = analyze_tree(&dir, &[]);
+        let rels: Vec<&str> = files.iter().map(|file| file.rel.as_str()).collect();
+        assert!(
+            rels.iter()
+                .any(|rel| rel.ends_with("crates/left/src/lib.rs")),
+            "{rels:?}"
+        );
+        assert!(
+            rels.iter()
+                .any(|rel| rel.ends_with("crates/right/src/lib.rs")),
+            "{rels:?}"
+        );
+        let symbols: Vec<&str> = files
+            .iter()
+            .flat_map(|file| {
+                file.functions
+                    .iter()
+                    .map(|function| function.symbol.as_str())
+            })
+            .collect();
+        assert!(symbols.contains(&"left_one"), "{symbols:?}");
+        assert!(symbols.contains(&"right_one"), "{symbols:?}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn copy_fixture(from: &Path, to: &Path) {
+        fs::create_dir_all(to).unwrap();
+        for entry in fs::read_dir(from).unwrap().flatten() {
+            let name = entry.file_name();
+            if name == ".sc" || name == "target" || name == ".git" {
+                continue;
+            }
+            let dest = to.join(&name);
+            if entry.path().is_dir() {
+                copy_fixture(&entry.path(), &dest);
+            } else {
+                fs::copy(entry.path(), dest).unwrap();
+            }
+        }
     }
 }

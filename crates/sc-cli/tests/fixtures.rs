@@ -107,6 +107,38 @@ fn crap_tested_exits_0() {
 }
 
 #[test]
+fn workspace_src_is_scored_from_member_crates() {
+    let (code, card, _, stderr) = analyze(&["testdata/workspace_src", "--budget-seconds", "120"]);
+    assert_eq!(code, 0, "stderr={stderr}\ncard={card}");
+    let paths: Vec<&str> = card["scope"]["paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|path| path.as_str())
+        .collect();
+    assert!(
+        paths
+            .iter()
+            .any(|path| path.ends_with("crates/left/src/lib.rs")),
+        "{paths:?}"
+    );
+    assert!(
+        paths
+            .iter()
+            .any(|path| path.ends_with("crates/right/src/lib.rs")),
+        "{paths:?}"
+    );
+    assert!(
+        card["crap"]["worst"].as_array().unwrap().len() >= 2,
+        "{card}"
+    );
+    assert!(
+        card["metrics"]["crap_max"].as_f64().unwrap() > 0.0,
+        "{card}"
+    );
+}
+
+#[test]
 fn good_crate_passes_and_has_the_scorecard_shape() {
     let out = std::env::temp_dir().join(format!("sc-good-{}.json", std::process::id()));
     let out_s = out.to_string_lossy().to_string();

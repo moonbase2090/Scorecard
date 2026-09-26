@@ -39,7 +39,7 @@ pub fn inspect_source(text: &str, rel: &str) -> Option<SourceFacts> {
         items: pub_items_in_file(&file, rel),
     })
 }
-pub use discover::{is_excluded, scan, source_files, Scan};
+pub use discover::{is_excluded, scan, source_files, source_files_under, Scan};
 pub use imports::{imports_in_file, ImportHit};
 pub use perf::{perf_in_file, PerfHit};
 pub use pubs::{pub_items_in_file, PubItem};
