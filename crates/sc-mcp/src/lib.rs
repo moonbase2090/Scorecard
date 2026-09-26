@@ -19,7 +19,7 @@ pub fn handle(message: &Value, cwd: &Path) -> Option<Value> {
         "initialize" => json!({
             "protocolVersion": "2024-11-05",
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "sc", "version": "0.1.0"}
+            "serverInfo": {"name": "sc-mcp", "version": env!("CARGO_PKG_VERSION")}
         }),
         "tools/list" => json!({"tools": tools()}),
         "tools/call" => call_tool(cwd, message.get("params").unwrap_or(&Value::Null)),
