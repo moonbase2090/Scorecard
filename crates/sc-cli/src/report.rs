@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 //! Self-contained HTML scorecard report.
 //!
 //! `to_html` renders one `.html` file with inline CSS and no external

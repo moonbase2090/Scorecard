@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 //! Dimension scores and the CRAP formula.
 //!
 //! Dimension scores are in `0.0..=1.0`. Each score starts at 1.0. An error

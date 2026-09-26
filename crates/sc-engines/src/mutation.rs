@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};

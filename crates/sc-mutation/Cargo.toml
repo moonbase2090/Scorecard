@@ -10,4 +10,4 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 publish = false
-description = "Stub: cargo-mutants adapter (not implemented)"
+description = "Workspace marker. The mutation runner lives in sc-engines."

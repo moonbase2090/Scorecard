@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /// Branchy classifier. Keep this body identical to `testdata/crap_tested`.
 pub fn classify(n: i32, flag: bool, mode: u8) -> &'static str {
     if n < 0 {

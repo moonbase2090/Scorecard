@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 //! Language pack detection.
 //!
 //! One marker selects a pack. Several markers and no `pack` override is
