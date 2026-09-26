@@ -1,10 +1,10 @@
 # Scorecard
 
-[![CI](https://github.com/moonbase2090/Scorecard/actions/workflows/ci.yml/badge.svg)](https://github.com/moonbase2090/Scorecard/actions/workflows/ci.yml)
+[![CI](https://github.com/moonbase2090/Scorecard/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/moonbase2090/Scorecard/actions/workflows/ci.yml?query=branch%3Adevelop)
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-blue.svg)](LICENSE)
-[![MSRV 1.85](https://img.shields.io/badge/MSRV-1.85-blue.svg)](https://github.com/moonbase2090/Scorecard)
+[![MSRV 1.85](https://img.shields.io/badge/MSRV-1.85-blue.svg)](https://github.com/moonbase2090/Scorecard/blob/develop/Cargo.toml)
 
-The CI badge tracks `.github/workflows/ci.yml` (`name: ci`). It shows a status after that workflow is on the default branch.
+The CI badge is workflow `ci` on `develop`. `ci.yml` is not on `main`. This repository is private, so that badge is visible to people with access. License is MPL-2.0. The MSRV is Rust 1.85. The crates are not published, so there is no crates.io badge.
 
 `sc` is a local code-quality gate. It picks one language pack, runs that pack's tools, and prints a scorecard an agent can act on.
 
