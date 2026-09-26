@@ -25,6 +25,7 @@ pub fn cyclomatic_of_block(block: &Block) -> u32 {
     visitor.cc
 }
 
+#[inline(never)]
 fn collect_items(items: &[Item], file: &str, prefix: &str, out: &mut Vec<FunctionInfo>) {
     for item in items {
         match item {
@@ -125,7 +126,12 @@ fn push_fn(
 
 fn module_prefix(rel_path: &str) -> String {
     let rel = rel_path.trim_start_matches("./");
-    let without_src = rel.strip_prefix("src/").unwrap_or(rel);
+    // `src/lib.rs` and `crates/<member>/src/lib.rs` are both crate roots.
+    let without_src = rel
+        .rsplit_once("/src/")
+        .map(|(_, rest)| rest)
+        .or_else(|| rel.strip_prefix("src/"))
+        .unwrap_or(rel);
     if without_src == "lib.rs" || without_src == "main.rs" {
         return String::new();
     }
@@ -259,10 +265,31 @@ mod tests {
     }
 
     #[test]
+    fn trait_defaults_and_modules_are_collected() {
+        let src = r#"
+trait Worker {
+    fn go(&self) { let _ = 1; }
+}
+mod inner {
+    pub fn hidden() {}
+}
+"#;
+        let file = syn::parse_file(src).unwrap();
+        let fns = functions_in_source(&file, "src/lib.rs");
+        let symbols: Vec<_> = fns.iter().map(|f| f.symbol.as_str()).collect();
+        assert!(symbols.contains(&"Worker::go"));
+        assert!(symbols.contains(&"inner::hidden"));
+    }
+
+    #[test]
     fn file_module_prefix() {
         let src = "pub fn inner() {}";
         let file = syn::parse_file(src).unwrap();
         let fns = functions_in_source(&file, "src/foo/bar.rs");
+        assert_eq!(fns[0].symbol, "foo::bar::inner");
+        let fns = functions_in_source(&file, "crates/left/src/lib.rs");
+        assert_eq!(fns[0].symbol, "inner");
+        let fns = functions_in_source(&file, "crates/left/src/foo/bar.rs");
         assert_eq!(fns[0].symbol, "foo::bar::inner");
     }
 }

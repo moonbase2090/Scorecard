@@ -1,5 +1,8 @@
 name: sc
 description: Run the sc scorecard gate and upload SARIF
+branding:
+  icon: check-circle
+  color: green
 inputs:
   spec:
     description: Path to a spec or task file

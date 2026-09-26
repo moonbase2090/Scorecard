@@ -1,0 +1,6 @@
+# Dogfood config for this repository. `sc analyze .` loads it, including the
+# develop CI job, which does not pass `--config`.
+# CRAP uses the defaults: threshold 30, untested CC 15.
+
+[gates]
+fail_on = ["types", "tests", "crap", "secrets", "lint"]

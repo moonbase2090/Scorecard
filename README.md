@@ -4,7 +4,7 @@
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-blue.svg)](LICENSE)
 [![MSRV 1.85](https://img.shields.io/badge/MSRV-1.85-blue.svg)](https://github.com/moonbase2090/Scorecard/blob/develop/Cargo.toml)
 
-The CI badge is workflow `ci` on `develop`. `ci.yml` is not on `main`. This repository is private, so that badge is visible to people with access. License is MPL-2.0. The MSRV is Rust 1.85. The crates are not published, so there is no crates.io badge.
+The CI badge is workflow `ci` on `develop`. `ci.yml` is on `main` as well. License is MPL-2.0. The MSRV is Rust 1.85. The crates are not published, so there is no crates.io badge.
 
 `sc` is a local code-quality gate. It picks one language pack, runs that pack's tools, and prints a scorecard an agent can act on.
 
@@ -20,7 +20,7 @@ Exit 0 means the configured gates passed. Exit 1 means a gate failed. Exit 2 mea
 
 ## Sample
 
-This is the output of `sc analyze testdata/good_crate --format md` on commit `e274846`:
+This is the output of `sc analyze testdata/good_crate --format md` on commit `0afc676`:
 
 ```markdown
 # scorecard
@@ -29,7 +29,7 @@ This is the output of `sc analyze testdata/good_crate --format md` on commit `e2
 
 **Repo:** testdata/good_crate
 
-**Git:** e274846a7f974c97d81b3977349b93217c4f4b49 (clean)
+**Git:** 0afc676039d07842e5bfeb3c57a09df26e5c9a23 (clean)
 
 **Scope:** tree of `src`. `loc_changed`, `files_changed`, and `coverage_changed` describe that tree.
 
@@ -89,6 +89,31 @@ cargo install cargo-llvm-cov
 
 On older toolchains the component is named `llvm-tools-preview`. If either tool is missing, `sc` still runs. Function coverage is treated as 0, a `coverage.missing` warning is recorded, and CRAP is still computed. The process exits 2 only when a required gate (`types` or `tests`) cannot run.
 
+## GitHub Action
+
+Run the gate in CI with the composite action (plain `bash` steps, no
+runner-specific features):
+
+```yaml
+- uses: moonbase2090/Scorecard/action@develop
+  with:
+    fail-on: types,tests,crap,secrets,lint
+    format: sarif
+```
+
+| Input      | Default                         | Notes                                    |
+| ---------- | ------------------------------- | ---------------------------------------- |
+| `spec`     | `""`                            | Path to a spec or task file              |
+| `fail-on`  | `types,tests,crap,secrets,lint` | Comma-separated gates                    |
+| `mutation` | `off`                           | `off`, `diff`, or `full`                 |
+| `format`   | `sarif`                         | `json`, `md`, `sarif`, `html`, or `all`  |
+| `diff`     | `""`                            | Git base ref; empty skips `--diff`       |
+
+With `format: sarif` (or `all`) the SARIF report is uploaded via the
+pinned `upload-sarif` step, so findings show up under code scanning.
+Until the first tagged release, pin the action to `@develop` or a full
+commit SHA.
+
 ## More
 
 - [Examples](examples/README.md)
@@ -96,6 +121,7 @@ On older toolchains the component is named `llvm-tools-preview`. If either tool 
 - [Config](docs/config.md)
 - [MCP](docs/mcp.md)
 - [CRAP](docs/crap.md)
+- [v0.1.0 readiness](docs/v0.1.0-readiness.md)
 
 ## License
 

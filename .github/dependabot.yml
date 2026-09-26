@@ -5,8 +5,36 @@ updates:
     schedule:
       interval: weekly
     target-branch: develop
+    open-pull-requests-limit: 5
+    groups:
+      minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    # Majors pinned for MSRV 1.85 / pending deliberate migration.
+    ignore:
+      - dependency-name: toml
+        update-types: ["version-update:semver-major"]
+      - dependency-name: syn
+        update-types: ["version-update:semver-major"]
+      - dependency-name: sha2
+        update-types: ["version-update:semver-major"]
+      - dependency-name: criterion
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
     target-branch: develop
+    open-pull-requests-limit: 5
+    groups:
+      minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch

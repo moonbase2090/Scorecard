@@ -68,6 +68,7 @@ fn tool(name: &str, description: &str, schema: Value) -> Value {
     })
 }
 
+#[inline(never)]
 fn call_tool(cwd: &Path, params: &Value) -> Value {
     let name = params.get("name").and_then(Value::as_str).unwrap_or("");
     let args = params.get("arguments").cloned().unwrap_or(json!({}));
@@ -171,6 +172,7 @@ fn explain(cwd: &Path, args: &Value) -> Result<String, String> {
     .unwrap_or_else(|_| "{}".into()))
 }
 
+#[inline(never)]
 fn list_findings(cwd: &Path, args: &Value) -> Result<String, String> {
     let card = last_scorecard(cwd)?;
     if let Some(id) = args.get("scorecard_id").and_then(Value::as_str) {
@@ -244,5 +246,25 @@ mod tests {
             names,
             vec!["analyze_paths", "analyze_diff", "explain", "list_findings"]
         );
+    }
+
+    #[test]
+    fn unknown_tool_is_an_error_and_list_findings_filters() {
+        let bad = call_tool(Path::new("."), &json!({"name": "chat", "arguments": {}}));
+        assert_eq!(bad["isError"], true);
+        let dir = std::env::temp_dir().join(format!("sc-mcp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".sc")).unwrap();
+        std::fs::write(
+            dir.join(".sc/last-scorecard.json"),
+            r#"{"id":"abc","findings":[{"id":"f1","severity":"error","message":"boom","suggested_action":"fix"}]}"#,
+        )
+        .unwrap();
+        let listed = list_findings(&dir, &json!({"severity": "error"})).unwrap();
+        assert!(listed.contains("f1"));
+        let explained = explain(&dir, &json!({"finding_id": "f1"})).unwrap();
+        assert!(explained.contains("boom"));
+        assert!(list_findings(&dir, &json!({"scorecard_id": "nope"})).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

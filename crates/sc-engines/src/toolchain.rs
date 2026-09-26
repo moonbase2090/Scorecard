@@ -333,6 +333,7 @@ fn cpp_plan(root: &Path) -> Vec<Step> {
     ]
 }
 
+#[inline(never)]
 fn apply(root: &Path, deadline: Instant, step: Step, report: &mut ToolReport) {
     let Some(command) = step.command else {
         report.skipped.push(step.engine.into());
@@ -808,5 +809,74 @@ mod tests {
         } else {
             assert_eq!(script, "sc-missing-bin-zz --version");
         }
+    }
+
+    #[test]
+    fn apply_records_success_failure_and_a_missing_tool() {
+        let root = std::env::temp_dir().join(format!("sc-apply-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        let mut report = ToolReport {
+            findings: Vec::new(),
+            runs: Vec::new(),
+            ran: Vec::new(),
+            skipped: Vec::new(),
+            gates: Vec::new(),
+        };
+        apply(
+            &root,
+            deadline,
+            Step {
+                gate: "types",
+                engine: "compile",
+                command: Some("true".into()),
+                absent: "missing".into(),
+            },
+            &mut report,
+        );
+        apply(
+            &root,
+            deadline,
+            Step {
+                gate: "tests",
+                engine: "tests",
+                command: Some("false".into()),
+                absent: "missing".into(),
+            },
+            &mut report,
+        );
+        apply(
+            &root,
+            deadline,
+            Step {
+                gate: "lint",
+                engine: "lint",
+                command: Some("sc-not-a-tool-zz".into()),
+                absent: "lint is not installed".into(),
+            },
+            &mut report,
+        );
+        apply(
+            &root,
+            deadline,
+            Step {
+                gate: "types",
+                engine: "compile",
+                command: None,
+                absent: "nothing to compile".into(),
+            },
+            &mut report,
+        );
+        assert!(report.ran.iter().any(|engine| engine == "compile"));
+        assert!(report
+            .findings
+            .iter()
+            .any(|finding| finding.rule == "test.failed"));
+        assert!(report
+            .skipped
+            .iter()
+            .any(|engine| engine == "lint" || engine == "compile"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

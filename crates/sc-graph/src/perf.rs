@@ -20,6 +20,7 @@ pub fn perf_in_file(file: &File, rel: &str) -> Vec<PerfHit> {
     out
 }
 
+#[inline(never)]
 fn walk_items(items: &[Item], file: &str, prefix: &str, out: &mut Vec<PerfHit>) {
     for item in items {
         match item {
@@ -187,5 +188,23 @@ pub fn walk(items: &[String]) {
         let rules: Vec<_> = hits.iter().map(|hit| hit.rule.as_str()).collect();
         assert!(rules.contains(&"perf.nested_loop"), "{rules:?}");
         assert!(rules.contains(&"perf.clone_in_loop"), "{rules:?}");
+    }
+
+    #[test]
+    fn impl_trait_and_module_functions_are_scanned() {
+        let src = r#"
+impl Foo {
+    fn m(&self) { let _ = 1; }
+}
+trait Bar {
+    fn go() { let _ = 1; }
+}
+mod inner {
+    pub fn hidden() { let _ = 1; }
+}
+"#;
+        let file = syn::parse_file(src).unwrap();
+        let hits = perf_in_file(&file, "src/lib.rs");
+        assert!(hits.is_empty());
     }
 }

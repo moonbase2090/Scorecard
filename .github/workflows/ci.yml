@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: rustfmt, clippy
@@ -47,7 +47,7 @@ jobs:
           sudo npm install -g c8 bats
           sudo apt-get update && sudo apt-get install -y lcov
       # noble has no kcov package: build v43 from source, caching the binary.
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: kcov-cache
         with:
           path: /usr/local/bin/kcov
@@ -83,7 +83,7 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: rustfmt, clippy
@@ -100,7 +100,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Install cargo-deny
@@ -112,11 +112,70 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: dtolnay/rust-toolchain@077fee5b0788f1a772d4c6ce2814159cd1d6632b # 1.85
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Install 1.85 via rustup instead of a second dtolnay pin: two pins
+      # from the same action at different refs confuse Dependabot.
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - name: Install Rust 1.85
+        run: rustup toolchain install 1.85 --profile minimal
       - name: Check MSRV
-        run: cargo check --workspace --locked --all-targets
+        run: cargo +1.85 check --workspace --locked --all-targets
+
+  # Workspace line coverage via cargo-llvm-cov, with the report as an
+  # artifact. Push-only like dogfood: PRs already run the suite without
+  # instrumentation. Floor 70 sits just under the measured 72% baseline.
+  coverage:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      # Same fixture toolchain as check-ubuntu: llvm-cov runs the full
+      # suite including the fixture tests.
+      - name: Install Rust coverage tooling
+        run: cargo install cargo-llvm-cov --locked
+      - name: Install lint and coverage tools
+        run: |
+          pipx install ruff
+          sudo npm install -g c8 bats
+          sudo apt-get update && sudo apt-get install -y lcov
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: kcov-cache
+        with:
+          path: /usr/local/bin/kcov
+          key: kcov-v43-noble
+      - name: Build kcov from source
+        if: steps.kcov-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update && sudo apt-get install -y cmake g++ pkg-config libcurl4-openssl-dev zlib1g-dev libdw-dev libiberty-dev binutils-dev
+          curl -sSL https://github.com/SimonKagstrom/kcov/archive/refs/tags/v43.tar.gz | tar xz -C /tmp
+          cmake -S /tmp/kcov-43 -B /tmp/kcov-43/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/kcov-43/build -j"$(nproc)"
+          sudo cmake --install /tmp/kcov-43/build --prefix /usr/local
+          kcov --version
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: "8.3"
+          extensions: pcov
+          coverage: pcov
+          tools: phpunit, phpstan
+      - name: Coverage
+        run: cargo llvm-cov --workspace --locked --lcov --output-path coverage.lcov --fail-under-lines 70
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: coverage-report
+          path: coverage.lcov
+          if-no-files-found: warn
 
   # Self-analysis on pushes to develop. Plain cargo/sc commands only, so
   # this stays portable if CI moves off GitHub Actions later.
@@ -128,7 +187,7 @@ jobs:
       contents: read
       actions: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       # Dogfood runs the repo's own test suite, so it needs the same
@@ -142,7 +201,7 @@ jobs:
           pipx install ruff
           sudo npm install -g c8 bats
           sudo apt-get update && sudo apt-get install -y lcov
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: kcov-cache
         with:
           path: /usr/local/bin/kcov

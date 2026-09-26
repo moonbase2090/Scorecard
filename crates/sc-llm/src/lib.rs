@@ -49,8 +49,16 @@ pub fn resolve_target(endpoint: &str, model: &str) -> (String, String, Option<St
                 .ok()
                 .filter(|value| !value.is_empty())
         });
+    resolve_target_with(endpoint, model, key)
+}
+
+fn resolve_target_with(
+    endpoint: &str,
+    model: &str,
+    key: Option<String>,
+) -> (String, String, Option<String>) {
     if endpoint == DEFAULT_ENDPOINT {
-        if let Some(key) = key.clone() {
+        if let Some(key) = key {
             return (
                 SPACEXAI_ENDPOINT.to_string(),
                 SPACEXAI_MODEL.to_string(),
@@ -62,6 +70,13 @@ pub fn resolve_target(endpoint: &str, model: &str) -> (String, String, Option<St
 }
 
 pub fn review(request: LlmRequest<'_>) -> LlmOutcome {
+    review_with(request, post_chat)
+}
+
+fn review_with(
+    request: LlmRequest<'_>,
+    post: impl Fn(&str, Option<&str>, &Value) -> Result<Value, String>,
+) -> LlmOutcome {
     let (endpoint, model, key) = resolve_target(request.endpoint, request.model);
     if endpoint.contains("api.x.ai") && key.is_none() {
         return LlmOutcome {
@@ -93,7 +108,7 @@ pub fn review(request: LlmRequest<'_>) -> LlmOutcome {
             "max_tokens": MAX_TOKENS,
             "tools": tools(),
         });
-        let response = match post_chat(&endpoint, key.as_deref(), &body) {
+        let response = match post(&endpoint, key.as_deref(), &body) {
             Ok(response) => response,
             Err(err) => {
                 return LlmOutcome {
@@ -313,6 +328,7 @@ fn spec_section(spec: &str, heading: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     #[test]
     fn parses_gap_json_and_ignores_score_prose() {
@@ -323,12 +339,184 @@ mod tests {
     }
 
     #[test]
+    fn parses_gap_json_skips_empty_items() {
+        let text = "{\"gaps\":[{\"item\":\"\",\"detail\":\"x\"},{\"item\":\"kept\"}]}";
+        let gaps = parse_gaps(text).unwrap();
+        assert_eq!(gaps.len(), 1);
+        assert_eq!(gaps[0].item, "kept");
+        assert!(parse_gaps("{\"gaps\":{}}").is_none());
+    }
+
+    #[test]
     fn default_endpoint_uses_spacexai_when_the_key_is_set() {
-        std::env::set_var("XAI_API_KEY", "test-key");
-        let (endpoint, model, key) = resolve_target(DEFAULT_ENDPOINT, "qwen2.5-coder");
+        let (endpoint, model, key) =
+            resolve_target_with(DEFAULT_ENDPOINT, "qwen2.5-coder", Some("test-key".into()));
         assert_eq!(endpoint, SPACEXAI_ENDPOINT);
         assert_eq!(model, SPACEXAI_MODEL);
         assert_eq!(key.as_deref(), Some("test-key"));
-        std::env::remove_var("XAI_API_KEY");
+    }
+
+    #[test]
+    fn custom_endpoints_pass_through_with_their_key() {
+        let (endpoint, _, key) =
+            resolve_target_with("http://localhost:8080/v1", "qwen", Some("k".into()));
+        assert_eq!(endpoint, "http://localhost:8080/v1");
+        assert_eq!(key.as_deref(), Some("k"));
+        let (endpoint, _, key) = resolve_target_with(DEFAULT_ENDPOINT, "qwen", None);
+        assert_eq!(endpoint, DEFAULT_ENDPOINT);
+        assert_eq!(key, None);
+    }
+
+    static TREE_SEQ: AtomicU64 = AtomicU64::new(0);
+
+    fn test_tree() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "sc-llm-test-{}-{}",
+            std::process::id(),
+            TREE_SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::create_dir_all(dir.join("tests")).unwrap();
+        std::fs::write(dir.join("src").join("a.rs"), "fn target() {}\n").unwrap();
+        std::fs::write(dir.join("tests").join("t.rs"), "use target;\n").unwrap();
+        dir
+    }
+
+    fn request<'a>(root: &'a Path, spec: &'a str, endpoint: &'a str) -> LlmRequest<'a> {
+        LlmRequest {
+            endpoint,
+            model: "test-model",
+            api_key: None,
+            spec,
+            root,
+            intent: None,
+        }
+    }
+
+    fn tool_response(calls: Value) -> Value {
+        json!({"choices": [{"message": {"tool_calls": calls, "content": null}}]})
+    }
+
+    fn content_response(text: &str) -> Value {
+        json!({"choices": [{"message": {"content": text}}]})
+    }
+
+    #[test]
+    fn review_skips_spacexai_without_a_key() {
+        let dir = test_tree();
+        let outcome = review_with(request(&dir, "spec", SPACEXAI_ENDPOINT), |_, _, _| {
+            panic!("must not call the network when the key is missing")
+        });
+        assert!(outcome.gaps.is_empty());
+        assert_eq!(outcome.skipped.as_deref(), Some("XAI_API_KEY is not set"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn review_reports_post_errors() {
+        let dir = test_tree();
+        let outcome = review_with(request(&dir, "spec", "http://127.0.0.1:1/v1"), |_, _, _| {
+            Err("connection refused".to_string())
+        });
+        assert_eq!(outcome.skipped.as_deref(), Some("connection refused"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn review_needs_a_message_choice() {
+        let dir = test_tree();
+        let outcome = review_with(request(&dir, "spec", "http://127.0.0.1:1/v1"), |_, _, _| {
+            Ok(json!({"choices": []}))
+        });
+        assert_eq!(
+            outcome.skipped.as_deref(),
+            Some("llm response has no message")
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn review_runs_a_tool_then_parses_gaps() {
+        let dir = test_tree();
+        let calls = std::cell::Cell::new(0);
+        let outcome = review_with(
+            request(&dir, "# Spec\nitem", "http://127.0.0.1:1/v1"),
+            |_, _, _| {
+                calls.set(calls.get() + 1);
+                Ok(if calls.get() == 1 {
+                    tool_response(
+                        json!([{"id": "c1", "function": {"name": "callers_of", "arguments": "{\"symbol\":\"target\"}"}}]),
+                    )
+                } else {
+                    content_response("prefix {\"gaps\":[{\"item\":\"missing\",\"detail\":\"d\"}]}")
+                })
+            },
+        );
+        assert_eq!(outcome.skipped, None);
+        assert_eq!(outcome.gaps.len(), 1);
+        assert_eq!(outcome.gaps[0].item, "missing");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn review_stops_at_the_tool_round_limit() {
+        let dir = test_tree();
+        let outcome = review_with(request(&dir, "spec", "http://127.0.0.1:1/v1"), |_, _, _| {
+            Ok(tool_response(
+                json!([{"id": "c1", "function": {"name": "nope", "arguments": "{}"}}]),
+            ))
+        });
+        assert_eq!(
+            outcome.skipped.as_deref(),
+            Some("llm tool round limit reached")
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn review_rejects_non_json_content() {
+        let dir = test_tree();
+        let outcome = review_with(request(&dir, "spec", "http://127.0.0.1:1/v1"), |_, _, _| {
+            Ok(content_response("just prose, no json"))
+        });
+        assert_eq!(
+            outcome.skipped.as_deref(),
+            Some("llm response was not spec-gap json")
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn search_symbol_filters_tests_and_empty_queries() {
+        let dir = test_tree();
+        assert_eq!(search_symbol(&dir, "", false), "missing symbol");
+        assert_eq!(search_symbol(&dir, "absent", false), "none");
+        let all = search_symbol(&dir, "target", false);
+        assert!(all.contains("src/a.rs"));
+        assert!(all.contains("tests/t.rs"));
+        let tests = search_symbol(&dir, "target", true);
+        assert!(!tests.contains("src/a.rs"));
+        assert!(tests.contains("tests/t.rs"));
+        assert_eq!(search_symbol(&dir.join("missing"), "target", false), "none");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn file_tools_reject_bad_paths_and_slice_spans() {
+        let dir = test_tree();
+        assert_eq!(read_capped(&dir, "../evil.rs"), "path rejected");
+        assert!(!read_capped(&dir, "nope.rs").is_empty());
+        assert_eq!(read_span(&dir, "src/a.rs", 1, 1), "fn target() {}");
+        assert_eq!(read_span(&dir, "../evil.rs", 1, 9), "path rejected");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn spec_section_matches_headings() {
+        let spec = "# Alpha\na1\n# Beta\nb1\n";
+        assert!(spec_section(spec, "beta").contains("b1"));
+        assert!(!spec_section(spec, "beta").contains("a1"));
+        assert_eq!(spec_section(spec, "gamma"), "section not found");
+        assert!(spec_section(spec, "").contains("# Alpha"));
     }
 }
