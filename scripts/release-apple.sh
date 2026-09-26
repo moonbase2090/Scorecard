@@ -7,7 +7,10 @@
 # uploads and the release checksums only ever see shippable files.
 set -eu
 
-: "${GITHUB_REF_NAME:?GITHUB_REF_NAME must be set (e.g. v0.1.0)}"
+if [ -z "${GITHUB_REF_NAME:-}" ]; then
+  echo "error: GITHUB_REF_NAME is not set (expected a tag like v0.1.0)" >&2
+  exit 1
+fi
 ver="${GITHUB_REF_NAME#v}"
 root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 dist="$root/dist"
@@ -32,7 +35,6 @@ lipo -info "$stage/sc" | grep -q arm64
 lipo -info "$stage/sc-mcp" | grep -q x86_64
 lipo -info "$stage/sc-mcp" | grep -q arm64
 cp "$root/LICENSE" "$root/README.md" "$stage/"
-ln -sfn /usr/local/bin "$stage/bin"
 
 "$stage/sc" --version | grep -qx "sc $ver"
 "$stage/sc-mcp" --version | grep -qx "$ver"
@@ -60,7 +62,10 @@ if [ -n "${APPLE_CERTIFICATE_P12:-}" ]; then
   security set-key-partition-list -S apple-tool:,apple: -s -k "" "$keychain" >/dev/null
   security list-keychains -d user -s "$keychain"
   identity=$(security find-identity -v -p codesigning "$keychain" | awk -F'"' '/Developer ID Application/{print $2; exit}')
-  test -n "$identity"
+  if [ -z "$identity" ]; then
+    echo "error: no 'Developer ID Application' codesigning identity in $keychain (check APPLE_CERTIFICATE_P12)" >&2
+    exit 1
+  fi
   codesign --force --options runtime --timestamp --sign "$identity" "$stage/sc" "$stage/sc-mcp"
   rm -f "$dmg"
   hdiutil create -volname "Scorecard $ver" -srcfolder "$stage" -ov -format UDZO "$dmg"
