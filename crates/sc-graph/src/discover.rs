@@ -14,12 +14,31 @@ pub struct Scan {
 }
 
 pub fn source_files(root: &Path, exclude: &[String]) -> Vec<std::path::PathBuf> {
+    let dirs = [root.join("src")];
+    source_files_under(root, &dirs, exclude)
+}
+
+/// Rust files under each directory, relative to `root` after the walk.
+///
+/// A single crate passes `root/src`. A Cargo workspace also passes each
+/// member's `src`. Overlapping directories are scanned once.
+pub fn source_files_under(
+    root: &Path,
+    src_dirs: &[std::path::PathBuf],
+    exclude: &[String],
+) -> Vec<std::path::PathBuf> {
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     let mut files = Vec::new();
-    let src = root.join("src");
-    if src.is_dir() {
-        walk(&src, root, exclude, &mut files);
+    let mut seen = std::collections::BTreeSet::new();
+    for src in src_dirs {
+        let src = src.canonicalize().unwrap_or_else(|_| src.clone());
+        if !src.is_dir() || !seen.insert(src.clone()) {
+            continue;
+        }
+        walk(&src, &root, exclude, &mut files);
     }
     files.sort();
+    files.dedup();
     files
 }
 

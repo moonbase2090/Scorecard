@@ -34,7 +34,7 @@ Node checks syntax with `node --check` and runs `npm test` when a test script ex
 
 `--diff` selects Rust `#[test]` names (`test_selection` is `rust-tests`). Every other pack uses the full suite. On `--diff`, `cargo test` runs only `#[test]` functions in files that mention a changed symbol, at most eight names. An empty set, or a larger set, runs the full `cargo test`.
 
-On a Rust tree, `sc` runs `cargo check`, `cargo test`, complexity, `cargo llvm-cov`, CRAP, hallucinated imports, and a small secrets scan. `--diff` and `--paths` narrow the CRAP gate. Mutation, the spec check, and the LLM review are off unless you ask for them.
+On a Rust tree, `sc` runs `cargo check`, `cargo test`, complexity, `cargo llvm-cov`, CRAP, hallucinated imports, and a small secrets scan. `--diff` and `--paths` narrow the CRAP gate. Mutation, the spec check, and the LLM review are off unless you ask for them. A Cargo workspace is scored from each member's `src` directory, found with `cargo metadata`. A top-level `src` is included when it exists.
 
 ## Flags
 
@@ -73,6 +73,7 @@ Skipping coverage, mutation, or the LLM does not by itself exit 2.
 |---|---|
 | `testdata/failing_test` | Failing unit test. Exit 1, verdict `fail`, finding `test.failed` on that test. |
 | `testdata/good_crate` | Small crate that typechecks and passes tests. Exit 0. |
+| `testdata/workspace_src` | Virtual Cargo workspace with no top-level `src`. Exit 0. Scope includes both members, and CRAP is not zero. |
 | `testdata/crap_untested` | CC-heavy `classify`, no tests. Exit 1, finding `crap.over_threshold`. |
 | `testdata/crap_tested` | The same `classify` with tests that cover its branches. Exit 0 when llvm-cov is installed. |
 | `testdata/fake_dep` | Uses `missing_crate` under `cfg(any())`. Exit 0. Warning `sca.hallucinated_import`, disposition `ask`. |

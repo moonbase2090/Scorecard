@@ -4,6 +4,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Cargo workspaces are scored from each member's `src`, not only a top-level `src`.
+- The private-key check no longer flags the line that defines the PEM markers.
+
 ## [0.1.0]
 
 Workspace version `0.1.0`. Not tagged. Not published to crates.io.

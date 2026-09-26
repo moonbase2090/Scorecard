@@ -125,7 +125,12 @@ fn push_fn(
 
 fn module_prefix(rel_path: &str) -> String {
     let rel = rel_path.trim_start_matches("./");
-    let without_src = rel.strip_prefix("src/").unwrap_or(rel);
+    // `src/lib.rs` and `crates/<member>/src/lib.rs` are both crate roots.
+    let without_src = rel
+        .rsplit_once("/src/")
+        .map(|(_, rest)| rest)
+        .or_else(|| rel.strip_prefix("src/"))
+        .unwrap_or(rel);
     if without_src == "lib.rs" || without_src == "main.rs" {
         return String::new();
     }
@@ -263,6 +268,10 @@ mod tests {
         let src = "pub fn inner() {}";
         let file = syn::parse_file(src).unwrap();
         let fns = functions_in_source(&file, "src/foo/bar.rs");
+        assert_eq!(fns[0].symbol, "foo::bar::inner");
+        let fns = functions_in_source(&file, "crates/left/src/lib.rs");
+        assert_eq!(fns[0].symbol, "inner");
+        let fns = functions_in_source(&file, "crates/left/src/foo/bar.rs");
         assert_eq!(fns[0].symbol, "foo::bar::inner");
     }
 }
