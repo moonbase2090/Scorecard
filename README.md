@@ -139,4 +139,4 @@ Perf findings `perf.nested_loop` and `perf.clone_in_loop` are warnings. They do 
 
 ## License
 
-MIT.
+Scorecard is licensed under the [Mozilla Public License 2.0](LICENSE). You can use it in commercial products. If you distribute modified MPL-covered files, you must make their source available under MPL-2.0.
