@@ -14,7 +14,7 @@ inputs:
     required: false
     default: off
   format:
-    description: json, md, sarif, or all
+    description: json, md, sarif, html, or all
     required: false
     default: sarif
   diff:
@@ -26,13 +26,14 @@ runs:
   steps:
     - name: Install sc
       shell: bash
-      run: cargo install --path crates/ca-cli --locked --force
+      run: cargo install --path crates/sc-cli --locked --force
     - name: Analyze
       shell: bash
       run: |
         case "${{ inputs.format }}" in
           md) out=sc-results.md ;;
           json) out=sc-results.json ;;
+          html) out=sc-results.html ;;
           *) out=sc-results.sarif ;;
         esac
         args=(analyze . --format "${{ inputs.format }}" --out "$out" --fail-on "${{ inputs.fail-on }}" --mutation "${{ inputs.mutation }}")

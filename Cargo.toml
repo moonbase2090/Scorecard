@@ -1,14 +1,14 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/ca-cli",
-    "crates/ca-core",
-    "crates/ca-graph",
-    "crates/ca-engines",
-    "crates/ca-mutation",
-    "crates/ca-llm",
-    "crates/ca-mcp",
-    "crates/ca-sarif",
+    "crates/sc-cli",
+    "crates/sc-core",
+    "crates/sc-graph",
+    "crates/sc-engines",
+    "crates/sc-mutation",
+    "crates/sc-llm",
+    "crates/sc-mcp",
+    "crates/sc-sarif",
 ]
 
 [workspace.package]

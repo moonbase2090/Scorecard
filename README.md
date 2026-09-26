@@ -4,21 +4,21 @@
 
 `sc` detects one language pack from the tree. `Cargo.toml` is Rust. `package.json` is Node. A Python manifest is Python. A top-level or `scripts/` or `bin/` shell file, with no other marker, is Bash. `go.mod` is Go. `pom.xml` or Gradle is Java. A root `.csproj` or `.sln` is C#. `composer.json` is PHP. `CMakeLists.txt` is C++. Two markers and no override is an error. Set `pack` in `analyzer.toml`, or pass `--pack`, to name the pack. `command` is only an override: it runs secrets plus a lint command you set yourself.
 
-A gate with `enforced: false` is reported and does not fail the process. Rust enforces types, tests, CRAP, secrets, dependency checks, and lint. Python enforces `python3 -m compileall`, pytest when a test suite is present, Ruff, imports declared in `pyproject.toml`, secrets, and CRAP. Pytest writes line coverage when pytest-cov is available. The other packs use the same CRAP formula. Node reads c8, Java reads JaCoCo, C# reads Cobertura from `dotnet-coverage`, PHP reads Clover, Bash reads kcov, and C++ reads lcov after CTest. A missing report scores uncovered functions as coverage 0. Report paths are `.ca/coverage/coverage-final.json` (c8), `target/site/jacoco/jacoco.xml` (JaCoCo), `.ca/coverage/csharp.cobertura.xml` (dotnet-coverage), `.ca/coverage/clover.xml` (PHPUnit with pcov), `.ca/coverage/kcov` (kcov Cobertura), and `.ca/coverage/cpp.info` (lcov). The command pack has no coverage runner. Node checks syntax with `node --check` and runs `npm test` when a test script exists. Bash uses `bash -n`, and `shellcheck` or `bats` when they are installed. Go runs `go build`, `go test -coverprofile`, and `go vet`. C++ uses `g++ -fsyntax-only`. Java, C#, and PHP run their compilers when `javac`, `dotnet`, or `php` is on `PATH`. If the host binary is missing and the `scorecard-tools` image is present, the same command runs in that image. Build it locally with `docker build -t scorecard-tools:latest docker/scorecard-tools`. No registry is required. The image includes Rust (`cargo`, `clippy`, `llvm-tools`, `cargo-llvm-cov`), Python (`python3`, `pytest`, `pytest-cov`, `ruff`, `uv`), and Go 1.27.1, plus the other pack tools. A missing compiler and a missing image are reported and do not fail the process. `--diff` selects Rust `#[test]` names (`test_selection` is `rust-tests`). Every other pack uses the full suite.
+A gate with `enforced: false` is reported and does not fail the process. Rust enforces types, tests, CRAP, secrets, dependency checks, and lint. Python enforces `python3 -m compileall`, pytest when a test suite is present, Ruff, imports declared in `pyproject.toml`, secrets, and CRAP. Pytest writes line coverage when pytest-cov is available. The other packs use the same CRAP formula. Node reads c8, Java reads JaCoCo, C# reads Cobertura from `dotnet-coverage`, PHP reads Clover, Bash reads kcov, and C++ reads lcov after CTest. A missing report scores uncovered functions as coverage 0. Report paths are `.sc/coverage/coverage-final.json` (c8), `target/site/jacoco/jacoco.xml` (JaCoCo), `.sc/coverage/csharp.cobertura.xml` (dotnet-coverage), `.sc/coverage/clover.xml` (PHPUnit with pcov), `.sc/coverage/kcov` (kcov Cobertura), and `.sc/coverage/cpp.info` (lcov). The command pack has no coverage runner. Node checks syntax with `node --check` and runs `npm test` when a test script exists. Bash uses `bash -n`, and `shellcheck` or `bats` when they are installed. Go runs `go build`, `go test -coverprofile`, and `go vet`. C++ uses `g++ -fsyntax-only`. Java, C#, and PHP run their compilers when `javac`, `dotnet`, or `php` is on `PATH`. If the host binary is missing and the `scorecard-tools` image is present, the same command runs in that image. Build it locally with `docker build -t scorecard-tools:latest docker/scorecard-tools`. No registry is required. The image includes Rust (`cargo`, `clippy`, `llvm-tools`, `cargo-llvm-cov`), Python (`python3`, `pytest`, `pytest-cov`, `ruff`, `uv`), and Go 1.27.1, plus the other pack tools. A missing compiler and a missing image are reported and do not fail the process. `--diff` selects Rust `#[test]` names (`test_selection` is `rust-tests`). Every other pack uses the full suite.
 
 On a Rust tree, `sc` runs `cargo check`, `cargo test`, complexity, `cargo llvm-cov`, CRAP, hallucinated imports, and a small secrets scan. `--diff` and `--paths` narrow the CRAP gate. Mutation, the spec check, and the LLM review are off unless you ask for them. `sc-mcp` serves four MCP tools. `--format sarif` writes SARIF 2.1.0.
 
 ## Install
 
 ```bash
-cargo build --release -p ca-cli
+cargo build --release -p sc-cli
 # binary: target/release/sc
 ```
 
 Or install it into Cargo's bin directory:
 
 ```bash
-cargo install --path crates/ca-cli
+cargo install --path crates/sc-cli
 ```
 
 Build with Rust 1.85 or newer (current crates use that MSRV). Coverage needs the LLVM tools component for the active toolchain, plus `cargo-llvm-cov`:
@@ -40,7 +40,7 @@ sc analyze testdata/crap_tested --format md
 
 ```text
 sc analyze [PATH] [--diff [BASE]] [--diff-head REV] [--paths FILE] [--spec PATH]
-            [--format json|md|sarif|all] [--out PATH] [--fail-on LIST]
+            [--format json|md|sarif|html|all] [--out PATH] [--fail-on LIST]
             [--mutation off|diff|full] [--llm off|on] [--intent TEXT]
             [--budget-seconds N] [--config PATH]
 ```
@@ -48,15 +48,15 @@ sc analyze [PATH] [--diff [BASE]] [--diff-head REV] [--paths FILE] [--spec PATH]
 | Flag | Default |
 |---|---|
 | `PATH` | `.` |
-| `--format` | `json` (`md`, `sarif`, or `all`) |
+| `--format` | `json` (`md`, `sarif`, `html`, or `all`) |
 | `--fail-on` | `types,tests,crap,secrets,lint` |
 | `--mutation` | `off` |
 | `--llm` | `off` |
 | `--intent` | none |
 | `--budget-seconds` | `120` |
-| `--config` | `analyzer.toml` in the crate, then `~/.config/ca/analyzer.toml` |
+| `--config` | `analyzer.toml` in the crate, then `~/.config/sc/analyzer.toml` |
 
-`--format all` prints JSON, then Markdown, on stdout. With `--out`, JSON, Markdown, and SARIF are written as sibling `.json`, `.md`, and `.sarif` files. `--format sarif` writes SARIF to stdout and to `--out`.
+`--format all` prints JSON, then Markdown, on stdout. With `--out`, JSON, Markdown, SARIF, and HTML are written as sibling `.json`, `.md`, `.sarif`, and `.html` files. `--format sarif` writes SARIF to stdout and to `--out`. `--format html` writes a self-contained visual report (no network requests; open it from `file://` or any static server) to stdout and to `--out`.
 
 Exit codes:
 
@@ -93,7 +93,7 @@ Names from llvm-cov are matched to parsed functions on a best-effort basis (dema
 
 At CC 5 and 0% coverage, CRAP is exactly 30, so the function passes. At CC 12 and 0% coverage, CRAP is 156.
 
-Dimension scores start at 1.0. Each error finding subtracts 0.25 and each warning subtracts 0.05, floored at 0. Correctness takes compile and test findings; maintainability takes complexity, coverage, and CRAP; efficiency and security stay at 1.0 until those engines exist. See `crates/ca-core/src/score.rs`.
+Dimension scores start at 1.0. Each error finding subtracts 0.25 and each warning subtracts 0.05, floored at 0. Correctness takes compile and test findings; maintainability takes complexity, coverage, and CRAP; efficiency and security stay at 1.0 until those engines exist. See `crates/sc-core/src/score.rs`.
 
 ## Fixtures
 
@@ -113,7 +113,7 @@ In tree mode the scorecard fields `loc_changed`, `files_changed`, and `coverage_
 
 ## Config
 
-See `analyzer.toml.example`. Copy it to `analyzer.toml` or `~/.config/ca/analyzer.toml`. `--fail-on` overrides `gates.fail_on`.
+See `analyzer.toml.example`. Copy it to `analyzer.toml` or `~/.config/sc/analyzer.toml`. `--fail-on` overrides `gates.fail_on`.
 
 `secrets` matches a small token set (AWS access keys, GitHub tokens, Slack tokens, Stripe live keys, and private-key blocks). An undeclared dependency is a strongly advised warning (`sca.hallucinated_import`, disposition `ask`). It stays on the scorecard and does not fail the process. `std`, `core`, `alloc`, `crate`, `self`, and `super` are allowed. Python uses the same warning for an import that is not in `pyproject.toml`.
 
@@ -129,7 +129,7 @@ On `--diff`, `cargo test` runs only `#[test]` functions in files that mention a 
 
 `--llm on` sends the spec to an OpenAI-compatible `/chat/completions` endpoint. The built-in endpoint is `http://127.0.0.1:11434/v1`. If that endpoint is unchanged and `XAI_API_KEY` is set, the call uses SpaceXAI at `https://api.x.ai/v1` with model `grok-4.5`. The model may add `spec.llm_gap` warnings. It does not invent CRAP or mutation scores. A failed call skips the engine and does not fail the run. The loop allows 12 tool rounds and 2000 output tokens. Tools are `get_file`, `get_span`, `callers_of`, `tests_covering`, and `spec_section`.
 
-`sc-mcp` speaks MCP over stdio. The tools are `analyze_paths`, `analyze_diff`, `explain`, and `list_findings`. `explain` and `list_findings` read `.ca/last-scorecard.json` from the last analyze. Parse results are cached in `.ca/cache/parse-v1.json`.
+`sc-mcp` speaks MCP over stdio. The tools are `analyze_paths`, `analyze_diff`, `explain`, and `list_findings`. `explain` and `list_findings` read `.sc/last-scorecard.json` from the last analyze. Parse results are cached in `.sc/cache/parse-v1.json`.
 
 `sc setup` makes that server visible to agents on this computer. It writes the skill to `~/.grok/skills/scorecard`, `~/.claude/skills/scorecard`, `~/.cursor/skills/scorecard`, and `~/.agents/skills/scorecard`. It registers `sc-mcp` in `~/.grok/config.toml`, `~/.cursor/mcp.json`, and `~/.claude.json` when `sc-mcp` is on `PATH`. Run it again after you install or move the binary. Reload MCP servers in the agent after that.
 
