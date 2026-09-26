@@ -1,0 +1,33 @@
+sc 0.1.0  testdata/failing_test  rust  GITSHA STATE  scope tree
+
+FAIL
+
+gates
+  [ok]  types            enforced
+  [xx]  tests            enforced  test failures
+  [ok]  crap             enforced
+  [ok]  sca              advisory
+  [ok]  secrets          enforced
+  [ok]  lint             enforced
+
+scores
+  correctness      0.75  [########..]
+  efficiency       1.00  [##########]
+  maintainability  1.00  [##########]
+  security         1.00  [##########]
+
+worst crap  threshold 30
+  CRAP   CC   COV  SYMBOL            LOCATION
+     2    1    0%  add               src/lib.rs
+
+findings
+error
+  test.failed
+  src/lib.rs:12  tests::it_adds
+  Fix the failing test or the behavior it checks
+
+engines run: compile, tests, complexity, crap, sca, secrets, perf, lint
+engines skipped: coverage, spec, mutation, llm
+duration: DURs
+exit 1: a gate failed
+

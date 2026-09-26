@@ -4,6 +4,7 @@
 //! User-facing analyze output is the scorecard, rendered as JSON and/or Markdown.
 
 mod format;
+mod pretty;
 mod report;
 mod setup;
 
@@ -37,9 +38,10 @@ struct Cli {
 struct AnalyzeArgs {
     /// Project directory. Defaults to `.`.
     path: Option<PathBuf>,
-    /// `json` (default), `md`, `sarif`, `html`, or `all`.
-    #[arg(long, value_parser = ["json", "md", "sarif", "html", "all"], default_value = "json")]
-    format: String,
+    /// `json`, `pretty`, `md`, `sarif`, `html`, or `all`.
+    /// Omitted: `pretty` when stdout is a terminal, otherwise `json`.
+    #[arg(long, value_parser = ["json", "pretty", "md", "sarif", "html", "all"])]
+    format: Option<String>,
     /// Also write the report to this path.
     #[arg(long)]
     out: Option<PathBuf>,
@@ -87,6 +89,13 @@ enum Commands {
     Setup,
 }
 
+struct View<'a> {
+    stdout_format: &'a str,
+    file_format: &'a str,
+    color: bool,
+    width: usize,
+}
+
 pub fn run() -> i32 {
     let cli = Cli::parse();
     match cli.command {
@@ -112,7 +121,20 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
         budget_seconds,
         config,
     } = args;
-    let format = format.as_str();
+    let tty = io::IsTerminal::is_terminal(&io::stdout());
+    let stdout_format = pretty::stdout_format(format.as_deref(), tty);
+    let file_format = format.unwrap_or_else(|| "json".to_string());
+    let view = View {
+        stdout_format,
+        file_format: &file_format,
+        color: pretty::use_color(
+            tty,
+            std::env::var_os("NO_COLOR").is_some(),
+            std::env::var("CLICOLOR_FORCE").ok().as_deref(),
+            std::env::var("CLICOLOR").ok().as_deref(),
+        ),
+        width: pretty::term_width(),
+    };
     let path = path.unwrap_or_else(|| PathBuf::from("."));
     let repo = display_repo(&path);
     let stdout = io::stdout();
@@ -127,7 +149,7 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
         );
         return emit(
             &mut stdout,
-            format,
+            &view,
             out.as_deref(),
             &card,
             RunStatus::AnalyzerError,
@@ -146,7 +168,7 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
             );
             return emit(
                 &mut stdout,
-                format,
+                &view,
                 out.as_deref(),
                 &card,
                 RunStatus::AnalyzerError,
@@ -161,7 +183,7 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
             let card = early_card(&repo, "config.invalid", "config", &err);
             return emit(
                 &mut stdout,
-                format,
+                &view,
                 out.as_deref(),
                 &card,
                 RunStatus::AnalyzerError,
@@ -176,7 +198,7 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
                 let card = early_card(&repo, "config.invalid", "config", &err);
                 return emit(
                     &mut stdout,
-                    format,
+                    &view,
                     out.as_deref(),
                     &card,
                     RunStatus::AnalyzerError,
@@ -206,7 +228,7 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
                 );
                 return emit(
                     &mut stdout,
-                    format,
+                    &view,
                     out.as_deref(),
                     &card,
                     RunStatus::AnalyzerError,
@@ -231,7 +253,7 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
     });
     emit(
         &mut stdout,
-        format,
+        &view,
         out.as_deref(),
         &output.scorecard,
         output.status,
@@ -240,7 +262,7 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
 
 fn emit(
     stdout: &mut impl Write,
-    format: &str,
+    view: &View<'_>,
     out: Option<&Path>,
     card: &Scorecard,
     status: RunStatus,
@@ -254,19 +276,31 @@ fn emit(
         RunStatus::GateFailed => 1,
         RunStatus::AnalyzerError => 2,
     };
+    let pretty = pretty::to_pretty(
+        card,
+        &pretty::PrettyOpts {
+            color: view.color,
+            width: view.width,
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            report: out.map(|path| path.display().to_string()),
+            exit_code: code,
+        },
+    );
     if let Some(path) = out {
-        if let Err(err) = write_reports(format, path, &json, &md, &sarif, &html) {
+        if let Err(err) = write_reports(view.file_format, path, &json, &md, &sarif, &html, &pretty)
+        {
             let _ = writeln!(io::stderr(), "sc: failed to write report: {err}");
             code = 2;
         }
     }
-    let body = match format {
+    let body = match view.stdout_format {
         "md" => md,
         "sarif" => sarif,
         // HTML to a terminal is noise; `all` keeps JSON+Markdown on stdout
         // and still writes the .html sibling when --out is set.
         "html" => html,
         "all" => format!("{json}\n{md}"),
+        "pretty" => pretty,
         _ => json,
     };
     let _ = writeln!(stdout, "{body}");
@@ -280,6 +314,7 @@ fn write_reports(
     md: &str,
     sarif: &str,
     html: &str,
+    pretty: &str,
 ) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
@@ -290,6 +325,7 @@ fn write_reports(
         "md" => fs::write(path, format!("{md}\n")),
         "sarif" => fs::write(path, format!("{sarif}\n")),
         "html" => fs::write(path, format!("{html}\n")),
+        "pretty" => fs::write(path, format!("{pretty}\n")),
         "all" => {
             fs::write(json_target(path), format!("{json}\n"))?;
             fs::write(md_target(path), format!("{md}\n"))?;

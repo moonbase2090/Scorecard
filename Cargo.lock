@@ -743,7 +743,9 @@ dependencies = [
 name = "sc-cli"
 version = "0.1.0"
 dependencies = [
+ "anstyle",
  "clap",
+ "libc",
  "sc-core",
  "sc-engines",
  "sc-sarif",

@@ -4,6 +4,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `sc analyze --format pretty` prints a terminal scorecard. A terminal uses it when `--format` is omitted. A pipe stays JSON.
+
 ### Fixed
 
 - Cargo workspaces are scored from each member's `src`, not only a top-level `src`.
