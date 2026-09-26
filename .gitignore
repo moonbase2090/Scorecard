@@ -8,3 +8,7 @@ testdata/**/obj/
 testdata/**/__pycache__/
 testdata/**/.phpunit.result.cache
 testdata/go_pack/go_pack
+.grok/
+.codex/
+.cursor/
+feature-map/

@@ -3,10 +3,16 @@ name = "sc-llm"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
 publish = false
 description = "Optional OpenAI-compatible spec review"
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-ureq = { version = "2", default-features = false, features = ["tls", "json"] }
+serde.workspace = true
+serde_json.workspace = true
+ureq.workspace = true

@@ -1,13 +1,15 @@
+// SPDX-License-Identifier: MPL-2.0
 use std::io::{self, BufRead, Write};
 
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--version") {
+        println!("{}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
     let stdin = io::stdin();
     let mut stdin = stdin.lock();
     let mut stdout = io::stdout().lock();
-    loop {
-        let Some((frame, message)) = read_message(&mut stdin) else {
-            break;
-        };
+    while let Some((frame, message)) = read_message(&mut stdin) {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&message) else {
             continue;
         };

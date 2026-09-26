@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 //! Self-contained HTML scorecard report.
 //!
 //! `to_html` renders one `.html` file with inline CSS and no external
@@ -13,7 +14,10 @@ pub fn to_html(card: &Scorecard) -> String {
     out.push_str(
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>\n<title>",
     );
-    out.push_str(&esc(&format!("scorecard: {} — {}", card.repo, card.verdict)));
+    out.push_str(&esc(&format!(
+        "scorecard: {} — {}",
+        card.repo, card.verdict
+    )));
     out.push_str("</title>\n<style>\n");
     out.push_str(CSS);
     out.push_str("\n</style>\n</head>\n<body>\n<main>\n");
@@ -404,9 +408,8 @@ fn deep(out: &mut String, card: &Scorecard) {
                 out.push_str("</div>");
             }
         }
-        None => out.push_str(
-            "<p style=\"font-size:12.5px;color:var(--dim)\">no spec file requested.</p>",
-        ),
+        None => out
+            .push_str("<p style=\"font-size:12.5px;color:var(--dim)\">no spec file requested.</p>"),
     }
     out.push_str("</div>\n");
 }

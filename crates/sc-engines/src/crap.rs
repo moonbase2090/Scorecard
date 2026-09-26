@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 use sc_core::{crap_score, exceeds_threshold, CrapFunction, Finding};
 use sc_graph::FunctionInfo;
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 //! Scorecard contract, configuration, and score formulas.
 
 mod config;

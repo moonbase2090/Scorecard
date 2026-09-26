@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 use std::path::Path;
 
 use sc_core::Finding;
@@ -90,7 +91,7 @@ fn mentioned_paths(text: &str) -> Vec<String> {
             continue;
         }
         let looks_like_path =
-            token.contains('/') && token.split('/').last().unwrap_or("").contains('.');
+            token.contains('/') && token.split('/').next_back().unwrap_or("").contains('.');
         if looks_like_path {
             out.push(token.to_string());
         }
@@ -105,7 +106,6 @@ fn mentioned_items(text: &str) -> Vec<(String, String)> {
     let kinds = ["fn", "struct", "enum", "trait", "type", "const"];
     let mut index = 0;
     while index < text.len() {
-        let mut matched = false;
         for kind in kinds {
             let marker = format!("{kind} ");
             if text[index..].starts_with(&marker) {
@@ -117,15 +117,10 @@ fn mentioned_items(text: &str) -> Vec<(String, String)> {
                 if !name.is_empty() {
                     out.push((kind.to_string(), name));
                 }
-                matched = true;
                 break;
             }
         }
-        if !matched {
-            index += 1;
-        } else {
-            index += 1;
-        }
+        index += 1;
     }
     out.sort();
     out.dedup();

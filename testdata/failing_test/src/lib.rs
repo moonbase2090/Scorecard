@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 pub fn add(left: i32, right: i32) -> i32 {
     left + right
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
@@ -71,7 +72,40 @@ pub fn cargo_command(root: &Path) -> Command {
         .env_remove("LLVM_PROFILE_FILE")
         .env_remove("CARGO_MANIFEST_DIR")
         .env_remove("CARGO_MANIFEST_PATH");
+    strip_parent_llvm_cov(&mut cmd);
     cmd
+}
+
+const LLVM_COV_VARS: &[&str] = &[
+    "CARGO_LLVM_COV",
+    "CARGO_LLVM_COV_SHOW_ENV",
+    "CARGO_LLVM_COV_TARGET_DIR",
+    "CARGO_LLVM_COV_BUILD_DIR",
+    "__CARGO_LLVM_COV_RUSTC_WRAPPER",
+    "__CARGO_LLVM_COV_RUSTC_WRAPPER_RUSTFLAGS",
+    "__CARGO_LLVM_COV_RUSTC_WRAPPER_CRATE_NAMES",
+];
+
+pub fn under_llvm_cov(vars: &[(&str, &str)]) -> bool {
+    vars.iter().any(|(key, value)| match *key {
+        "CARGO_LLVM_COV" => !value.is_empty(),
+        "RUSTC_WRAPPER" => value.contains("llvm-cov"),
+        _ => false,
+    })
+}
+
+fn strip_parent_llvm_cov(cmd: &mut Command) {
+    for key in LLVM_COV_VARS {
+        cmd.env_remove(key);
+    }
+    let cov = std::env::var("CARGO_LLVM_COV").unwrap_or_default();
+    let wrapper = std::env::var("RUSTC_WRAPPER").unwrap_or_default();
+    if under_llvm_cov(&[
+        ("CARGO_LLVM_COV", cov.as_str()),
+        ("RUSTC_WRAPPER", wrapper.as_str()),
+    ]) {
+        cmd.env_remove("RUSTC_WRAPPER");
+    }
 }
 
 pub fn run_cmd(cmd: &mut Command, timeout: Duration) -> Result<Captured, CommandError> {
@@ -153,4 +187,21 @@ pub fn run_cargo(root: &Path, args: &[&str], deadline: Instant) -> Result<Captur
 
 fn shell_quote_arg(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::under_llvm_cov;
+
+    #[test]
+    fn nested_llvm_cov_is_detected_from_its_wrapper() {
+        assert!(under_llvm_cov(&[("CARGO_LLVM_COV", "1")]));
+        assert!(under_llvm_cov(&[(
+            "RUSTC_WRAPPER",
+            "/usr/local/bin/cargo-llvm-cov",
+        )]));
+        assert!(!under_llvm_cov(&[("CARGO_LLVM_COV", "")]));
+        assert!(!under_llvm_cov(&[("RUSTC_WRAPPER", "/usr/bin/sccache")]));
+        assert!(!under_llvm_cov(&[]));
+    }
 }

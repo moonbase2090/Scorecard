@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 use sc_core::{Finding, Span};
 
 pub fn secrets_in_text(text: &str, rel: &str) -> Vec<Finding> {

@@ -3,11 +3,24 @@ name = "sc-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
 publish = false
 description = "Scorecard model, config, and scoring"
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-toml = "0.8"
-uuid = { version = "1", features = ["v4"] }
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+criterion = { version = "0.7.0", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "crap_score"
+harness = false

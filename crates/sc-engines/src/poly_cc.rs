@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 //! Cyclomatic complexity for the non-Rust packs.
 //!
 //! Python uses the stdlib `ast` module. The other packs count decision points
@@ -246,7 +247,7 @@ fn collect(root: &Path, dir: &Path, depth: u32, exts: &[&str], out: &mut Vec<Str
         } else if path
             .extension()
             .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| exts.iter().any(|wanted| *wanted == ext))
+            .is_some_and(|ext| exts.contains(&ext))
         {
             if let Ok(rel) = path.strip_prefix(root) {
                 out.push(rel.to_string_lossy().replace('\\', "/"));

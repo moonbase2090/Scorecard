@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: MPL-2.0
 //! `analyzer.toml` loading.
 //!
-//! Search order: `--config`, then `./analyzer.toml` in the crate, then
+//! Search order: `--config`, then `./analyzer.toml` in the project, then
 //! `~/.config/sc/analyzer.toml`.
 
 use std::path::{Path, PathBuf};
@@ -20,7 +21,7 @@ pub struct Config {
     pub llm: LlmConfig,
     pub engines: EnginesConfig,
     pub commands: CommandsConfig,
-    /// Empty detects a language pack from the tree. `rust`, `node`, `python`, or `go`.
+    /// Empty detects a pack from the tree: `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, or `command`.
     pub pack: String,
 }
 

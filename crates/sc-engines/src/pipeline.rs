@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 //! Assemble a scorecard from the deterministic engines.
 //!
 //! Engines return structured findings. Nothing in this crate writes user-facing
@@ -498,10 +499,12 @@ fn analyze_rust(request: AnalyzeRequest) -> AnalyzeOutput {
         &request.config.commands.lint,
         types_pass,
         deadline,
-        &mut ran,
-        &mut skipped,
-        &mut findings,
-        &mut runs,
+        LintSink {
+            ran: &mut ran,
+            skipped: &mut skipped,
+            findings: &mut findings,
+            runs: &mut runs,
+        },
     );
 
     let untested_cc = request.config.gates.new_fn_untested_cc;
@@ -791,47 +794,52 @@ fn run_one_test(
     )
 }
 
+struct LintSink<'a> {
+    ran: &'a mut Vec<String>,
+    skipped: &'a mut Vec<String>,
+    findings: &'a mut Vec<Finding>,
+    runs: &'a mut Vec<RunRecord>,
+}
+
 fn run_lint_engine(
     root: &Path,
     lint: &str,
     types_pass: bool,
     deadline: Instant,
-    ran: &mut Vec<String>,
-    skipped: &mut Vec<String>,
-    findings: &mut Vec<Finding>,
-    runs: &mut Vec<RunRecord>,
+    sink: LintSink<'_>,
 ) -> bool {
     if !types_pass {
-        skipped.push("lint".into());
+        sink.skipped.push("lint".into());
         return false;
     }
     let script = lint.trim();
     if script.is_empty() {
-        skipped.push("lint".into());
+        sink.skipped.push("lint".into());
         return false;
     }
     let started = Instant::now();
     match run_shell(root, script, deadline) {
         Ok(captured) => {
             note_run(
-                runs,
+                sink.runs,
                 "lint",
                 script,
                 captured.status.code(),
                 captured.elapsed,
             );
             if captured.status.success() {
-                ran.push("lint".into());
+                sink.ran.push("lint".into());
                 true
             } else if command_missing(&captured.stderr, &captured.stdout) {
-                skipped.push("lint".into());
-                findings.push(unavailable("lint", "lint command was not found"));
+                sink.skipped.push("lint".into());
+                sink.findings
+                    .push(unavailable("lint", "lint command was not found"));
                 true
             } else {
-                ran.push("lint".into());
+                sink.ran.push("lint".into());
                 let detail =
                     crate::command::brief(&format!("{}\n{}", captured.stdout, captured.stderr));
-                findings.push(Finding {
+                sink.findings.push(Finding {
                     id: "lint:failed".into(),
                     rule: "lint.failed".into(),
                     engine: "lint".into(),
@@ -852,15 +860,17 @@ fn run_lint_engine(
             }
         }
         Err(CommandError::Timeout) => {
-            note_run(runs, "lint", script, None, started.elapsed());
-            skipped.push("lint".into());
-            findings.push(unavailable("lint", "lint command timed out"));
+            note_run(sink.runs, "lint", script, None, started.elapsed());
+            sink.skipped.push("lint".into());
+            sink.findings
+                .push(unavailable("lint", "lint command timed out"));
             true
         }
         Err(err) => {
-            note_run(runs, "lint", script, None, started.elapsed());
-            skipped.push("lint".into());
-            findings.push(unavailable("lint", &err.message("lint")));
+            note_run(sink.runs, "lint", script, None, started.elapsed());
+            sink.skipped.push("lint".into());
+            sink.findings
+                .push(unavailable("lint", &err.message("lint")));
             true
         }
     }

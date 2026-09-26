@@ -1,0 +1,131 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  apple:
+    runs-on: macos-14
+    timeout-minutes: 60
+    # Job-level permissions replace the workflow default, so checkout of this
+    # private repo needs contents: read here. Artifact upload/download (v4)
+    # uses the runtime token and needs no actions: scope.
+    permissions:
+      contents: read
+    outputs:
+      signed: ${{ steps.package.outputs.signed }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - name: Build arm64 and x86_64
+        run: |
+          cargo build --release --locked -p sc-cli -p sc-mcp --target aarch64-apple-darwin
+          cargo build --release --locked -p sc-cli -p sc-mcp --target x86_64-apple-darwin
+      - name: Package universal disk image
+        id: package
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+        run: sh scripts/release-apple.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: apple
+          path: |
+            dist/*.tar.gz
+            dist/*.dmg
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Job-level permissions replace the workflow default, so checkout of this
+    # private repo needs contents: read here. Artifact upload/download (v4)
+    # uses the runtime token and needs no actions: scope.
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install the arm64 linker
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Build
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+        run: cargo build --release --locked -p sc-cli -p sc-mcp --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          set -eu
+          ver="${GITHUB_REF_NAME#v}"
+          # A prerelease tag (v0.1.0-rc.2) may ship binaries that report the
+          # base Cargo.toml version (0.1.0); a final tag must match exactly.
+          base="${ver%%-*}"
+          triple="${{ matrix.target }}"
+          src="target/${triple}/release"
+          if [ "$triple" = "x86_64-unknown-linux-gnu" ]; then
+            got=$("$src/sc" --version)
+            [ "$got" = "sc $ver" ] || [ "$got" = "sc $base" ] || { echo "error: sc --version is '$got', tag is $GITHUB_REF_NAME" >&2; exit 1; }
+            got=$("$src/sc-mcp" --version)
+            [ "$got" = "$ver" ] || [ "$got" = "$base" ] || { echo "error: sc-mcp --version is '$got', tag is $GITHUB_REF_NAME" >&2; exit 1; }
+          else
+            file "$src/sc" | grep -q 'ARM aarch64'
+            file "$src/sc-mcp" | grep -q 'ARM aarch64'
+          fi
+          tmp=$(mktemp -d)
+          cp "$src/sc" "$src/sc-mcp" LICENSE README.md "$tmp/"
+          mkdir -p dist
+          tar -C "$tmp" -czf "dist/sc-v${ver}-${triple}.tar.gz" sc sc-mcp LICENSE README.md
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-${{ matrix.target }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: [apple, linux]
+    if: needs.apple.outputs.signed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: "*"
+          merge-multiple: true
+          path: dist
+      - name: Checksums and GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          cd dist
+          sha256sum * > SHA256SUMS
+          set -- --repo "$GITHUB_REPOSITORY" --verify-tag --title "$GITHUB_REF_NAME"
+          case "$GITHUB_REF_NAME" in
+            *-*) set -- "$@" --prerelease ;;
+          esac
+          gh release create "$GITHUB_REF_NAME" "$@" *

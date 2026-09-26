@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 //! Compile, test, and lint commands for the non-Rust, non-Python packs.
 //!
 //! A missing compiler is reported and does not fail the process. A command
@@ -403,10 +404,24 @@ fn bash_tests(root: &Path) -> Option<String> {
     if bats.is_empty() {
         return None;
     }
+    let libs: Vec<String> = list_files(root, &["sh"])
+        .into_iter()
+        .filter(|file| {
+            file.starts_with("scripts/")
+                || file.starts_with("bin/")
+                || file.contains("/scripts/")
+                || file.contains("/bin/")
+        })
+        .collect();
     let targets = shell_join(&bats);
-    let script = format!(
-        "mkdir -p .sc/coverage/kcov && kcov --clean --include-pattern=.sh --bash-parse-files-in-dir=. --cobertura-only .sc/coverage/kcov bats {targets}; status=$?; if [ \"$status\" -ne 0 ]; then bats {targets}; exit $?; fi; exit 0"
-    );
+    let mut script = String::from("mkdir -p .sc/coverage/kcov");
+    for file in &libs {
+        script.push_str(&format!(
+            " && kcov --cobertura-only .sc/coverage/kcov {} a >/dev/null || true",
+            shell_quote(file)
+        ));
+    }
+    script.push_str(&format!(" && bats {targets}"));
     via("kcov", script).or_else(|| via("bats", format!("bats {targets}")))
 }
 
@@ -431,7 +446,7 @@ fn gradle_uses_jacoco(root: &Path) -> bool {
     })
 }
 
-const CSHARP_TEST: &str = "dotnet test --nologo -v q; status=$?; if [ \"$status\" -eq 0 ] && command -v dotnet-coverage >/dev/null; then dotnet-coverage collect -f cobertura -o .sc/coverage/csharp.cobertura.xml -- dotnet test --nologo -v q || true; fi; exit $status";
+const CSHARP_TEST: &str = "dotnet test --nologo -v q /p:CollectCoverage=true /p:IncludeTestAssembly=true /p:CoverletOutputFormat=cobertura /p:CoverletOutput=.sc/coverage/csharp.cobertura.xml; status=$?; exit $status";
 
 fn php_test(bin: &str) -> String {
     let covered = if bin.contains('/') {
@@ -678,6 +693,8 @@ fn tool_missing(stderr: &str, stdout: &str) -> bool {
     text.contains("not found")
         || text.contains("no such command")
         || text.contains("not recognized")
+        || text.contains("unable to locate a java runtime")
+        || text.contains("no java runtime present")
 }
 
 fn shell(
@@ -766,6 +783,13 @@ mod tests {
         let command = test.command.clone().unwrap_or_default();
         assert!(command.contains("jacoco"), "{command}");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn macos_java_stub_is_a_missing_tool() {
+        let stderr = "The operation couldn’t be completed. Unable to locate a Java Runtime.\nPlease visit http://www.java.com for information on installing Java.\n";
+        assert!(tool_missing(stderr, ""));
+        assert!(!tool_missing("error: cannot find symbol", ""));
     }
 
     #[test]

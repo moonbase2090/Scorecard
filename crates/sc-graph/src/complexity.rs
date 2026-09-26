@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 use sc_core::Span;
 use serde::{Deserialize, Serialize};
 use syn::spanned::Spanned;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 //! MCP server for four scorecard tools.
 //!
 //! `analyze_paths`, `analyze_diff`, `explain`, and `list_findings`.
@@ -19,7 +20,7 @@ pub fn handle(message: &Value, cwd: &Path) -> Option<Value> {
         "initialize" => json!({
             "protocolVersion": "2024-11-05",
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "sc", "version": "0.1.0"}
+            "serverInfo": {"name": "sc-mcp", "version": env!("CARGO_PKG_VERSION")}
         }),
         "tools/list" => json!({"tools": tools()}),
         "tools/call" => call_tool(cwd, message.get("params").unwrap_or(&Value::Null)),
@@ -131,8 +132,7 @@ fn run_analyze(
     intent: Option<String>,
 ) -> Result<String, String> {
     let root = find_crate(cwd)?;
-    let config = sc_core::load_config_file(sc_core::resolve_config_path(None, &root).as_deref())
-        .map_err(|err| err)?;
+    let config = sc_core::load_config_file(sc_core::resolve_config_path(None, &root).as_deref())?;
     let output = analyze(AnalyzeRequest {
         root,
         repo: ".".into(),
