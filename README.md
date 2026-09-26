@@ -40,7 +40,7 @@ sc analyze testdata/crap_tested --format md
 
 ```text
 sc analyze [PATH] [--diff [BASE]] [--diff-head REV] [--paths FILE] [--spec PATH]
-            [--format json|md|sarif|all] [--out PATH] [--fail-on LIST]
+            [--format json|md|sarif|html|all] [--out PATH] [--fail-on LIST]
             [--mutation off|diff|full] [--llm off|on] [--intent TEXT]
             [--budget-seconds N] [--config PATH]
 ```
@@ -48,7 +48,7 @@ sc analyze [PATH] [--diff [BASE]] [--diff-head REV] [--paths FILE] [--spec PATH]
 | Flag | Default |
 |---|---|
 | `PATH` | `.` |
-| `--format` | `json` (`md`, `sarif`, or `all`) |
+| `--format` | `json` (`md`, `sarif`, `html`, or `all`) |
 | `--fail-on` | `types,tests,crap,secrets,lint` |
 | `--mutation` | `off` |
 | `--llm` | `off` |
@@ -56,7 +56,7 @@ sc analyze [PATH] [--diff [BASE]] [--diff-head REV] [--paths FILE] [--spec PATH]
 | `--budget-seconds` | `120` |
 | `--config` | `analyzer.toml` in the crate, then `~/.config/sc/analyzer.toml` |
 
-`--format all` prints JSON, then Markdown, on stdout. With `--out`, JSON, Markdown, and SARIF are written as sibling `.json`, `.md`, and `.sarif` files. `--format sarif` writes SARIF to stdout and to `--out`.
+`--format all` prints JSON, then Markdown, on stdout. With `--out`, JSON, Markdown, SARIF, and HTML are written as sibling `.json`, `.md`, `.sarif`, and `.html` files. `--format sarif` writes SARIF to stdout and to `--out`. `--format html` writes a self-contained visual report (no network requests; open it from `file://` or any static server) to stdout and to `--out`.
 
 Exit codes:
 

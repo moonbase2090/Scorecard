@@ -3,6 +3,7 @@
 //! User-facing analyze output is the scorecard, rendered as JSON and/or Markdown.
 
 mod format;
+mod report;
 mod setup;
 
 use std::fs;
@@ -18,6 +19,7 @@ use sc_engines::{analyze, AnalyzeRequest, RunStatus};
 use clap::{Parser, Subcommand};
 
 use format::{to_json, to_markdown};
+use report::to_html;
 
 #[derive(Parser)]
 #[command(
@@ -36,8 +38,8 @@ enum Commands {
     Analyze {
         /// Crate directory (or a path to Cargo.toml). Defaults to `.`.
         path: Option<PathBuf>,
-        /// `json` (default), `md`, `sarif`, or `all`.
-        #[arg(long, value_parser = ["json", "md", "sarif", "all"], default_value = "json")]
+        /// `json` (default), `md`, `sarif`, `html`, or `all`.
+        #[arg(long, value_parser = ["json", "md", "sarif", "html", "all"], default_value = "json")]
         format: String,
         /// Also write the report to this path.
         #[arg(long)]
@@ -269,13 +271,14 @@ fn emit(
     let json = to_json(card);
     let md = to_markdown(card);
     let sarif = sc_sarif::to_sarif(card);
+    let html = to_html(card);
     let mut code = match status {
         RunStatus::Passed => 0,
         RunStatus::GateFailed => 1,
         RunStatus::AnalyzerError => 2,
     };
     if let Some(path) = out {
-        if let Err(err) = write_reports(format, path, &json, &md, &sarif) {
+        if let Err(err) = write_reports(format, path, &json, &md, &sarif, &html) {
             let _ = writeln!(io::stderr(), "sc: failed to write report: {err}");
             code = 2;
         }
@@ -283,6 +286,9 @@ fn emit(
     let body = match format {
         "md" => md,
         "sarif" => sarif,
+        // HTML to a terminal is noise; `all` keeps JSON+Markdown on stdout
+        // and still writes the .html sibling when --out is set.
+        "html" => html,
         "all" => format!("{json}\n{md}"),
         _ => json,
     };
@@ -290,7 +296,14 @@ fn emit(
     code
 }
 
-fn write_reports(format: &str, path: &Path, json: &str, md: &str, sarif: &str) -> io::Result<()> {
+fn write_reports(
+    format: &str,
+    path: &Path,
+    json: &str,
+    md: &str,
+    sarif: &str,
+    html: &str,
+) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent)?;
@@ -299,10 +312,12 @@ fn write_reports(format: &str, path: &Path, json: &str, md: &str, sarif: &str) -
     match format {
         "md" => fs::write(path, format!("{md}\n")),
         "sarif" => fs::write(path, format!("{sarif}\n")),
+        "html" => fs::write(path, format!("{html}\n")),
         "all" => {
             fs::write(json_target(path), format!("{json}\n"))?;
             fs::write(md_target(path), format!("{md}\n"))?;
-            fs::write(sarif_target(path), format!("{sarif}\n"))
+            fs::write(sarif_target(path), format!("{sarif}\n"))?;
+            fs::write(html_target(path), format!("{html}\n"))
         }
         _ => fs::write(path, format!("{json}\n")),
     }
@@ -310,6 +325,13 @@ fn write_reports(format: &str, path: &Path, json: &str, md: &str, sarif: &str) -
 
 fn sarif_target(path: &Path) -> PathBuf {
     path.with_extension("sarif")
+}
+
+fn html_target(path: &Path) -> PathBuf {
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("html") => path.to_path_buf(),
+        _ => path.with_extension("html"),
+    }
 }
 
 fn json_target(path: &Path) -> PathBuf {

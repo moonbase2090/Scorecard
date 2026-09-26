@@ -332,3 +332,62 @@ fn missing_path_exits_2() {
     assert!(rules(&card).contains(&"engine.unavailable"));
 }
 
+fn analyze_raw(args: &[&str]) -> (i32, String, String) {
+    let _guard = FIXTURE_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+    let output = Command::new(env!("CARGO_BIN_EXE_sc"))
+        .current_dir(workspace())
+        .arg("analyze")
+        .args(args)
+        .output()
+        .expect("spawn sc");
+    let code = output.status.code().unwrap_or(101);
+    (
+        code,
+        String::from_utf8_lossy(&output.stdout).to_string(),
+        String::from_utf8_lossy(&output.stderr).to_string(),
+    )
+}
+
+#[test]
+fn html_format_writes_a_self_contained_report() {
+    let out = std::env::temp_dir().join(format!("sc-report-{}.html", std::process::id()));
+    let out_s = out.to_string_lossy().to_string();
+    let (code, stdout, stderr) = analyze_raw(&[
+        "testdata/good_crate",
+        "--format",
+        "html",
+        "--out",
+        &out_s,
+    ]);
+    assert_eq!(code, 0, "stderr={stderr}\n{stdout}");
+    assert!(
+        stdout.trim_start().starts_with("<!DOCTYPE html>"),
+        "stdout is not html"
+    );
+    assert!(stdout.contains("PASS"), "missing verdict");
+    assert!(stdout.contains("worst crap"), "missing crap section");
+    let written = std::fs::read_to_string(&out).unwrap();
+    assert_eq!(written.trim(), stdout.trim());
+    for marker in ["unpkg", "cdn.", "http://", "https://"] {
+        assert!(!written.contains(marker), "report fetches {marker}");
+    }
+    let _ = std::fs::remove_file(&out);
+}
+
+#[test]
+fn all_format_writes_an_html_sibling() {
+    let out = std::env::temp_dir().join(format!("sc-all-{}", std::process::id()));
+    let out_s = out.to_string_lossy().to_string();
+    let (code, stdout, stderr) =
+        analyze_raw(&["testdata/good_crate", "--format", "all", "--out", &out_s]);
+    assert_eq!(code, 0, "stderr={stderr}");
+    // stdout stays JSON+Markdown, never HTML.
+    assert!(stdout.trim_start().starts_with('{'));
+    assert!(!stdout.contains("<!DOCTYPE html>"));
+    let html = std::fs::read_to_string(out.with_extension("html")).unwrap();
+    assert!(html.contains("<!DOCTYPE html>"));
+    for ext in ["json", "md", "sarif", "html"] {
+        let _ = std::fs::remove_file(out.with_extension(ext));
+    }
+}
+
