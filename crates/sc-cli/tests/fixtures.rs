@@ -375,7 +375,10 @@ fn pretty_good_crate_matches_the_golden() {
         "180",
     ]);
     assert_eq!(code, 0, "{stderr}");
-    assert_eq!(scrub_pretty(&stdout), include_str!("golden/good_crate.pretty.txt"));
+    assert_eq!(
+        scrub_pretty(&stdout),
+        include_str!("golden/good_crate.pretty.txt")
+    );
 }
 
 #[test]
