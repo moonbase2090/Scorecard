@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 use sc_core::Scorecard;
 
 pub fn to_json(card: &Scorecard) -> String {

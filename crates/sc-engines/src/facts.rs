@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};

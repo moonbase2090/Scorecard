@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 //! Deterministic engines. They return findings and never print diagnostics.
 
 mod cargo_test;

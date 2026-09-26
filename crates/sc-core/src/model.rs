@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 //! JSON contract. Field names are part of the stable scorecard schema.
 
 use serde::{Deserialize, Serialize};
