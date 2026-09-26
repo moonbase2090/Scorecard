@@ -3,6 +3,12 @@ name = "sc-mcp"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
 publish = false
 description = "MCP server for sc"
 
@@ -13,4 +19,4 @@ path = "src/main.rs"
 [dependencies]
 sc-core = { path = "../sc-core" }
 sc-engines = { path = "../sc-engines" }
-serde_json = "1"
+serde_json.workspace = true
