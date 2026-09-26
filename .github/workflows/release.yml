@@ -5,9 +5,18 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   apple:
     runs-on: macos-14
+    permissions:
+      actions: write
     outputs:
       signed: ${{ steps.package.outputs.signed }}
     steps:
@@ -31,11 +40,15 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: apple
-          path: dist/*
+          path: |
+            dist/*.tar.gz
+            dist/*.dmg
           if-no-files-found: error
 
   linux:
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
     strategy:
       fail-fast: false
       matrix:
@@ -62,7 +75,7 @@ jobs:
           triple="${{ matrix.target }}"
           src="target/${triple}/release"
           if [ "$triple" = "x86_64-unknown-linux-gnu" ]; then
-            "$src/sc" --version | grep -qx "$ver"
+            "$src/sc" --version | grep -qx "sc $ver"
             "$src/sc-mcp" --version | grep -qx "$ver"
           else
             file "$src/sc" | grep -q 'ARM aarch64'
@@ -75,7 +88,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: linux-${{ matrix.target }}
-          path: dist/*
+          path: dist/*.tar.gz
           if-no-files-found: error
 
   publish:
@@ -84,6 +97,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/download-artifact@v4
         with:
