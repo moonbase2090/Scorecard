@@ -781,7 +781,7 @@ dependencies = [
  "proc-macro2",
  "sc-core",
  "serde",
- "syn 2.0.119",
+ "syn 3.0.6",
 ]
 
 [[package]]
