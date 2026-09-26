@@ -8,7 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Cargo workspaces are scored from each member's `src`, not only a top-level `src`.
 - The private-key check no longer flags the line that defines the PEM markers.
-- Coverage names match a generic function and a trait method to the syn symbol. This repo's `analyzer.toml` sets the dogfood CRAP threshold to 420.
+- Coverage names match a generic function and a trait method to the syn symbol.
+- Dogfood uses the default CRAP threshold of 30 again. `mutation::execute` is tested with a fake cargo runner, and the other functions that were over 30 are covered or split except where pull request #21 already split `analyze_rust`.
 
 ## [0.1.0]
 

@@ -188,6 +188,7 @@ fn pyproject_mentions_pytest(root: &Path) -> bool {
         .unwrap_or(false)
 }
 
+#[inline(never)]
 fn run_pytest(
     root: &Path,
     deadline: Instant,
@@ -669,6 +670,7 @@ fn shell(
     run_cmd(&mut cmd, timeout)
 }
 
+#[inline(never)]
 fn read_coverage(
     root: &Path,
     functions: &[sc_graph::FunctionInfo],
@@ -785,6 +787,62 @@ fn error_finding(id: &str, rule: &str, engine: &str, message: String, action: &s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_pytest_json_coverage_for_a_function() {
+        let root = std::env::temp_dir().join(format!("sc-py-cov-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join(".sc/coverage")).unwrap();
+        std::fs::write(
+            root.join(".sc/coverage/pytest.json"),
+            r#"{"files":{"src/app.py":{"executed_lines":[1,2],"missing_lines":[3]}},"totals":{"percent_covered":66.0}}"#,
+        )
+        .unwrap();
+        let functions = vec![sc_graph::FunctionInfo {
+            file: "src/app.py".into(),
+            symbol: "choose".into(),
+            span: sc_core::Span {
+                start_line: 1,
+                start_col: 1,
+                end_line: 3,
+                end_col: 1,
+            },
+            cc: 2,
+        }];
+        let data = read_coverage(&root, &functions).unwrap();
+        assert_eq!(data.functions.len(), 1);
+        assert!(data.functions[0].coverage > 0.5);
+        assert!(read_coverage(&root.join("missing"), &functions).is_none());
+        std::fs::create_dir_all(root.join("tests")).unwrap();
+        std::fs::write(
+            root.join("tests/test_ok.py"),
+            "def test_ok():\n    assert True\n",
+        )
+        .unwrap();
+        let mut findings = Vec::new();
+        let mut runs = Vec::new();
+        let mut ran = Vec::new();
+        let mut skipped = Vec::new();
+        let empty = root.join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        let _ = run_pytest(
+            &empty,
+            std::time::Instant::now() + std::time::Duration::from_secs(5),
+            &mut findings,
+            &mut runs,
+            &mut ran,
+            &mut skipped,
+        );
+        let _ = run_pytest(
+            &root,
+            std::time::Instant::now() + std::time::Duration::from_secs(20),
+            &mut findings,
+            &mut runs,
+            &mut ran,
+            &mut skipped,
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn reads_third_party_imports_and_declared_deps() {

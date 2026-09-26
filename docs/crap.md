@@ -6,7 +6,7 @@ Cyclomatic complexity, not cognitive. For each function:
 CRAP(m) = CC(m)^2 * (1 - cov(m))^3 + CC(m)
 ```
 
-`cov` is that function's line coverage, in `0..1`. The default threshold is 30 (`gates.crap_threshold` in `analyzer.toml`). A score equal to the threshold passes. Only a score above it fails the `crap` gate (`crap.over_threshold`). This repository commits `analyzer.toml` with a higher threshold so dogfood can score `crates/*/src` without pretending those functions are under 30.
+`cov` is that function's line coverage, in `0..1`. The default threshold is 30 (`gates.crap_threshold` in `analyzer.toml`). A score equal to the threshold passes. Only a score above it fails the `crap` gate (`crap.over_threshold`). This repository's `analyzer.toml` keeps that default.
 
 Coverage needed to stay at or under 30:
 

@@ -15,6 +15,7 @@ pub struct MutationOutcome {
     pub unavailable: Option<String>,
 }
 
+#[inline(never)]
 pub fn run_mutation(
     root: &Path,
     mode: &str,
@@ -67,6 +68,17 @@ fn execute(
     max_mutants: u32,
     budget: Duration,
 ) -> MutationOutcome {
+    execute_with(root, patch, max_mutants, budget, cargo)
+}
+
+#[inline(never)]
+fn execute_with(
+    root: &Path,
+    patch: Option<&Path>,
+    max_mutants: u32,
+    budget: Duration,
+    mut run: impl FnMut(&Path, &[String], Duration) -> Result<crate::command::Captured, CommandError>,
+) -> MutationOutcome {
     let deadline = Instant::now() + budget;
     let left = match crate::command::budget_left(deadline) {
         Ok(left) => left,
@@ -77,16 +89,10 @@ fn execute(
         args.push("--in-diff".into());
         args.push(patch.to_string_lossy().to_string());
     }
-    let list = cargo(root, &list_args(&args), left.min(Duration::from_secs(30)));
-    let listed = match list {
-        Ok(captured) if captured.status.success() => parse_list_count(&captured.stdout),
-        Ok(captured) if tool_missing(&captured.stderr) || tool_missing(&captured.stdout) => {
-            return unavailable_outcome("cargo-mutants is not installed");
-        }
-        Ok(_) => 0,
-        Err(CommandError::NotFound) => return unavailable_outcome("cargo is not installed"),
-        Err(CommandError::Timeout) => return unavailable_outcome("cargo mutants --list timed out"),
-        Err(CommandError::Spawn(err)) => return unavailable_outcome(&err),
+    let list = run(root, &list_args(&args), left.min(Duration::from_secs(30)));
+    let listed = match interpret_list(list) {
+        Ok(count) => count,
+        Err(outcome) => return outcome,
     };
     if listed > max_mutants as usize {
         return unavailable_outcome(&format!(
@@ -97,7 +103,31 @@ fn execute(
         Ok(left) => left,
         Err(_) => return unavailable_outcome("mutation budget exhausted"),
     };
-    match cargo(root, &args, left) {
+    finish_mutants(root, run(root, &args, left))
+}
+
+#[inline(never)]
+fn interpret_list(
+    list: Result<crate::command::Captured, CommandError>,
+) -> Result<usize, MutationOutcome> {
+    match list {
+        Ok(captured) if captured.status.success() => Ok(parse_list_count(&captured.stdout)),
+        Ok(captured) if tool_missing(&captured.stderr) || tool_missing(&captured.stdout) => {
+            Err(unavailable_outcome("cargo-mutants is not installed"))
+        }
+        Ok(_) => Ok(0),
+        Err(CommandError::NotFound) => Err(unavailable_outcome("cargo is not installed")),
+        Err(CommandError::Timeout) => Err(unavailable_outcome("cargo mutants --list timed out")),
+        Err(CommandError::Spawn(err)) => Err(unavailable_outcome(&err)),
+    }
+}
+
+#[inline(never)]
+fn finish_mutants(
+    root: &Path,
+    ran: Result<crate::command::Captured, CommandError>,
+) -> MutationOutcome {
+    match ran {
         Ok(captured) if tool_missing(&captured.stderr) || tool_missing(&captured.stdout) => {
             unavailable_outcome("cargo-mutants is not installed")
         }
@@ -292,5 +322,103 @@ mod tests {
         assert_eq!(outcome.section.timeout, 1);
         assert_eq!(outcome.findings[0].rule, "mutation.survivor");
         assert!((outcome.section.score.unwrap() - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn off_skips_and_diff_without_a_base_is_unavailable() {
+        let root = Path::new(".");
+        let off = run_mutation(root, "off", None, 1, Duration::from_secs(1));
+        assert!(!off.ran);
+        assert_eq!(off.section.status, "skipped");
+        let missing = run_mutation(root, "diff", None, 1, Duration::from_secs(1));
+        assert!(missing.unavailable.unwrap().contains("base"));
+    }
+
+    fn captured(ok: bool, stdout: &str, stderr: &str) -> crate::command::Captured {
+        let status = if ok {
+            std::process::Command::new("true").status().unwrap()
+        } else {
+            std::process::Command::new("false").status().unwrap()
+        };
+        crate::command::Captured {
+            status,
+            stdout: stdout.into(),
+            stderr: stderr.into(),
+            elapsed: Duration::from_millis(1),
+        }
+    }
+
+    #[test]
+    fn execute_reports_a_survivor_from_a_fake_cargo() {
+        let root = std::env::temp_dir().join(format!("sc-mut-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("mutants.out")).unwrap();
+        std::fs::write(
+            root.join("mutants.out/outcomes.json"),
+            r#"[{"summary":"missed","scenario":{"summary":"flip","file":"src/lib.rs"}}]"#,
+        )
+        .unwrap();
+        let mut calls = 0;
+        let outcome = execute_with(&root, None, 10, Duration::from_secs(5), |_, args, _| {
+            calls += 1;
+            if args.iter().any(|arg| arg == "--list") {
+                Ok(captured(true, "[{}]", ""))
+            } else {
+                Ok(captured(true, "", ""))
+            }
+        });
+        assert!(calls >= 2);
+        assert_eq!(outcome.section.survived, 1);
+        assert_eq!(outcome.findings[0].rule, "mutation.survivor");
+        let too_many = execute_with(&root, None, 0, Duration::from_secs(5), |_, args, _| {
+            if args.iter().any(|arg| arg == "--list") {
+                Ok(captured(true, "[{},{}]", ""))
+            } else {
+                Ok(captured(true, "", ""))
+            }
+        });
+        assert_eq!(too_many.section.status, "unavailable");
+        let missing = execute_with(&root, None, 10, Duration::from_secs(5), |_, _, _| {
+            Ok(captured(false, "", "no such command: mutants"))
+        });
+        assert!(missing.unavailable.unwrap().contains("not installed"));
+        let timed = execute_with(&root, None, 10, Duration::ZERO, |_, _, _| {
+            Err(CommandError::Timeout)
+        });
+        assert_eq!(timed.section.status, "unavailable");
+        let patch = root.join("change.diff");
+        std::fs::write(&patch, "diff\n").unwrap();
+        let mut saw_diff = false;
+        let ran_timeout = execute_with(
+            &root,
+            Some(&patch),
+            10,
+            Duration::from_secs(5),
+            |_, args, _| {
+                if args.iter().any(|arg| arg == "--in-diff") {
+                    saw_diff = true;
+                }
+                if args.iter().any(|arg| arg == "--list") {
+                    Ok(captured(true, "[]", ""))
+                } else {
+                    Err(CommandError::Timeout)
+                }
+            },
+        );
+        assert!(saw_diff);
+        assert_eq!(ran_timeout.section.status, "timeout");
+        let missing_cargo = execute_with(&root, None, 10, Duration::from_secs(5), |_, _, _| {
+            Err(CommandError::NotFound)
+        });
+        assert!(missing_cargo.unavailable.unwrap().contains("cargo"));
+        let listed_failed = execute_with(&root, None, 10, Duration::from_secs(5), |_, _, _| {
+            Ok(captured(false, "", "build failed"))
+        });
+        assert_eq!(listed_failed.section.status, "ran");
+        let spawned = execute_with(&root, None, 10, Duration::from_secs(5), |_, _, _| {
+            Err(CommandError::Spawn("nope".into()))
+        });
+        assert!(spawned.unavailable.unwrap().contains("nope"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -155,6 +155,10 @@ pub fn normalize_demangled(raw: &str) -> String {
                 return format!("{ty}::{method}");
             }
         }
+        if let Some((ty, method)) = rest.split_once(">::") {
+            let ty = ty.split('<').next().unwrap_or(ty).trim_end_matches("::");
+            return format!("{ty}::{method}");
+        }
     }
     // `evaluate::<python::run>` is still `evaluate`. Deleting the brackets
     // used to glue the type arguments on as extra path segments.
@@ -243,6 +247,17 @@ mod tests {
         let name = normalize_demangled(raw);
         assert!(
             symbol_matches(&name, "complexity::CcVisitor::visit_expr"),
+            "full={full} norm={name}"
+        );
+    }
+
+    #[test]
+    fn pack_method_matches_the_syn_symbol() {
+        let raw = "_RNvMNtCsh9m6iVWrboU_10sc_engines4packNtB2_6PackId6as_str";
+        let full = rustc_demangle::demangle(raw).to_string();
+        let name = normalize_demangled(raw);
+        assert!(
+            symbol_matches(&name, "pack::PackId::as_str"),
             "full={full} norm={name}"
         );
     }

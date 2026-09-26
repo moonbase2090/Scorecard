@@ -15,6 +15,11 @@ pub fn run() -> i32 {
             return 2;
         }
     };
+    run_at(&home)
+}
+
+#[inline(never)]
+fn run_at(home: &Path) -> i32 {
     let mut lines = Vec::new();
     for rel in [
         ".grok/skills/scorecard",
@@ -33,7 +38,7 @@ pub fn run() -> i32 {
     }
     match mcp_bin() {
         Some(bin) => {
-            if let Err(err) = register_mcp(&home, &bin, &mut lines) {
+            if let Err(err) = register_mcp(home, &bin, &mut lines) {
                 eprintln!("mcp: {err}");
                 return 2;
             }
@@ -55,6 +60,7 @@ fn write_skill(dir: &Path) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+#[inline(never)]
 fn register_mcp(home: &Path, bin: &Path, lines: &mut Vec<String>) -> Result<(), String> {
     let command = bin.display().to_string();
     let grok = home.join(".grok/config.toml");
@@ -94,6 +100,7 @@ fn append_grok(text: &str, command: &str) -> String {
     out
 }
 
+#[inline(never)]
 fn merge_mcp_json(path: &Path, command: &str) -> Result<String, String> {
     if !path.is_file() {
         let body = format!(
@@ -196,6 +203,7 @@ fn json_escape(text: &str) -> String {
     text.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+#[inline(never)]
 fn mcp_bin() -> Option<PathBuf> {
     let name = "sc-mcp";
     if let Some(path) = which(name) {
@@ -270,5 +278,36 @@ mod tests {
         let next = insert_mcp_server(text, "/bin/sc-mcp").unwrap();
         let value: serde_json::Value = serde_json::from_str(&next).unwrap();
         assert_eq!(value["mcpServers"]["sc"]["command"], "/bin/sc-mcp");
+    }
+
+    #[test]
+    fn setup_writes_skills_and_mcp_files_under_a_temp_home() {
+        let home = std::env::temp_dir().join(format!("sc-setup-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&home);
+        fs::create_dir_all(&home).unwrap();
+        assert_eq!(run_at(&home), 0);
+        assert!(home.join(".grok/skills/scorecard/SKILL.md").is_file());
+        let cursor = home.join(".cursor/mcp.json");
+        if cursor.is_file() {
+            let text = fs::read_to_string(&cursor).unwrap();
+            assert!(text.contains("sc"));
+        }
+        let bin = PathBuf::from("/bin/sh");
+        let mut lines = Vec::new();
+        register_mcp(&home, &bin, &mut lines).unwrap();
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("already registered") || line.contains("mcp")));
+        let created = home.join("fresh.json");
+        assert_eq!(
+            merge_mcp_json(&created, "/bin/sc-mcp").unwrap(),
+            "registered"
+        );
+        assert_eq!(
+            merge_mcp_json(&created, "/bin/sc-mcp").unwrap(),
+            "already registered"
+        );
+        let _ = mcp_bin();
+        let _ = fs::remove_dir_all(&home);
     }
 }

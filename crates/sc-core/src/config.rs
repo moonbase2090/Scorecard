@@ -218,8 +218,8 @@ mod tests {
     fn repo_dogfood_config_is_explicit() {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../analyzer.toml");
         let config = load_config_file(Some(&path)).unwrap();
-        assert_eq!(config.gates.crap_threshold, 420);
-        assert_eq!(config.gates.new_fn_untested_cc, 21);
+        assert_eq!(config.gates.crap_threshold, 30);
+        assert_eq!(config.gates.new_fn_untested_cc, 15);
         assert!(config.gates.fail_on.iter().any(|gate| gate == "crap"));
     }
 
