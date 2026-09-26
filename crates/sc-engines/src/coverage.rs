@@ -146,7 +146,20 @@ fn as_i64(value: &Value) -> Option<i64> {
 
 pub fn normalize_demangled(raw: &str) -> String {
     let demangled = rustc_demangle::demangle(raw).to_string();
-    strip_disambiguators(&demangled).replace(['<', '>'], "")
+    let stripped = strip_disambiguators(&demangled);
+    // `<CcVisitor as Visit>::visit_expr` is the syn symbol `CcVisitor::visit_expr`.
+    if let Some(rest) = stripped.strip_prefix('<') {
+        if let Some((ty, after)) = rest.split_once(" as ") {
+            if let Some((_, method)) = after.split_once(">::") {
+                let ty = ty.split('<').next().unwrap_or(ty).trim_end_matches("::");
+                return format!("{ty}::{method}");
+            }
+        }
+    }
+    // `evaluate::<python::run>` is still `evaluate`. Deleting the brackets
+    // used to glue the type arguments on as extra path segments.
+    let cut = stripped.split('<').next().unwrap_or(&stripped);
+    cut.trim_end_matches("::").to_string()
 }
 
 fn strip_disambiguators(name: &str) -> String {
@@ -221,5 +234,24 @@ mod tests {
     fn method_path_matches_exactly() {
         assert!(symbol_matches("crate::Foo::bar", "Foo::bar"));
         assert!(!symbol_matches("crate::Foo::bar", "bar"));
+    }
+
+    #[test]
+    fn trait_method_demangles_to_the_syn_symbol() {
+        let raw = "_RNvXNtCsgmNkC5cO7tE_8sc_graph10complexityNtB2_9CcVisitorNtNtNtCsjHvgqTPRpCr_3syn3gen5visit5Visit10visit_expr";
+        let full = rustc_demangle::demangle(raw).to_string();
+        let name = normalize_demangled(raw);
+        assert!(
+            symbol_matches(&name, "complexity::CcVisitor::visit_expr"),
+            "full={full} norm={name}"
+        );
+    }
+
+    #[test]
+    fn generic_instantiation_matches_the_base_symbol() {
+        let raw = "_RINvNtCsh9m6iVWrboU_10sc_engines4crap8evaluateNCNvNtB4_6python3run0EB4_";
+        let name = normalize_demangled(raw);
+        assert!(symbol_matches(&name, "crap::evaluate"), "{name}");
+        assert!(!symbol_matches(&name, "evaluate"), "{name}");
     }
 }
