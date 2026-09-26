@@ -89,6 +89,31 @@ cargo install cargo-llvm-cov
 
 On older toolchains the component is named `llvm-tools-preview`. If either tool is missing, `sc` still runs. Function coverage is treated as 0, a `coverage.missing` warning is recorded, and CRAP is still computed. The process exits 2 only when a required gate (`types` or `tests`) cannot run.
 
+## GitHub Action
+
+Run the gate in CI with the composite action (plain `bash` steps, no
+runner-specific features):
+
+```yaml
+- uses: moonbase2090/Scorecard/action@develop
+  with:
+    fail-on: types,tests,crap,secrets,lint
+    format: sarif
+```
+
+| Input      | Default                         | Notes                                    |
+| ---------- | ------------------------------- | ---------------------------------------- |
+| `spec`     | `""`                            | Path to a spec or task file              |
+| `fail-on`  | `types,tests,crap,secrets,lint` | Comma-separated gates                    |
+| `mutation` | `off`                           | `off`, `diff`, or `full`                 |
+| `format`   | `sarif`                         | `json`, `md`, `sarif`, `html`, or `all`  |
+| `diff`     | `""`                            | Git base ref; empty skips `--diff`       |
+
+With `format: sarif` (or `all`) the SARIF report is uploaded via the
+pinned `upload-sarif` step, so findings show up under code scanning.
+Until the first tagged release, pin the action to `@develop` or a full
+commit SHA.
+
 ## More
 
 - [Examples](examples/README.md)
