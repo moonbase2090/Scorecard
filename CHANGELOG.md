@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Cargo workspaces are scored from each member's `src`, not only a top-level `src`.
 - The private-key check no longer flags the line that defines the PEM markers.
+- Coverage names match a generic function and a trait method to the syn symbol. This repo's `analyzer.toml` sets the dogfood CRAP threshold to 420.
 
 ## [0.1.0]
 
