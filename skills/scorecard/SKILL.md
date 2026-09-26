@@ -16,7 +16,7 @@ From the project root, run `sc analyze --format json`.
 | 1 | A gate failed. Fix findings whose `disposition` is `fix`, then run `sc` again. |
 | 2 | A required tool did not run. Read the message and install that tool. |
 
-A finding with `enforced: false` is reported and does not fail the run. The last report is `.ca/last-scorecard.json`.
+A finding with `enforced: false` is reported and does not fail the run. The last report is `.sc/last-scorecard.json`.
 
 When the MCP server `sc` is connected, call `analyze_diff` for a change and `analyze_paths` for named files. Call `list_findings` and `explain` on that report.
 

@@ -26,7 +26,7 @@ runs:
   steps:
     - name: Install sc
       shell: bash
-      run: cargo install --path crates/ca-cli --locked --force
+      run: cargo install --path crates/sc-cli --locked --force
     - name: Analyze
       shell: bash
       run: |

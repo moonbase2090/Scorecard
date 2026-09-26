@@ -1,0 +1,11 @@
+[package]
+name = "sc-sarif"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "SARIF 2.1.0 export for sc scorecards"
+
+[dependencies]
+sc-core = { path = "../sc-core" }
+serde_json = "1"

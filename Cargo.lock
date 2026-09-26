@@ -74,80 +74,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 
 [[package]]
-name = "ca-cli"
-version = "0.1.0"
-dependencies = [
- "ca-core",
- "ca-engines",
- "ca-sarif",
- "clap",
- "serde_json",
-]
-
-[[package]]
-name = "ca-core"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "toml",
- "uuid",
-]
-
-[[package]]
-name = "ca-engines"
-version = "0.1.0"
-dependencies = [
- "ca-core",
- "ca-graph",
- "ca-llm",
- "rustc-demangle",
- "serde",
- "serde_json",
- "sha2",
-]
-
-[[package]]
-name = "ca-graph"
-version = "0.1.0"
-dependencies = [
- "ca-core",
- "proc-macro2",
- "serde",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "ca-llm"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "ureq",
-]
-
-[[package]]
-name = "ca-mcp"
-version = "0.1.0"
-dependencies = [
- "ca-core",
- "ca-engines",
- "serde_json",
-]
-
-[[package]]
-name = "ca-mutation"
-version = "0.1.0"
-
-[[package]]
-name = "ca-sarif"
-version = "0.1.0"
-dependencies = [
- "ca-core",
- "serde_json",
-]
-
-[[package]]
 name = "cc"
 version = "1.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -615,6 +541,80 @@ name = "rustversion"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
+
+[[package]]
+name = "sc-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "sc-core",
+ "sc-engines",
+ "sc-sarif",
+ "serde_json",
+]
+
+[[package]]
+name = "sc-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "toml",
+ "uuid",
+]
+
+[[package]]
+name = "sc-engines"
+version = "0.1.0"
+dependencies = [
+ "rustc-demangle",
+ "sc-core",
+ "sc-graph",
+ "sc-llm",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "sc-graph"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "sc-core",
+ "serde",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "sc-llm"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
+name = "sc-mcp"
+version = "0.1.0"
+dependencies = [
+ "sc-core",
+ "sc-engines",
+ "serde_json",
+]
+
+[[package]]
+name = "sc-mutation"
+version = "0.1.0"
+
+[[package]]
+name = "sc-sarif"
+version = "0.1.0"
+dependencies = [
+ "sc-core",
+ "serde_json",
+]
 
 [[package]]
 name = "serde"
