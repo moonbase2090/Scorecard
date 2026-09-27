@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The Scorecard action installs the prebuilt release for the runner and uploads an HTML report when the format is `html` or `all`.
 - Document the HTML report, including the flow strip, in the readme and in `docs/html-report.md`.
 - The macOS disk image ships `INSTALL.txt` and a signed `Install Scorecard.pkg` that installs `sc` and `sc-mcp` to `/usr/local/bin`. The same package is a release asset named `sc-v<version>-macos.pkg`.
 
