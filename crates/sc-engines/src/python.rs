@@ -756,6 +756,7 @@ fn note(
         command: command.to_string(),
         exit_code,
         duration_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
+        budget_ms: None,
     });
 }
 

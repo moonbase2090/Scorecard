@@ -865,7 +865,37 @@ fn coverage_phase(
     coverage_enabled: bool,
     state: &mut RustState,
 ) {
-    if !state.tests_pass || !coverage_enabled {
+    if !state.tests_pass {
+        if !state.skipped.iter().any(|engine| engine == "coverage") {
+            state.skipped.push("coverage".into());
+        }
+        let failed_test = state
+            .runs
+            .iter()
+            .rev()
+            .find(|run| run.engine == "tests" && run.exit_code != Some(0));
+        let reason = match failed_test {
+            Some(run) => format!(
+                "coverage skipped: tests gate failed (test command exit code {})",
+                run.exit_code
+                    .map(|code| code.to_string())
+                    .unwrap_or_else(|| "unavailable".into())
+            ),
+            None => format!(
+                "coverage skipped: tests gate failed ({})",
+                if state.tests_reason.is_empty() {
+                    "test command was not run"
+                } else {
+                    &state.tests_reason
+                }
+            ),
+        };
+        state
+            .findings
+            .push(crate::coverage::missing_finding(&reason));
+        return;
+    }
+    if !coverage_enabled {
         if !state.skipped.iter().any(|engine| engine == "coverage") {
             state.skipped.push("coverage".into());
         }
@@ -1196,7 +1226,22 @@ fn note_run(
         command: command.to_string(),
         exit_code,
         duration_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
+        budget_ms: None,
     });
+}
+
+fn note_run_with_budget(
+    runs: &mut Vec<RunRecord>,
+    engine: &str,
+    command: &str,
+    exit_code: Option<i32>,
+    elapsed: Duration,
+    budget: Duration,
+) {
+    note_run(runs, engine, command, exit_code, elapsed);
+    if let Some(run) = runs.last_mut() {
+        run.budget_ms = Some(u64::try_from(budget.as_millis()).unwrap_or(u64::MAX));
+    }
 }
 
 fn run_test_set(
@@ -1429,6 +1474,7 @@ fn run_coverage(
     let manifest_s = manifest.to_string_lossy().to_string();
     let out_s = out_path.to_string_lossy().to_string();
     let started = Instant::now();
+    let budget = deadline.saturating_duration_since(started);
     let captured = run_cargo(
         root,
         &[
@@ -1442,19 +1488,21 @@ fn run_coverage(
         deadline,
     );
     match &captured {
-        Ok(captured) => note_run(
+        Ok(captured) => note_run_with_budget(
             runs,
             "coverage",
             "cargo llvm-cov --json",
             captured.status.code(),
             captured.elapsed,
+            budget,
         ),
-        Err(_) => note_run(
+        Err(_) => note_run_with_budget(
             runs,
             "coverage",
             "cargo llvm-cov --json",
             None,
             started.elapsed(),
+            budget,
         ),
     }
     let captured = captured.map_err(|err| err.message("cargo llvm-cov"))?;
