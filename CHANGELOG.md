@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- The readme, `docs/config.md`, and `analyzer.toml.example` say where `analyzer.toml` goes: the root of the analyzed directory (usually the repo root), then `~/.config/sc/analyzer.toml`, with no parent or sub-directory search.
 - The HTML report summary grid keeps the git SHA inside its own cell. A long value wraps or clips instead of painting over the tests column.
 - `sca.hallucinated_import` treats workspace member package names and their dependencies as declared. A path dep written with a hyphen matches the underscore name used in source.
 - A report-only run (`--fail-on ""` with failing gates) no longer reads as a clean pass anywhere. The HTML flow strip and page title say `report only`, the markdown verdict line adds the failing count, and the terminal shows a `REPORT ONLY` banner and `exit 0: no enforced gate failed`. A run whose enforced gates pass while an advisory gate such as `sca` fails stays `PASS`, with a note such as `1 advisory gate failing`, instead of switching to `REPORT ONLY`.
