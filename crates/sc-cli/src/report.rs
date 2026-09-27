@@ -66,6 +66,9 @@ summary{cursor:pointer;color:var(--accent);font-size:12px}
 .group>summary{font-size:14px;color:var(--ink);padding:6px 0}
 .group>summary .pill{margin-left:4px}
 .more{color:var(--dim);font-size:12.5px;margin:10px 0 0}
+.log pre{background:#04080f;border:1px solid #1b2a4e;border-radius:10px;
+padding:8px 12px;margin:6px 0 0;font-family:ui-monospace,Menlo,monospace;
+font-size:11.5px;max-height:320px;overflow:auto;white-space:pre}
 .pathlist{margin-top:6px;max-height:240px;overflow:auto}
 .pathlist div{margin:1px 0}
 .pathlist code{word-break:normal}
@@ -650,6 +653,18 @@ fn findings(out: &mut String, card: &Scorecard) {
     }
 }
 
+/// The raw command output a finding carries in `evidence.log` (lint and
+/// test failures). The message is the first useful line; the log sits
+/// behind a disclosure so the compile preamble never leads the card.
+pub(crate) fn raw_log(finding: &sc_core::Finding) -> Option<&str> {
+    finding
+        .evidence
+        .get("log")
+        .and_then(|log| log.as_str())
+        .map(str::trim_end)
+        .filter(|log| !log.trim().is_empty())
+}
+
 fn plural(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
@@ -686,6 +701,11 @@ fn finding_card(out: &mut String, finding: &sc_core::Finding, untested: bool) {
     out.push_str("</span></div><p>");
     out.push_str(&esc(&finding.message));
     out.push_str("</p>");
+    if let Some(log) = raw_log(finding) {
+        out.push_str("<details class=\"log\"><summary>full output</summary><pre>");
+        out.push_str(&esc(log));
+        out.push_str("</pre></details>");
+    }
     // Repo-level findings (file ".", no span or symbol) have no location.
     if finding.file != "." || finding.span.is_some() || finding.symbol.is_some() {
         out.push_str("<div style=\"font-size:12px;color:var(--dim)\">");
@@ -990,6 +1010,23 @@ mod tests {
         let html = to_html(&card());
         assert!(html.contains("<span>undeclared deps</span>"));
         assert!(!html.contains("hallucinated imports"));
+    }
+
+    #[test]
+    fn html_puts_the_raw_log_behind_a_disclosure() {
+        let mut c = card();
+        let mut lint = finding("lint.failed", "lint", "error", "src/lib.rs", "chunks_exact");
+        lint.message = "error: using chunks_exact".into();
+        lint.evidence = serde_json::json!({
+            "command": "cargo clippy -- -D warnings",
+            "diagnostic": "error: using chunks_exact",
+            "log": "   Compiling demo v0.1.0\nerror: using chunks_exact <T>\n",
+        });
+        c.findings.push(lint);
+        let html = to_html(&c);
+        assert!(html.contains("<p>error: using chunks_exact</p><details class=\"log\"><summary>full output</summary><pre>   Compiling demo v0.1.0\nerror: using chunks_exact &lt;T&gt;</pre></details>"));
+        // The CRAP card has no log, so exactly one disclosure.
+        assert_eq!(html.matches("<details class=\"log\">").count(), 1);
     }
 
     #[test]
