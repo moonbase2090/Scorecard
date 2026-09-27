@@ -66,6 +66,8 @@ summary{cursor:pointer;color:var(--accent);font-size:12px}
 .group>summary{font-size:14px;color:var(--ink);padding:6px 0}
 .group>summary .pill{margin-left:4px}
 .more{color:var(--dim);font-size:12.5px;margin:10px 0 0}
+.fnlist{margin:6px 0 0;padding-left:18px;font-size:12.5px;color:var(--dim)}
+.fnlist .more{list-style:none;margin-left:-18px}
 .log pre{background:#04080f;border:1px solid #1b2a4e;border-radius:10px;
 padding:8px 12px;margin:6px 0 0;font-family:ui-monospace,Menlo,monospace;
 font-size:11.5px;max-height:320px;overflow:auto;white-space:pre}
@@ -707,6 +709,53 @@ fn findings(out: &mut String, card: &Scorecard) {
     }
 }
 
+/// Functions shown per finding from `evidence.functions`.
+const FUNCTION_LIMIT: usize = 20;
+
+/// The functions a finding lists in `evidence.functions` (for example the
+/// functions `coverage.unmatched` found no coverage record for), as
+/// ("file:line", symbol) pairs, plus how many more exist beyond what is
+/// shown. The engine caps the list, so `evidence.unmatched` can give the
+/// real total. Empty when the finding already names its one function.
+pub(crate) fn evidence_functions(finding: &sc_core::Finding) -> (Vec<(String, String)>, usize) {
+    let Some(items) = finding
+        .evidence
+        .get("functions")
+        .and_then(|functions| functions.as_array())
+    else {
+        return (Vec::new(), 0);
+    };
+    let listed: Vec<(String, String)> = items
+        .iter()
+        .filter_map(|item| {
+            let file = item.get("file")?.as_str()?;
+            let symbol = item.get("symbol")?.as_str()?;
+            let line = item
+                .get("line")
+                .or_else(|| item.get("span").and_then(|span| span.get("start_line")))
+                .and_then(|line| line.as_u64());
+            let location = match line {
+                Some(line) => format!("{file}:{line}"),
+                None => file.to_string(),
+            };
+            Some((location, symbol.to_string()))
+        })
+        .collect();
+    if listed.len() == 1 && finding.symbol.as_deref() == Some(listed[0].1.as_str()) {
+        return (Vec::new(), 0);
+    }
+    let total = finding
+        .evidence
+        .get("unmatched")
+        .and_then(|count| count.as_u64())
+        .map(|count| count as usize)
+        .unwrap_or(listed.len())
+        .max(listed.len());
+    let shown: Vec<_> = listed.into_iter().take(FUNCTION_LIMIT).collect();
+    let more = total - shown.len();
+    (shown, more)
+}
+
 /// The raw command output a finding carries in `evidence.log` (lint and
 /// test failures). The message is the first useful line; the log sits
 /// behind a disclosure so the compile preamble never leads the card.
@@ -755,6 +804,21 @@ fn finding_card(out: &mut String, finding: &sc_core::Finding, untested: bool) {
     out.push_str("</span></div><p>");
     out.push_str(&esc(&finding.message));
     out.push_str("</p>");
+    let (functions, more) = evidence_functions(finding);
+    if !functions.is_empty() {
+        out.push_str("<ul class=\"fnlist\">");
+        for (location, symbol) in &functions {
+            out.push_str("<li><code>");
+            out.push_str(&esc(location));
+            out.push_str("</code> · <code>");
+            out.push_str(&esc(symbol));
+            out.push_str("</code></li>");
+        }
+        if more > 0 {
+            out.push_str(&format!("<li class=\"more\">{more} more</li>"));
+        }
+        out.push_str("</ul>");
+    }
     if let Some(log) = raw_log(finding) {
         out.push_str("<details class=\"log\"><summary>full output</summary><pre>");
         out.push_str(&esc(log));
@@ -1097,6 +1161,41 @@ mod tests {
         assert!(html.contains("diff scope: 1 function over threshold in this diff. The tree-wide count is on a tree-scope run (sc analyze without --diff)."));
         c.scope.mode = "tree".into();
         assert!(!to_html(&c).contains("diff scope:"));
+    }
+
+    #[test]
+    fn html_lists_evidence_functions_with_the_real_total() {
+        let mut c = card();
+        let mut unmatched = finding("coverage.unmatched", "coverage", "warning", ".", "");
+        unmatched.evidence = serde_json::json!({
+            "unmatched": 25,
+            "functions": [
+                {"file": "src/a.rs", "symbol": "a::run", "line": 12},
+                {"file": "src/b.rs", "symbol": "b<T>::go", "span": {"start_line": 3}},
+                {"file": "src/c.rs", "symbol": "c::plain"},
+            ],
+        });
+        c.findings.push(unmatched);
+        let html = to_html(&c);
+        assert!(html.contains("<ul class=\"fnlist\"><li><code>src/a.rs:12</code> · <code>a::run</code></li><li><code>src/b.rs:3</code> · <code>b&lt;T&gt;::go</code></li><li><code>src/c.rs</code> · <code>c::plain</code></li><li class=\"more\">22 more</li></ul>"));
+    }
+
+    #[test]
+    fn html_skips_the_list_when_the_finding_names_its_one_function() {
+        let mut c = card();
+        let mut one = finding(
+            "coverage.unmatched",
+            "coverage",
+            "warning",
+            "src/a.rs",
+            "a::run",
+        );
+        one.evidence = serde_json::json!({
+            "unmatched": 1,
+            "functions": [{"file": "src/a.rs", "symbol": "a::run", "line": 12}],
+        });
+        c.findings.push(one);
+        assert!(!to_html(&c).contains("class=\"fnlist\""));
     }
 
     #[test]
