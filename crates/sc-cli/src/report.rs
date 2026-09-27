@@ -147,7 +147,11 @@ fn hero(out: &mut String, card: &Scorecard) {
         out.push_str(&format!(
             " · {} {}, none enforced",
             failing,
-            if failing == 1 { "failing gate" } else { "failing gates" }
+            if failing == 1 {
+                "failing gate"
+            } else {
+                "failing gates"
+            }
         ));
     }
     out.push_str("</div></div></div><div class=\"meta\">");
@@ -270,13 +274,7 @@ fn pipeline(out: &mut String, card: &Scorecard) {
         card.engines_skipped.len(),
         false,
     );
-    step(
-        out,
-        "gates",
-        &ratio,
-        0,
-        true,
-    );
+    step(out, "gates", &ratio, 0, true);
     out.push_str("<div class=\"sep\">→</div>");
     out.push_str("<div class=\"step");
     if card.verdict == "pass" {
@@ -621,9 +619,7 @@ mod tests {
     fn html_collapses_tree_paths_behind_details() {
         let mut c = card();
         c.scope.mode = "tree".into();
-        c.scope.paths = (0..12)
-            .map(|i| format!("src/module/file{i}.rs"))
-            .collect();
+        c.scope.paths = (0..12).map(|i| format!("src/module/file{i}.rs")).collect();
         let html = to_html(&c);
         assert!(html.contains("12 paths <details>"));
         assert!(html.contains("/<wbr>"));
