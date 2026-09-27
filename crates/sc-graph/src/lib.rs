@@ -28,6 +28,8 @@ pub struct SourceFacts {
     pub imports: Vec<ImportHit>,
     pub perf: Vec<PerfHit>,
     pub items: Vec<PubItem>,
+    /// `mod` declarations and `extern crate` rename targets in this file.
+    pub local_names: Vec<String>,
 }
 
 pub fn inspect_source(text: &str, rel: &str) -> Option<SourceFacts> {
@@ -37,9 +39,10 @@ pub fn inspect_source(text: &str, rel: &str) -> Option<SourceFacts> {
         imports: imports_in_file(&file, rel),
         perf: perf_in_file(&file, rel),
         items: pub_items_in_file(&file, rel),
+        local_names: local_names_in_file(&file),
     })
 }
 pub use discover::{is_excluded, scan, source_files, source_files_under, Scan};
-pub use imports::{imports_in_file, ImportHit};
+pub use imports::{imports_in_file, local_names_in_file, ImportHit};
 pub use perf::{perf_in_file, PerfHit};
 pub use pubs::{pub_items_in_file, PubItem};

@@ -252,6 +252,20 @@ fn fake_dep_warns_on_hallucinated_import() {
 }
 
 #[test]
+fn local_mod_pub_use_is_not_hallucinated() {
+    let (code, card, _, stderr) = analyze(&["testdata/local_mod"]);
+    assert_eq!(code, 0, "stderr={stderr}\ncard={card}");
+    let hallucinated: Vec<_> = card["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|finding| finding["rule"] == "sca.hallucinated_import")
+        .collect();
+    assert!(hallucinated.is_empty(), "{hallucinated:?}");
+    assert_eq!(card["metrics"]["hallucinated_imports"].as_u64().unwrap(), 0);
+}
+
+#[test]
 fn secret_token_fails_the_secrets_gate() {
     let (code, card, _, stderr) = analyze(&["testdata/secret_token"]);
     assert_eq!(code, 1, "stderr={stderr}\ncard={card}");
