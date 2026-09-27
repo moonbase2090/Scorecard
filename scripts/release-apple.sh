@@ -153,18 +153,28 @@ if [ "$signing" = true ]; then
       echo "error: installer p12 import failed (check APPLE_INSTALLER_P12 and APPLE_INSTALLER_PASSWORD)" >&2
       exit 1
     fi
-    # set-key-partition-list only stamps keys already in the keychain, so
-    # this later import needs it re-applied: without the apple-tool
-    # partition, productbuild blocks on an invisible approval prompt and
-    # the Package step hangs until the job is canceled (v0.1.2).
-    security set-key-partition-list -S apple-tool:,apple: -s -k "" "$keychain" >/dev/null
     installer_identity=$(security find-identity -v -p basic "$keychain" | awk -F'"' '/Developer ID Installer/{print $2; exit}')
   fi
   if [ -z "$installer_identity" ]; then
     echo "error: no 'Developer ID Installer' identity (add it to APPLE_CERTIFICATE_P12 or set APPLE_INSTALLER_P12 + APPLE_INSTALLER_PASSWORD); refusing to ship an unsigned pkg" >&2
     exit 1
   fi
+  # set-key-partition-list only stamps keys already in the keychain, so
+  # re-apply it once the Installer identity is resolved: a key imported
+  # after the first call (APPLE_INSTALLER_P12) would otherwise miss the
+  # apple-tool partition and productbuild would block on an invisible
+  # approval prompt, hanging the Package step until canceled (v0.1.2).
+  security set-key-partition-list -S apple-tool:,apple: -s -k "" "$keychain" >/dev/null
 fi
+
+# macOS runners have no `timeout(1)`. Bound productbuild with python3
+# (already required for dmgbuild) so a future stall fails the step in
+# 5 minutes with a traceback instead of hanging to cancel.
+run_with_timeout() {
+  secs=$1
+  shift
+  python3 -c 'import subprocess, sys; subprocess.run(sys.argv[2:], check=True, timeout=int(sys.argv[1]))' "$secs" "$@"
+}
 
 # Build Install Scorecard.pkg: the universal binaries go to
 # /usr/local/bin under the com.moonbase2090.scorecard identifier.
@@ -177,8 +187,12 @@ pkgbuild --root "$work/pkgroot" --identifier com.moonbase2090.scorecard \
 sed "s/@VER@/$ver/g" "$root/packaging/distribution.xml.in" > "$work/distribution.xml"
 pkg="$dist/sc-v${ver}-macos.pkg"
 if [ -n "$installer_identity" ]; then
-  productbuild --distribution "$work/distribution.xml" --package-path "$work" \
+  echo "installer identity: $installer_identity"
+  security find-identity -v -p basic "$keychain" | head -n 5
+  echo "productbuild --sign starting (5-minute guard)"
+  run_with_timeout 300 productbuild --distribution "$work/distribution.xml" --package-path "$work" \
     --sign "$installer_identity" "$pkg"
+  echo "productbuild done: $pkg"
 else
   echo "warning: building an unsigned pkg (no installer identity; local dry-run only, never ship this)" >&2
   productbuild --distribution "$work/distribution.xml" --package-path "$work" "$pkg"
