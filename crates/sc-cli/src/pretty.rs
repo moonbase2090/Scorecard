@@ -4,6 +4,7 @@
 //! Color follows `NO_COLOR`, `CLICOLOR_FORCE`, and whether stdout is a TTY.
 //! The plain style uses ASCII so a captured transcript stays readable.
 
+use crate::report::Outcome;
 use anstyle::{AnsiColor, Color, Style};
 use sc_core::{CrapFunction, Finding, Gate, Scorecard};
 
@@ -92,10 +93,17 @@ fn push_header(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usi
 }
 
 fn push_banner(out: &mut String, card: &Scorecard, opts: &PrettyOpts) {
-    let pass = card.verdict == "pass";
-    let word = if pass { "PASS" } else { "FAIL" };
-    let style = if pass { green() } else { red() };
+    let outcome = Outcome::of(card);
+    let (word, style) = match outcome {
+        Outcome::Fail => ("FAIL", red()),
+        Outcome::ReportOnly(_) => ("REPORT ONLY", blue()),
+        Outcome::Pass | Outcome::Advisory(_) => ("PASS", green()),
+    };
     out.push_str(&paint(opts.color, style.bold(), word));
+    if let Some(note) = outcome.note() {
+        out.push_str("  ");
+        out.push_str(&note);
+    }
     out.push('\n');
     out.push('\n');
 }
@@ -236,12 +244,16 @@ fn push_footer(out: &mut String, card: &Scorecard, opts: &PrettyOpts) {
         out.push_str(path);
         out.push('\n');
     }
-    out.push_str(&exit_line(opts.exit_code));
+    out.push_str(&exit_line(
+        opts.exit_code,
+        matches!(Outcome::of(card), Outcome::ReportOnly(_)),
+    ));
     out.push('\n');
 }
 
-fn exit_line(code: i32) -> String {
+fn exit_line(code: i32, report_only: bool) -> String {
     let meaning = match code {
+        0 if report_only => "no enforced gate failed",
         0 => "gates passed",
         1 => "a gate failed",
         _ => "the analyzer could not finish",
@@ -353,6 +365,10 @@ fn green() -> Style {
     Style::new().fg_color(Some(Color::Ansi(AnsiColor::Green)))
 }
 
+fn blue() -> Style {
+    Style::new().fg_color(Some(Color::Ansi(AnsiColor::Blue)))
+}
+
 fn red() -> Style {
     Style::new().fg_color(Some(Color::Ansi(AnsiColor::Red)))
 }
@@ -434,6 +450,64 @@ mod tests {
         assert!(text.contains("PASS"));
         assert!(!text.contains('\u{1b}'));
         assert!(text.contains("[ok]") || text.contains("(none)"));
+        assert!(text.contains("exit 0: gates passed"));
+    }
+
+    #[test]
+    fn report_only_banner_replaces_pass() {
+        let mut card = Scorecard::skeleton("demo", 30);
+        card.verdict = "pass".into();
+        card.gates.push(Gate {
+            id: "crap".into(),
+            pass: false,
+            enforced: false,
+            reason: Some("1 function over threshold".into()),
+        });
+        let text = to_pretty(
+            &card,
+            &PrettyOpts {
+                color: false,
+                width: 80,
+                version: "0.1.0".into(),
+                report: None,
+                exit_code: 0,
+            },
+        );
+        assert!(text.contains("REPORT ONLY  1 failing gate, none enforced"));
+        assert!(!text.contains("PASS"));
+        assert!(text.contains("exit 0: no enforced gate failed"));
+    }
+
+    #[test]
+    fn advisory_miss_keeps_the_pass_banner() {
+        let mut card = Scorecard::skeleton("demo", 30);
+        card.verdict = "pass".into();
+        card.gates = vec![
+            Gate {
+                id: "types".into(),
+                pass: true,
+                enforced: true,
+                reason: None,
+            },
+            Gate {
+                id: "sca".into(),
+                pass: false,
+                enforced: false,
+                reason: Some("3 undeclared dependencies".into()),
+            },
+        ];
+        let text = to_pretty(
+            &card,
+            &PrettyOpts {
+                color: false,
+                width: 80,
+                version: "0.1.0".into(),
+                report: None,
+                exit_code: 0,
+            },
+        );
+        assert!(text.contains("PASS  1 advisory gate failing"));
+        assert!(!text.contains("REPORT ONLY"));
         assert!(text.contains("exit 0: gates passed"));
     }
 }

@@ -16,7 +16,8 @@ pub fn to_html(card: &Scorecard) -> String {
     );
     out.push_str(&esc(&format!(
         "scorecard: {} — {}",
-        card.repo, card.verdict
+        card.repo,
+        Outcome::of(card).word(card)
     )));
     out.push_str("</title>\n<style>\n");
     out.push_str(CSS);
@@ -114,26 +115,66 @@ font-size:11.5px;overflow-x:auto;white-space:nowrap}
 footer{margin-top:32px;color:var(--dim);font-size:11.5px;text-align:center}
 "#;
 
+/// How a verdict should read, shared by every renderer. Exit code and the
+/// verdict field are untouched; this only picks the words.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Outcome {
+    Fail,
+    /// Every provided gate passed.
+    Pass,
+    /// Enforced gates passed; this many advisory gates (such as `sca`) failed.
+    Advisory(usize),
+    /// No gate was enforced (empty `--fail-on`) and this many failed. Must
+    /// never read as a clean pass.
+    ReportOnly(usize),
+}
+
+impl Outcome {
+    pub(crate) fn of(card: &Scorecard) -> Self {
+        if card.verdict != "pass" {
+            return Outcome::Fail;
+        }
+        let provided: Vec<_> = card.gates.iter().filter(|gate| provided(gate)).collect();
+        let failing = provided.iter().filter(|gate| !gate.pass).count();
+        if failing == 0 {
+            Outcome::Pass
+        } else if provided.iter().any(|gate| gate.enforced) {
+            Outcome::Advisory(failing)
+        } else {
+            Outcome::ReportOnly(failing)
+        }
+    }
+
+    /// "1 failing gate, none enforced" or "1 advisory gate failing".
+    pub(crate) fn note(self) -> Option<String> {
+        let noun = |n: usize| if n == 1 { "gate" } else { "gates" };
+        match self {
+            Outcome::ReportOnly(n) => Some(format!("{n} failing {}, none enforced", noun(n))),
+            Outcome::Advisory(n) => Some(format!("{n} advisory {} failing", noun(n))),
+            Outcome::Fail | Outcome::Pass => None,
+        }
+    }
+
+    /// Verdict word for the page title and the flow strip.
+    fn word(self, card: &Scorecard) -> &str {
+        match self {
+            Outcome::ReportOnly(_) => "report only",
+            _ => &card.verdict,
+        }
+    }
+}
+
 fn hero(out: &mut String, card: &Scorecard) {
-    // A passing verdict with failing gates (empty --fail-on, or advisory
-    // misses) must never read as a clean pass: neutral report-only badge
-    // plus the failing count. Exit code and verdict text are untouched.
-    let failing = card
-        .gates
-        .iter()
-        .filter(|gate| provided(gate) && !gate.pass)
-        .count();
-    let (cls, label) = if card.verdict != "pass" {
-        ("fail", "FAIL".to_string())
-    } else if failing > 0 {
-        ("report", "REPORT ONLY".to_string())
-    } else {
-        ("pass", "PASS".to_string())
+    let outcome = Outcome::of(card);
+    let (cls, label) = match outcome {
+        Outcome::Fail => ("fail", "FAIL"),
+        Outcome::ReportOnly(_) => ("report", "REPORT ONLY"),
+        Outcome::Pass | Outcome::Advisory(_) => ("pass", "PASS"),
     };
     out.push_str("<h1>scorecard</h1>\n<div class=\"card\"><div class=\"hero\">");
     out.push_str(&format!(
         "<span class=\"verdict {cls}\">{}</span>",
-        esc(&label)
+        esc(label)
     ));
     out.push_str("<div><div style=\"font-size:16px;font-weight:700\">");
     out.push_str(&esc(&card.repo));
@@ -144,16 +185,9 @@ fn hero(out: &mut String, card: &Scorecard) {
     out.push_str("</code> · <code>");
     out.push_str(&esc(&card.id));
     out.push_str("</code>");
-    if card.verdict == "pass" && failing > 0 {
-        out.push_str(&format!(
-            " · {} {}, none enforced",
-            failing,
-            if failing == 1 {
-                "failing gate"
-            } else {
-                "failing gates"
-            }
-        ));
+    if let Some(note) = outcome.note() {
+        out.push_str(" · ");
+        out.push_str(&note);
     }
     out.push_str("</div></div></div><div class=\"meta\">");
     meta(out, "git", &git(card));
@@ -260,13 +294,12 @@ fn pipeline(out: &mut String, card: &Scorecard) {
         format!("{passed}/{} pass", provided.len())
     };
     out.push_str("<h2>flow</h2>\n<div class=\"flow\">");
-    step(
-        out,
-        "scope",
-        &card.scope.mode,
-        card.scope.paths.len(),
-        false,
-    );
+    let scope = match card.scope.paths.len() {
+        0 => card.scope.mode.clone(),
+        1 => format!("{} · 1 path", card.scope.mode),
+        n => format!("{} · {n} paths", card.scope.mode),
+    };
+    step(out, "scope", &scope, 0, false);
     step(out, "pack", &card.pack, 0, false);
     step(
         out,
@@ -278,11 +311,12 @@ fn pipeline(out: &mut String, card: &Scorecard) {
     step(out, "gates", &ratio, 0, true);
     out.push_str("<div class=\"sep\">→</div>");
     out.push_str("<div class=\"step");
-    if card.verdict == "pass" {
+    let outcome = Outcome::of(card);
+    if matches!(outcome, Outcome::Pass | Outcome::Advisory(_)) {
         out.push_str(" hi");
     }
     out.push_str("\"><b>verdict</b><span>");
-    out.push_str(&esc(&card.verdict));
+    out.push_str(&esc(outcome.word(card)));
     out.push_str("</span></div></div>\n");
 }
 
@@ -698,6 +732,37 @@ mod tests {
         assert!(html.contains("<span class=\"verdict report\">REPORT ONLY</span>"));
         assert!(html.contains("1 failing gate, none enforced"));
         assert!(!html.contains("verdict pass"));
+        // The flow strip and page title agree with the badge.
+        assert!(html.contains("<div class=\"step\"><b>verdict</b><span>report only</span>"));
+        assert!(html.contains("— report only</title>"));
+    }
+
+    #[test]
+    fn html_advisory_miss_stays_pass_with_a_note() {
+        // Default --fail-on: enforced gates passed, only advisory sca failed.
+        let mut c = card();
+        c.verdict = "pass".into();
+        c.gates[0].pass = true;
+        c.gates.push(Gate {
+            id: "sca".into(),
+            pass: false,
+            enforced: false,
+            reason: Some("3 undeclared dependencies".into()),
+        });
+        let html = to_html(&c);
+        assert!(html.contains("<span class=\"verdict pass\">PASS</span>"));
+        assert!(html.contains("1 advisory gate failing"));
+        assert!(!html.contains("REPORT ONLY"));
+        assert!(html.contains("<div class=\"step hi\"><b>verdict</b><span>pass</span>"));
+    }
+
+    #[test]
+    fn html_flow_scope_counts_paths_not_skips() {
+        let mut c = card();
+        c.scope.paths = vec!["src/a.rs".into(), "src/b.rs".into()];
+        let html = to_html(&c);
+        assert!(html.contains("<b>scope</b><span>tree · 2 paths</span>"));
+        assert!(!html.contains("2 skipped"));
     }
 
     #[test]
