@@ -306,7 +306,19 @@ fn step(out: &mut String, title: &str, main: &str, skipped: usize, hi: bool) {
 
 fn a11y_section(out: &mut String, card: &Scorecard) {
     out.push_str("<h2>accessibility</h2>\n<div class=\"card\">");
-    let mut rules: Vec<&str> = Vec::new();
+    let rules = a11y_rules(card);
+    if rules.is_empty() {
+        out.push_str("<p style=\"color:var(--dim)\">No accessibility findings.</p></div>\n");
+        return;
+    }
+    for rule in rules {
+        write_a11y_rule(out, card, rule);
+    }
+    out.push_str("</div>\n");
+}
+
+fn a11y_rules(card: &Scorecard) -> Vec<&str> {
+    let mut rules = Vec::new();
     for finding in card
         .findings
         .iter()
@@ -316,33 +328,30 @@ fn a11y_section(out: &mut String, card: &Scorecard) {
             rules.push(finding.rule.as_str());
         }
     }
-    if rules.is_empty() {
-        out.push_str("<p style=\"color:var(--dim)\">No accessibility findings.</p></div>\n");
-        return;
+    rules
+}
+
+fn write_a11y_rule(out: &mut String, card: &Scorecard, rule: &str) {
+    out.push_str("<h3><code>");
+    out.push_str(&esc(rule));
+    out.push_str("</code></h3><ul>");
+    for finding in card.findings.iter().filter(|finding| finding.rule == rule) {
+        write_a11y_item(out, finding);
     }
-    for rule in rules {
-        out.push_str("<h3><code>");
-        out.push_str(&esc(rule));
-        out.push_str("</code></h3><ul>");
-        for finding in card
-            .findings
-            .iter()
-            .filter(|finding| finding.engine == "a11y" && finding.rule == rule)
-        {
-            let line = finding
-                .span
-                .as_ref()
-                .map(|span| span.start_line)
-                .unwrap_or(1);
-            out.push_str("<li><code>");
-            out.push_str(&esc(&format!("{}:{line}", finding.file)));
-            out.push_str("</code> ");
-            out.push_str(&esc(&finding.message));
-            out.push_str("</li>");
-        }
-        out.push_str("</ul>");
-    }
-    out.push_str("</div>\n");
+    out.push_str("</ul>");
+}
+
+fn write_a11y_item(out: &mut String, finding: &sc_core::Finding) {
+    let line = finding
+        .span
+        .as_ref()
+        .map(|span| span.start_line)
+        .unwrap_or(1);
+    out.push_str("<li><code>");
+    out.push_str(&esc(&format!("{}:{line}", finding.file)));
+    out.push_str("</code> ");
+    out.push_str(&esc(&finding.message));
+    out.push_str("</li>");
 }
 
 fn scores_metrics(out: &mut String, card: &Scorecard) {

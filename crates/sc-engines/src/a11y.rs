@@ -82,167 +82,287 @@ pub fn check_elements(
     document: bool,
 ) -> Vec<Finding> {
     let mut findings = Vec::new();
-    if document && !disabled.iter().any(|rule| rule == "html-lang") {
-        let lang = elements.iter().find(|elem| elem.name == "html");
-        let ok = lang
-            .is_some_and(|elem| attr(elem, "lang").is_some_and(|value| !value.trim().is_empty()));
-        if !ok {
-            let line = lang.map(|elem| elem.line).unwrap_or(1);
-            findings.push(finding(file, "html-lang", line, "html element has no lang"));
-        }
+    if document {
+        findings.extend(document_rules(file, elements, disabled));
     }
-    if document && !disabled.iter().any(|rule| rule == "document-title") {
-        let titled = elements
-            .iter()
-            .any(|elem| elem.name == "title" && !elem.text.trim().is_empty());
-        if !titled {
-            findings.push(finding(file, "document-title", 1, "page has no title"));
-        }
-    }
-    if document
-        && !disabled.iter().any(|rule| rule == "landmark")
-        && !elements.iter().any(is_landmark)
-    {
-        findings.push(finding(
-            file,
-            "landmark",
-            1,
-            "page has no landmark (main, nav, header, footer, or aside)",
-        ));
-    }
-    let mut ids: Vec<(&str, u32)> = Vec::new();
-    let mut headings: Vec<(u32, u32)> = Vec::new();
+    let mut ids = Vec::new();
+    let mut headings = Vec::new();
     for elem in elements {
-        if let Some(id) = attr(elem, "id") {
-            if !id.is_empty() {
-                ids.push((id, elem.line));
-            }
-        }
-        if let Some(level) = heading_level(&elem.name) {
-            headings.push((level, elem.line));
-        }
-        if elem.name == "img"
-            && !disabled.iter().any(|rule| rule == "img-alt")
-            && attr(elem, "alt").is_none()
-        {
-            findings.push(finding(file, "img-alt", elem.line, "img has no alt"));
-        }
-        if needs_label(elem)
-            && !disabled.iter().any(|rule| rule == "label")
-            && !labeled(elem, elements)
-        {
-            findings.push(finding(
-                file,
-                "label",
-                elem.line,
-                "form control has no label",
-            ));
-        }
-        if matches!(elem.name.as_str(), "a" | "button")
-            && !disabled.iter().any(|rule| rule == "name")
-            && elem.text.trim().is_empty()
-            && attr(elem, "aria-label").is_none()
-            && attr(elem, "aria-labelledby").is_none()
-        {
-            findings.push(finding(
-                file,
-                "name",
-                elem.line,
-                "link or button has no accessible name",
-            ));
-        }
-        if !disabled.iter().any(|rule| rule == "tabindex") {
-            if let Some(value) = attr(elem, "tabindex") {
-                if value.trim().parse::<i32>().unwrap_or(0) > 0 {
-                    findings.push(finding(file, "tabindex", elem.line, "positive tabindex"));
-                }
-            }
-        }
-        if matches!(elem.name.as_str(), "video" | "audio")
-            && !disabled.iter().any(|rule| rule == "autoplay")
-            && has_attr(elem, "autoplay")
-            && !has_attr(elem, "controls")
-        {
-            findings.push(finding(
-                file,
-                "autoplay",
-                elem.line,
-                "autoplay media has no controls",
-            ));
-        }
-        if !disabled.iter().any(|rule| rule == "contrast") {
-            if let Some((fg, bg)) = inline_colors(elem) {
-                if contrast(fg, bg) < 4.5 {
-                    findings.push(finding(
-                        file,
-                        "contrast",
-                        elem.line,
-                        "inline colors are below 4.5:1",
-                    ));
-                }
-            }
-        }
+        note_id(elem, &mut ids);
+        note_heading(elem, &mut headings);
+        findings.extend(element_rules(file, elem, elements, disabled));
     }
-    if !disabled.iter().any(|rule| rule == "duplicate-id") {
-        let mut seen: Vec<&str> = Vec::new();
-        for (id, line) in ids {
-            if seen.contains(&id) {
-                findings.push(finding(
-                    file,
-                    "duplicate-id",
-                    line,
-                    &format!("duplicate id `{id}`"),
-                ));
-            } else {
-                seen.push(id);
-            }
-        }
-    }
-    if !disabled.iter().any(|rule| rule == "heading-order") {
-        let mut previous = 0u32;
-        for (level, line) in headings {
-            if previous > 0 && level > previous + 1 {
-                findings.push(finding(
-                    file,
-                    "heading-order",
-                    line,
-                    &format!("heading jumps from h{previous} to h{level}"),
-                ));
-            }
-            previous = level;
-        }
-    }
-    if !disabled.iter().any(|rule| rule == "contrast") {
+    findings.extend(duplicate_findings(file, &ids, disabled));
+    findings.extend(heading_findings(file, &headings, disabled));
+    if !rule_off(disabled, "contrast") {
         findings.extend(style_contrast(file, elements));
     }
     findings
 }
 
-fn style_contrast(file: &str, elements: &[Elem]) -> Vec<Finding> {
+fn rule_off(disabled: &[String], rule: &str) -> bool {
+    disabled.iter().any(|item| item == rule)
+}
+
+fn document_rules(file: &str, elements: &[Elem], disabled: &[String]) -> Vec<Finding> {
     let mut findings = Vec::new();
-    for style in elements.iter().filter(|elem| elem.name == "style") {
-        for (selector, body) in css_rules(&style.text) {
-            let Some((fg, bg)) = colors_in(body) else {
-                continue;
-            };
-            if contrast(fg, bg) >= 4.5 {
-                continue;
-            }
-            let tag = selector.trim().to_ascii_lowercase();
-            if !tag.chars().all(|ch| ch.is_ascii_alphanumeric()) {
-                continue;
-            }
-            for elem in elements.iter().filter(|elem| elem.name == tag) {
-                findings.push(finding(
-                    file,
-                    "contrast",
-                    elem.line,
-                    "styled colors are below 4.5:1",
-                ));
-            }
+    push_opt(&mut findings, lang_finding(file, elements, disabled));
+    push_opt(&mut findings, title_finding(file, elements, disabled));
+    push_opt(&mut findings, landmark_finding(file, elements, disabled));
+    findings
+}
+
+fn lang_finding(file: &str, elements: &[Elem], disabled: &[String]) -> Option<Finding> {
+    if rule_off(disabled, "html-lang") || html_has_lang(elements) {
+        return None;
+    }
+    let line = elements
+        .iter()
+        .find(|elem| elem.name == "html")
+        .map(|elem| elem.line)
+        .unwrap_or(1);
+    Some(finding(file, "html-lang", line, "html element has no lang"))
+}
+
+fn html_has_lang(elements: &[Elem]) -> bool {
+    elements.iter().any(|elem| {
+        elem.name == "html" && attr(elem, "lang").is_some_and(|value| !value.trim().is_empty())
+    })
+}
+
+fn title_finding(file: &str, elements: &[Elem], disabled: &[String]) -> Option<Finding> {
+    if rule_off(disabled, "document-title") || has_title(elements) {
+        return None;
+    }
+    Some(finding(file, "document-title", 1, "page has no title"))
+}
+
+fn has_title(elements: &[Elem]) -> bool {
+    elements
+        .iter()
+        .any(|elem| elem.name == "title" && !elem.text.trim().is_empty())
+}
+
+fn landmark_finding(file: &str, elements: &[Elem], disabled: &[String]) -> Option<Finding> {
+    if rule_off(disabled, "landmark") || elements.iter().any(is_landmark) {
+        return None;
+    }
+    Some(finding(
+        file,
+        "landmark",
+        1,
+        "page has no landmark (main, nav, header, footer, or aside)",
+    ))
+}
+
+fn note_id<'a>(elem: &'a Elem, ids: &mut Vec<(&'a str, u32)>) {
+    if let Some(id) = attr(elem, "id") {
+        if !id.is_empty() {
+            ids.push((id, elem.line));
+        }
+    }
+}
+
+fn note_heading(elem: &Elem, headings: &mut Vec<(u32, u32)>) {
+    if let Some(level) = heading_level(&elem.name) {
+        headings.push((level, elem.line));
+    }
+}
+
+fn element_rules(file: &str, elem: &Elem, elements: &[Elem], disabled: &[String]) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    push_opt(&mut findings, img_alt(file, elem, disabled));
+    push_opt(&mut findings, label_gap(file, elem, elements, disabled));
+    push_opt(&mut findings, nameless(file, elem, disabled));
+    push_opt(&mut findings, tabindex_gap(file, elem, disabled));
+    push_opt(&mut findings, autoplay_gap(file, elem, disabled));
+    push_opt(&mut findings, inline_contrast(file, elem, disabled));
+    findings
+}
+
+fn push_opt(findings: &mut Vec<Finding>, item: Option<Finding>) {
+    if let Some(item) = item {
+        findings.push(item);
+    }
+}
+
+fn img_alt(file: &str, elem: &Elem, disabled: &[String]) -> Option<Finding> {
+    if elem.name != "img" || rule_off(disabled, "img-alt") || attr(elem, "alt").is_some() {
+        return None;
+    }
+    Some(finding(file, "img-alt", elem.line, "img has no alt"))
+}
+
+fn label_gap(file: &str, elem: &Elem, elements: &[Elem], disabled: &[String]) -> Option<Finding> {
+    if !needs_label(elem) || rule_off(disabled, "label") || labeled(elem, elements) {
+        return None;
+    }
+    Some(finding(
+        file,
+        "label",
+        elem.line,
+        "form control has no label",
+    ))
+}
+
+fn nameless(file: &str, elem: &Elem, disabled: &[String]) -> Option<Finding> {
+    if !is_named_control(elem) || rule_off(disabled, "name") || has_accessible_name(elem) {
+        return None;
+    }
+    Some(finding(
+        file,
+        "name",
+        elem.line,
+        "link or button has no accessible name",
+    ))
+}
+
+fn is_named_control(elem: &Elem) -> bool {
+    matches!(elem.name.as_str(), "a" | "button")
+}
+
+fn has_accessible_name(elem: &Elem) -> bool {
+    !elem.text.trim().is_empty()
+        || named_attr(elem, "aria-label")
+        || named_attr(elem, "aria-labelledby")
+}
+
+fn named_attr(elem: &Elem, key: &str) -> bool {
+    attr(elem, key).is_some_and(|value| !value.trim().is_empty())
+}
+
+fn tabindex_gap(file: &str, elem: &Elem, disabled: &[String]) -> Option<Finding> {
+    if rule_off(disabled, "tabindex") || !positive_tabindex(elem) {
+        return None;
+    }
+    Some(finding(file, "tabindex", elem.line, "positive tabindex"))
+}
+
+fn positive_tabindex(elem: &Elem) -> bool {
+    attr(elem, "tabindex")
+        .and_then(|value| value.trim().parse::<i32>().ok())
+        .is_some_and(|value| value > 0)
+}
+
+fn autoplay_gap(file: &str, elem: &Elem, disabled: &[String]) -> Option<Finding> {
+    if !is_media(elem) || rule_off(disabled, "autoplay") || !bare_autoplay(elem) {
+        return None;
+    }
+    Some(finding(
+        file,
+        "autoplay",
+        elem.line,
+        "autoplay media has no controls",
+    ))
+}
+
+fn is_media(elem: &Elem) -> bool {
+    matches!(elem.name.as_str(), "video" | "audio")
+}
+
+fn bare_autoplay(elem: &Elem) -> bool {
+    has_attr(elem, "autoplay") && !has_attr(elem, "controls")
+}
+
+fn inline_contrast(file: &str, elem: &Elem, disabled: &[String]) -> Option<Finding> {
+    if rule_off(disabled, "contrast") {
+        return None;
+    }
+    let (fg, bg) = inline_colors(elem)?;
+    if contrast(fg, bg) >= 4.5 {
+        return None;
+    }
+    Some(finding(
+        file,
+        "contrast",
+        elem.line,
+        "inline colors are below 4.5:1",
+    ))
+}
+
+fn duplicate_findings(file: &str, ids: &[(&str, u32)], disabled: &[String]) -> Vec<Finding> {
+    if rule_off(disabled, "duplicate-id") {
+        return Vec::new();
+    }
+    let mut findings = Vec::new();
+    let mut seen: Vec<&str> = Vec::new();
+    for (id, line) in ids {
+        if seen.contains(id) {
+            findings.push(finding(
+                file,
+                "duplicate-id",
+                *line,
+                &format!("duplicate id `{id}`"),
+            ));
+        } else {
+            seen.push(id);
         }
     }
     findings
+}
+
+fn heading_findings(file: &str, headings: &[(u32, u32)], disabled: &[String]) -> Vec<Finding> {
+    if rule_off(disabled, "heading-order") {
+        return Vec::new();
+    }
+    let mut findings = Vec::new();
+    let mut previous = 0u32;
+    for (level, line) in headings {
+        if previous > 0 && *level > previous + 1 {
+            findings.push(heading_skip(file, previous, *level, *line));
+        }
+        previous = *level;
+    }
+    findings
+}
+
+fn heading_skip(file: &str, previous: u32, level: u32, line: u32) -> Finding {
+    finding(
+        file,
+        "heading-order",
+        line,
+        &format!("heading jumps from h{previous} to h{level}"),
+    )
+}
+
+fn style_contrast(file: &str, elements: &[Elem]) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    for style in elements.iter().filter(|elem| elem.name == "style") {
+        findings.extend(style_block(file, elements, &style.text));
+    }
+    findings
+}
+
+fn style_block(file: &str, elements: &[Elem], css: &str) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    for (selector, body) in css_rules(css) {
+        findings.extend(selector_hits(file, elements, selector, body));
+    }
+    findings
+}
+
+fn selector_hits(file: &str, elements: &[Elem], selector: &str, body: &str) -> Vec<Finding> {
+    let Some(tag) = low_contrast_tag(selector, body) else {
+        return Vec::new();
+    };
+    elements
+        .iter()
+        .filter(|elem| elem.name == tag)
+        .map(|elem| finding(file, "contrast", elem.line, "styled colors are below 4.5:1"))
+        .collect()
+}
+
+fn low_contrast_tag(selector: &str, body: &str) -> Option<String> {
+    let (fg, bg) = colors_in(body)?;
+    if contrast(fg, bg) >= 4.5 {
+        return None;
+    }
+    let tag = selector.trim().to_ascii_lowercase();
+    if tag.chars().all(|ch| ch.is_ascii_alphanumeric()) {
+        Some(tag)
+    } else {
+        None
+    }
 }
 
 fn css_rules(text: &str) -> Vec<(&str, &str)> {
@@ -338,58 +458,100 @@ fn colors_in(style: &str) -> Option<([u8; 3], [u8; 3])> {
     let mut fg = None;
     let mut bg = None;
     for part in style.split(';') {
-        let Some((key, value)) = part.split_once(':') else {
-            continue;
-        };
-        let key = key.trim().to_ascii_lowercase();
-        let value = value.trim();
-        if key == "color" {
-            fg = parse_color(value);
-        } else if key == "background-color" || key == "background" {
-            bg = parse_color(value);
-        }
+        note_color(part, &mut fg, &mut bg);
     }
     Some((fg?, bg?))
+}
+
+fn note_color(part: &str, fg: &mut Option<[u8; 3]>, bg: &mut Option<[u8; 3]>) {
+    let Some((key, value)) = part.split_once(':') else {
+        return;
+    };
+    let value = value.trim();
+    match key.trim().to_ascii_lowercase().as_str() {
+        "color" => *fg = parse_color(value),
+        "background-color" | "background" => *bg = parse_color(value),
+        _ => {}
+    }
 }
 
 fn parse_color(value: &str) -> Option<[u8; 3]> {
     let value = value.trim().trim_matches('"').trim_matches('\'');
     if let Some(hex) = value.strip_prefix('#') {
-        return match hex.len() {
-            3 => {
-                let chars: Vec<char> = hex.chars().collect();
-                Some([
-                    hex_byte(&[chars[0], chars[0]])?,
-                    hex_byte(&[chars[1], chars[1]])?,
-                    hex_byte(&[chars[2], chars[2]])?,
-                ])
-            }
-            6 => Some([
-                hex_byte(&hex[0..2].chars().collect::<Vec<_>>())?,
-                hex_byte(&hex[2..4].chars().collect::<Vec<_>>())?,
-                hex_byte(&hex[4..6].chars().collect::<Vec<_>>())?,
-            ]),
-            _ => None,
-        };
+        return parse_hex(hex);
     }
-    if let Some(rest) = value
+    if let Some(body) = rgb_body(value) {
+        return parse_rgb(body);
+    }
+    named_color(value)
+}
+
+fn parse_hex(hex: &str) -> Option<[u8; 3]> {
+    match hex.len() {
+        3 => parse_short_hex(hex),
+        6 => parse_long_hex(hex),
+        _ => None,
+    }
+}
+
+fn parse_short_hex(hex: &str) -> Option<[u8; 3]> {
+    let chars: Vec<char> = hex.chars().collect();
+    Some([
+        hex_byte(&[chars[0], chars[0]])?,
+        hex_byte(&[chars[1], chars[1]])?,
+        hex_byte(&[chars[2], chars[2]])?,
+    ])
+}
+
+fn parse_long_hex(hex: &str) -> Option<[u8; 3]> {
+    Some([
+        hex_byte(&hex[0..2].chars().collect::<Vec<_>>())?,
+        hex_byte(&hex[2..4].chars().collect::<Vec<_>>())?,
+        hex_byte(&hex[4..6].chars().collect::<Vec<_>>())?,
+    ])
+}
+
+fn rgb_body(value: &str) -> Option<&str> {
+    value
         .strip_prefix("rgb(")
         .and_then(|rest| rest.strip_suffix(')'))
-    {
-        let mut parts = rest.split(',');
-        return Some([
-            parts.next()?.trim().parse().ok()?,
-            parts.next()?.trim().parse().ok()?,
-            parts.next()?.trim().parse().ok()?,
-        ]);
+}
+
+fn parse_rgb(body: &str) -> Option<[u8; 3]> {
+    let mut parts = body.split(',');
+    Some([
+        rgb_channel(parts.next())?,
+        rgb_channel(parts.next())?,
+        rgb_channel(parts.next())?,
+    ])
+}
+
+fn rgb_channel(part: Option<&str>) -> Option<u8> {
+    part?.trim().parse().ok()
+}
+
+fn named_color(value: &str) -> Option<[u8; 3]> {
+    let name = value.to_ascii_lowercase();
+    if let Some(rgb) = neutral_named(&name) {
+        return Some(rgb);
     }
-    Some(match value.to_ascii_lowercase().as_str() {
-        "black" => [0, 0, 0],
-        "white" => [255, 255, 255],
-        "red" => [255, 0, 0],
-        "gray" | "grey" => [128, 128, 128],
-        _ => return None,
-    })
+    bright_named(&name)
+}
+
+fn neutral_named(name: &str) -> Option<[u8; 3]> {
+    match name {
+        "black" => Some([0, 0, 0]),
+        "gray" | "grey" => Some([128, 128, 128]),
+        _ => None,
+    }
+}
+
+fn bright_named(name: &str) -> Option<[u8; 3]> {
+    match name {
+        "white" => Some([255, 255, 255]),
+        "red" => Some([255, 0, 0]),
+        _ => None,
+    }
 }
 
 fn hex_byte(chars: &[char]) -> Option<u8> {
@@ -422,42 +584,64 @@ fn mask_expressions(text: &str) -> String {
     let mut index = 0;
     while index < chars.len() {
         if chars[index] == '{' {
-            let start = index;
-            let mut depth = 0;
-            while index < chars.len() {
-                match chars[index] {
-                    '{' => depth += 1,
-                    '}' => {
-                        depth -= 1;
-                        index += 1;
-                        if depth == 0 {
-                            break;
-                        }
-                        continue;
-                    }
-                    _ => {}
-                }
-                index += 1;
-            }
-            let inside = &chars[start + 1..index.saturating_sub(1)];
-            if inside.contains(&'<') {
-                for ch in &chars[start..index] {
-                    out.push(*ch);
-                }
-            } else {
-                out.push_str("\"x\"");
-                for ch in inside {
-                    if *ch == '\n' {
-                        out.push('\n');
-                    }
-                }
-            }
-            continue;
+            index = mask_brace(&chars, index, &mut out);
+        } else {
+            out.push(chars[index]);
+            index += 1;
         }
-        out.push(chars[index]);
-        index += 1;
     }
     out
+}
+
+fn mask_brace(chars: &[char], start: usize, out: &mut String) -> usize {
+    let end = matching_brace(chars, start);
+    write_masked(chars, start, end, out);
+    end
+}
+
+fn matching_brace(chars: &[char], start: usize) -> usize {
+    let mut index = start;
+    let mut depth = 0i32;
+    while index < chars.len() {
+        depth += brace_delta(chars[index]);
+        index += 1;
+        if depth == 0 {
+            break;
+        }
+    }
+    index
+}
+
+fn brace_delta(ch: char) -> i32 {
+    match ch {
+        '{' => 1,
+        '}' => -1,
+        _ => 0,
+    }
+}
+
+fn write_masked(chars: &[char], start: usize, end: usize, out: &mut String) {
+    let inside = &chars[start + 1..end.saturating_sub(1)];
+    if inside.contains(&'<') {
+        copy_chars(out, &chars[start..end]);
+        return;
+    }
+    out.push_str("\"x\"");
+    keep_newlines(out, inside);
+}
+
+fn copy_chars(out: &mut String, chars: &[char]) {
+    for ch in chars {
+        out.push(*ch);
+    }
+}
+
+fn keep_newlines(out: &mut String, chars: &[char]) {
+    for ch in chars {
+        if *ch == '\n' {
+            out.push('\n');
+        }
+    }
 }
 
 #[cfg(test)]
@@ -548,6 +732,33 @@ mod tests {
         assert!(findings
             .iter()
             .all(|finding| finding.rule != "a11y.html-lang"));
+    }
+
+    #[test]
+    fn source_stays_within_the_uncovered_crap_bar() {
+        let facts = sc_graph::inspect_source(include_str!("a11y.rs"), "a11y.rs").unwrap();
+        for function in facts.functions {
+            assert!(
+                function.cc <= 5,
+                "{} has CC {}, which fails CRAP 30 at zero coverage",
+                function.symbol,
+                function.cc
+            );
+        }
+        let report =
+            sc_graph::inspect_source(include_str!("../../sc-cli/src/report.rs"), "report.rs")
+                .unwrap();
+        for function in report.functions {
+            if !function.symbol.contains("a11y") {
+                continue;
+            }
+            assert!(
+                function.cc <= 5,
+                "{} has CC {}, which fails CRAP 30 at zero coverage",
+                function.symbol,
+                function.cc
+            );
+        }
     }
 
     #[test]
