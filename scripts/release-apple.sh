@@ -162,8 +162,10 @@ if [ "$signing" = true ]; then
     echo "error: no 'Developer ID Installer' identity (add it to APPLE_CERTIFICATE_P12 or set APPLE_INSTALLER_P12 + APPLE_INSTALLER_PASSWORD); refusing to ship an unsigned pkg" >&2
     exit 1
   fi
-  # set-key-partition-list only stamps keys already in the keychain. Apply
-  # it again after an optional APPLE_INSTALLER_P12 import.
+  # set-key-partition-list only stamps keys already in the keychain, so
+  # re-apply it after an optional APPLE_INSTALLER_P12 import. Without this,
+  # a newly imported key can miss the apple-tool partition and productbuild
+  # can block on an invisible approval prompt.
   security set-key-partition-list -S apple-tool:,apple: -s -k "" "$keychain"
 fi
 
