@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Document the HTML report, including the flow strip, in the readme and in `docs/html-report.md`.
 - The macOS disk image ships `INSTALL.txt` and a double-clickable `Install Scorecard.command` that installs `sc` and `sc-mcp` to `/usr/local/bin` (or `~/.local/bin` without admin rights).
 
 ### Fixed
