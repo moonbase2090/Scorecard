@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The HTML flow strip's scope box counts paths (`tree · 42 paths`) instead of calling them skipped, and the markdown scope line no longer claims every tree is `src`.
 - Reports no longer show unmeasured coverage as 0%. When the coverage engine did not run, the HTML coverage tile reads `coverage not measured`, CRAP rows say `not measured` (`--` in the terminal), and the HTML, markdown, and terminal CRAP tables note that the numbers assume 0% coverage. Measured coverage now shows its percentage next to the bar.
 - The HTML metric tile for `sca` misses reads `undeclared deps` instead of `hallucinated imports`. The JSON field is unchanged.
+- The HTML report groups findings by rule. Groups with errors come first, smallest first, so one test failure is not buried under CRAP cards. Small error groups start open and the rest collapse behind their counts. Each group shows at most 50 cards, and `complexity.untested` folds into the matching `crap.over_threshold` card. Accessibility findings are no longer listed twice. Repo-level findings drop the bare `.` location, and long commands in the runs table no longer push the exit and duration columns off the card.
 
 ## [0.1.3] - 2026-09-27
 
