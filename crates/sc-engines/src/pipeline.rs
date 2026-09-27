@@ -88,7 +88,12 @@ fn analyze_blocked(request: AnalyzeRequest, pack: &str, message: &str) -> Analyz
         gate("types", false, message),
         gate("tests", false, message),
         gate("crap", false, message),
-        gate("sca", false, message),
+        Gate {
+            id: "sca".into(),
+            pass: false,
+            reason: Some(message.to_string()),
+            enforced: false,
+        },
         gate("lint", false, message),
     ];
     finish(Draft {
@@ -1539,7 +1544,12 @@ fn gate(id: &str, pass: bool, reason: &str) -> Gate {
 
 fn advisory_gate(id: &str, count: u64, noun: &str) -> Gate {
     if count == 0 {
-        return gate(id, true, "");
+        return Gate {
+            id: id.to_string(),
+            pass: true,
+            reason: None,
+            enforced: false,
+        };
     }
     Gate {
         id: id.to_string(),
