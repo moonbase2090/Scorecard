@@ -4,6 +4,7 @@
 //! Color follows `NO_COLOR`, `CLICOLOR_FORCE`, and whether stdout is a TTY.
 //! The plain style uses ASCII so a captured transcript stays readable.
 
+use crate::report::Outcome;
 use anstyle::{AnsiColor, Color, Style};
 use sc_core::{CrapFunction, Finding, Gate, Scorecard};
 
@@ -92,19 +93,17 @@ fn push_header(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usi
 }
 
 fn push_banner(out: &mut String, card: &Scorecard, opts: &PrettyOpts) {
-    let failing = crate::report::report_only_failures(card);
-    if failing > 0 {
-        out.push_str(&paint(opts.color, blue().bold(), "REPORT ONLY"));
-        out.push_str("  ");
-        out.push_str(&crate::report::report_only_note(failing));
-        out.push('\n');
-        out.push('\n');
-        return;
-    }
-    let pass = card.verdict == "pass";
-    let word = if pass { "PASS" } else { "FAIL" };
-    let style = if pass { green() } else { red() };
+    let outcome = Outcome::of(card);
+    let (word, style) = match outcome {
+        Outcome::Fail => ("FAIL", red()),
+        Outcome::ReportOnly(_) => ("REPORT ONLY", blue()),
+        Outcome::Pass | Outcome::Advisory(_) => ("PASS", green()),
+    };
     out.push_str(&paint(opts.color, style.bold(), word));
+    if let Some(note) = outcome.note() {
+        out.push_str("  ");
+        out.push_str(&note);
+    }
     out.push('\n');
     out.push('\n');
 }
@@ -247,7 +246,7 @@ fn push_footer(out: &mut String, card: &Scorecard, opts: &PrettyOpts) {
     }
     out.push_str(&exit_line(
         opts.exit_code,
-        crate::report::report_only_failures(card) > 0,
+        matches!(Outcome::of(card), Outcome::ReportOnly(_)),
     ));
     out.push('\n');
 }
@@ -477,5 +476,38 @@ mod tests {
         assert!(text.contains("REPORT ONLY  1 failing gate, none enforced"));
         assert!(!text.contains("PASS"));
         assert!(text.contains("exit 0: no enforced gate failed"));
+    }
+
+    #[test]
+    fn advisory_miss_keeps_the_pass_banner() {
+        let mut card = Scorecard::skeleton("demo", 30);
+        card.verdict = "pass".into();
+        card.gates = vec![
+            Gate {
+                id: "types".into(),
+                pass: true,
+                enforced: true,
+                reason: None,
+            },
+            Gate {
+                id: "sca".into(),
+                pass: false,
+                enforced: false,
+                reason: Some("3 undeclared dependencies".into()),
+            },
+        ];
+        let text = to_pretty(
+            &card,
+            &PrettyOpts {
+                color: false,
+                width: 80,
+                version: "0.1.0".into(),
+                report: None,
+                exit_code: 0,
+            },
+        );
+        assert!(text.contains("PASS  1 advisory gate failing"));
+        assert!(!text.contains("REPORT ONLY"));
+        assert!(text.contains("exit 0: gates passed"));
     }
 }

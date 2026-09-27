@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
+use crate::report::Outcome;
 use sc_core::Scorecard;
 
 /// Render a scorecard as pretty JSON.
@@ -31,15 +32,14 @@ pub fn to_markdown(card: &Scorecard) -> String {
     let head = card.git.head.as_deref().unwrap_or("none");
     let dirty = if card.git.dirty { "dirty" } else { "clean" };
     out.push_str("# scorecard\n\n");
-    let failing = crate::report::report_only_failures(card);
-    if failing > 0 {
-        out.push_str(&format!(
-            "**Verdict:** {} (report only: {})\n\n",
-            card.verdict,
-            crate::report::report_only_note(failing)
-        ));
-    } else {
-        out.push_str(&format!("**Verdict:** {}\n\n", card.verdict));
+    let outcome = Outcome::of(card);
+    match (outcome, outcome.note()) {
+        (Outcome::ReportOnly(_), Some(note)) => out.push_str(&format!(
+            "**Verdict:** {} (report only: {note})\n\n",
+            card.verdict
+        )),
+        (_, Some(note)) => out.push_str(&format!("**Verdict:** {} ({note})\n\n", card.verdict)),
+        (_, None) => out.push_str(&format!("**Verdict:** {}\n\n", card.verdict)),
     }
     out.push_str(&format!("**Repo:** {}\n\n", card.repo));
     out.push_str(&format!("**Git:** {head} ({dirty})\n\n"));
@@ -214,6 +214,29 @@ mod tests {
         let md = to_markdown(&card);
         assert!(md.contains("**Verdict:** pass (report only: 1 failing gate, none enforced)"));
         assert!(!md.contains("of `src`"));
+    }
+
+    #[test]
+    fn markdown_notes_advisory_misses_on_a_pass() {
+        let mut card = Scorecard::skeleton(".", 30);
+        card.verdict = "pass".into();
+        card.gates = vec![
+            Gate {
+                id: "types".into(),
+                pass: true,
+                enforced: true,
+                reason: None,
+            },
+            Gate {
+                id: "sca".into(),
+                pass: false,
+                enforced: false,
+                reason: Some("3 undeclared dependencies".into()),
+            },
+        ];
+        let md = to_markdown(&card);
+        assert!(md.contains("**Verdict:** pass (1 advisory gate failing)"));
+        assert!(!md.contains("report only"));
     }
 
     #[test]
