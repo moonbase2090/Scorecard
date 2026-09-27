@@ -143,12 +143,23 @@ pub fn to_markdown(card: &Scorecard) -> String {
             out.push_str(&format!("- symbol: `{symbol}`\n"));
         }
         out.push_str(&format!("- {}\n", finding.message));
+        if let Some(log) = crate::report::raw_log(finding) {
+            let fence = "`".repeat(longest_backtick_run(log).max(2) + 1);
+            out.push_str(&format!(
+                "\n<details><summary>full output</summary>\n\n{fence}text\n{log}\n{fence}\n\n</details>\n\n"
+            ));
+        }
         if let Some(action) = &finding.suggested_action {
             out.push_str(&format!("- suggested: {action}\n"));
         }
         out.push('\n');
     }
     out
+}
+
+/// A fence one backtick longer than any run in the log keeps it closed.
+fn longest_backtick_run(text: &str) -> usize {
+    text.split(|c| c != '`').map(str::len).max().unwrap_or(0)
 }
 
 fn cell(text: &str) -> String {
@@ -192,6 +203,27 @@ mod tests {
         let md = to_markdown(&card);
         assert!(md.contains("| 132 | 11 | 0% | classify | src/lib.rs |"));
         assert!(!md.contains("not measured"));
+    }
+
+    #[test]
+    fn markdown_folds_the_raw_log_with_a_safe_fence() {
+        let mut card = Scorecard::skeleton(".", 30);
+        card.findings.push(Finding {
+            id: "tests:failed".into(),
+            rule: "test.failed".into(),
+            engine: "tests".into(),
+            severity: "error".into(),
+            file: "tests/test_x.py".into(),
+            span: None,
+            symbol: Some("test_x".into()),
+            message: "FAILED tests/test_x.py::test_x".into(),
+            evidence: serde_json::json!({"log": "....F\n```\nFAILED tests/test_x.py::test_x"}),
+            suggested_action: None,
+            disposition: String::new(),
+        });
+        let md = to_markdown(&card);
+        assert!(md.contains("- FAILED tests/test_x.py::test_x\n\n<details><summary>full output</summary>\n\n````text\n....F\n```\nFAILED"));
+        assert!(md.contains("\n````\n\n</details>"));
     }
 
     #[test]
