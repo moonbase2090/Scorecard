@@ -62,6 +62,10 @@ border:1px solid var(--bad)}
 border:1px solid var(--accent)}
 details{margin-top:4px}
 summary{cursor:pointer;color:var(--accent);font-size:12px}
+.group{margin-top:12px}
+.group>summary{font-size:14px;color:var(--ink);padding:6px 0}
+.group>summary .pill{margin-left:4px}
+.more{color:var(--dim);font-size:12.5px;margin:10px 0 0}
 .pathlist{margin-top:6px;max-height:240px;overflow:auto}
 .pathlist div{margin:1px 0}
 .pathlist code{word-break:normal}
@@ -113,6 +117,7 @@ font-weight:600;word-break:break-all}
 padding:8px 12px;margin:8px 0 0;font-family:ui-monospace,Menlo,monospace;
 font-size:11.5px;overflow-x:auto;white-space:nowrap}
 .term b{color:var(--ok)}
+td.cmd{width:100%;max-width:0}
 footer{margin-top:32px;color:var(--dim);font-size:11.5px;text-align:center}
 "#;
 
@@ -518,6 +523,19 @@ fn crap(out: &mut String, card: &Scorecard) {
     out.push_str("</table></div>\n");
 }
 
+/// Cards shown per rule group. The rest stay in the JSON and SARIF reports,
+/// so a tree with a thousand CRAP findings does not become a megabyte page.
+const GROUP_LIMIT: usize = 50;
+
+/// Error groups at or under this size start expanded.
+const OPEN_LIMIT: usize = 10;
+
+/// Findings grouped by rule so one test failure is not buried under a
+/// hundred CRAP cards. Groups holding errors come first, smallest first,
+/// since a rare error is usually the one to act on; small error groups
+/// start open and the rest are collapsed behind their counts. `complexity.untested` repeats
+/// `crap.over_threshold` for the same function, so it folds into that
+/// card. Accessibility findings already have their own section above.
 fn findings(out: &mut String, card: &Scorecard) {
     out.push_str("<h2>findings · ");
     out.push_str(&card.findings.len().to_string());
@@ -526,38 +544,151 @@ fn findings(out: &mut String, card: &Scorecard) {
         out.push_str("<div class=\"card\" style=\"color:var(--dim)\">None. Clean gate.</div>\n");
         return;
     }
-    for finding in &card.findings {
-        let cls = if finding.severity == "error" {
-            "finding error"
-        } else {
-            "finding"
-        };
-        out.push_str("<div class=\"card ");
-        out.push_str(cls);
-        out.push_str("\"><h3>");
-        out.push_str(&esc(&finding.id));
-        out.push_str("</h3><div class=\"row\">");
-        out.push_str("<span class=\"pill ");
-        out.push_str(if finding.severity == "error" {
-            "fail"
-        } else {
-            "warn"
-        });
-        out.push_str("\">");
-        out.push_str(&esc(&finding.severity));
-        out.push_str("</span><span class=\"pill info\">");
-        out.push_str(&esc(&finding.rule));
-        out.push_str("</span>");
-        if !finding.disposition.is_empty() {
-            out.push_str("<span class=\"pill dim\">");
-            out.push_str(&esc(&finding.disposition));
-            out.push_str("</span>");
+    let key = |finding: &sc_core::Finding| (finding.file.clone(), finding.symbol.clone());
+    let crap_keys: Vec<_> = card
+        .findings
+        .iter()
+        .filter(|finding| finding.rule == "crap.over_threshold")
+        .map(key)
+        .collect();
+    let folded = |finding: &sc_core::Finding| {
+        finding.rule == "complexity.untested"
+            && finding.symbol.is_some()
+            && crap_keys.contains(&key(finding))
+    };
+    let untested: Vec<_> = card
+        .findings
+        .iter()
+        .filter(|finding| folded(finding))
+        .map(key)
+        .collect();
+    let mut groups: Vec<(&str, Vec<&sc_core::Finding>)> = Vec::new();
+    for finding in card
+        .findings
+        .iter()
+        .filter(|finding| finding.engine != "a11y" && !folded(finding))
+    {
+        match groups.iter_mut().find(|(rule, _)| *rule == finding.rule) {
+            Some((_, items)) => items.push(finding),
+            None => groups.push((finding.rule.as_str(), vec![finding])),
         }
+    }
+    let errors = |items: &[&sc_core::Finding]| {
+        items
+            .iter()
+            .filter(|finding| finding.severity == "error")
+            .count()
+    };
+    groups.sort_by(|(a_rule, a), (b_rule, b)| {
+        (errors(b) > 0)
+            .cmp(&(errors(a) > 0))
+            .then(a.len().cmp(&b.len()))
+            .then(a_rule.cmp(b_rule))
+    });
+    for (rule, mut items) in groups {
+        items.sort_by_key(|finding| finding.severity != "error");
+        let errs = errors(&items);
+        out.push_str("<details class=\"group\"");
+        if errs > 0 && items.len() <= OPEN_LIMIT {
+            out.push_str(" open");
+        }
+        out.push_str("><summary><code>");
+        out.push_str(&esc(rule));
+        out.push_str("</code> · ");
+        out.push_str(&items.len().to_string());
+        if errs > 0 {
+            out.push_str(&format!(
+                " <span class=\"pill fail\">{}</span>",
+                plural(errs, "error", "errors")
+            ));
+        }
+        if errs < items.len() {
+            out.push_str(&format!(
+                " <span class=\"pill warn\">{}</span>",
+                plural(items.len() - errs, "warning", "warnings")
+            ));
+        }
+        out.push_str("</summary>\n");
+        for finding in items.iter().take(GROUP_LIMIT) {
+            finding_card(out, finding, untested.contains(&key(finding)));
+        }
+        if items.len() > GROUP_LIMIT {
+            out.push_str(&format!(
+                "<p class=\"more\">{} more <code>{}</code> {} in the JSON and SARIF reports.</p>",
+                items.len() - GROUP_LIMIT,
+                esc(rule),
+                if items.len() - GROUP_LIMIT == 1 {
+                    "finding is"
+                } else {
+                    "findings are"
+                }
+            ));
+        }
+        out.push_str("</details>\n");
+    }
+    let a11y = card
+        .findings
+        .iter()
+        .filter(|finding| finding.engine == "a11y")
+        .count();
+    if !untested.is_empty() {
+        out.push_str(&format!(
+            "<p class=\"more\">{} <code>complexity.untested</code> {} into the matching <code>crap.over_threshold</code> cards.</p>\n",
+            untested.len(),
+            if untested.len() == 1 { "finding is folded" } else { "findings are folded" }
+        ));
+    }
+    if a11y > 0 {
+        out.push_str(&format!(
+            "<p class=\"more\">{} grouped under accessibility above.</p>\n",
+            plural(
+                a11y,
+                "accessibility finding is",
+                "accessibility findings are"
+            )
+        ));
+    }
+}
+
+fn plural(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
+fn finding_card(out: &mut String, finding: &sc_core::Finding, untested: bool) {
+    let cls = if finding.severity == "error" {
+        "finding error"
+    } else {
+        "finding"
+    };
+    out.push_str("<div class=\"card ");
+    out.push_str(cls);
+    out.push_str("\"><h3>");
+    out.push_str(&esc(&finding.id));
+    out.push_str("</h3><div class=\"row\">");
+    out.push_str("<span class=\"pill ");
+    out.push_str(if finding.severity == "error" {
+        "fail"
+    } else {
+        "warn"
+    });
+    out.push_str("\">");
+    out.push_str(&esc(&finding.severity));
+    out.push_str("</span><span class=\"pill info\">");
+    out.push_str(&esc(&finding.rule));
+    out.push_str("</span>");
+    if !finding.disposition.is_empty() {
         out.push_str("<span class=\"pill dim\">");
-        out.push_str(&esc(&finding.engine));
-        out.push_str("</span></div><p>");
-        out.push_str(&esc(&finding.message));
-        out.push_str("</p><div style=\"font-size:12px;color:var(--dim)\">");
+        out.push_str(&esc(&finding.disposition));
+        out.push_str("</span>");
+    }
+    out.push_str("<span class=\"pill dim\">");
+    out.push_str(&esc(&finding.engine));
+    out.push_str("</span></div><p>");
+    out.push_str(&esc(&finding.message));
+    out.push_str("</p>");
+    // Repo-level findings (file ".", no span or symbol) have no location.
+    if finding.file != "." || finding.span.is_some() || finding.symbol.is_some() {
+        out.push_str("<div style=\"font-size:12px;color:var(--dim)\">");
         out.push_str(&esc(&finding.file));
         if let Some(span) = &finding.span {
             out.push_str(&format!(":{}:{}", span.start_line, span.start_col));
@@ -568,13 +699,16 @@ fn findings(out: &mut String, card: &Scorecard) {
             out.push_str("</code>");
         }
         out.push_str("</div>");
-        if let Some(action) = &finding.suggested_action {
-            out.push_str("<div class=\"suggest\">suggested: ");
-            out.push_str(&esc(action));
-            out.push_str("</div>");
-        }
-        out.push_str("</div>\n");
     }
+    if untested {
+        out.push_str("<div class=\"suggest\">also <code>complexity.untested</code>: no coverage at this complexity</div>");
+    }
+    if let Some(action) = &finding.suggested_action {
+        out.push_str("<div class=\"suggest\">suggested: ");
+        out.push_str(&esc(action));
+        out.push_str("</div>");
+    }
+    out.push_str("</div>\n");
 }
 
 fn deep(out: &mut String, card: &Scorecard) {
@@ -620,7 +754,7 @@ fn runs(out: &mut String, card: &Scorecard) {
     for run in &card.runs {
         out.push_str("<tr><td><code>");
         out.push_str(&esc(&run.engine));
-        out.push_str("</code></td><td><div class=\"term\"><b>$ </b>");
+        out.push_str("</code></td><td class=\"cmd\"><div class=\"term\"><b>$ </b>");
         out.push_str(&esc(&run.command));
         out.push_str("</div></td><td>");
         match run.exit_code {
@@ -706,6 +840,127 @@ mod tests {
             disposition: "fix".into(),
         });
         card
+    }
+
+    fn finding(rule: &str, engine: &str, severity: &str, file: &str, symbol: &str) -> Finding {
+        Finding {
+            id: format!("{engine}:{file}:{symbol}"),
+            rule: rule.into(),
+            engine: engine.into(),
+            severity: severity.into(),
+            file: file.into(),
+            span: None,
+            symbol: (!symbol.is_empty()).then(|| symbol.to_string()),
+            message: format!("{rule} on {symbol}"),
+            evidence: serde_json::json!({}),
+            suggested_action: None,
+            disposition: String::new(),
+        }
+    }
+
+    #[test]
+    fn html_groups_findings_by_rule_with_rare_errors_first() {
+        let mut c = card();
+        c.findings.push(finding(
+            "crap.over_threshold",
+            "crap",
+            "error",
+            "src/b.rs",
+            "b",
+        ));
+        c.findings.push(finding(
+            "perf.nested_loop",
+            "perf",
+            "warning",
+            "src/a.rs",
+            "a",
+        ));
+        c.findings.push(finding(
+            "test.failed",
+            "tests",
+            "error",
+            "src/lib.rs",
+            "it_adds",
+        ));
+        let html = to_html(&c);
+        let test = html.find("<summary><code>test.failed</code> · 1").unwrap();
+        let crap = html
+            .find("<summary><code>crap.over_threshold</code> · 2")
+            .unwrap();
+        let perf = html
+            .find("<summary><code>perf.nested_loop</code> · 1")
+            .unwrap();
+        assert!(test < crap && crap < perf);
+        assert!(html.contains("<details class=\"group\" open><summary><code>test.failed</code>"));
+        assert!(html.contains("<details class=\"group\"><summary><code>perf.nested_loop</code>"));
+        assert!(html.contains("<span class=\"pill fail\">2 errors</span>"));
+    }
+
+    #[test]
+    fn html_collapses_big_error_groups_and_caps_cards() {
+        let mut c = card();
+        c.findings.clear();
+        for i in 0..60 {
+            let symbol = format!("f{i}");
+            c.findings.push(finding(
+                "crap.over_threshold",
+                "crap",
+                "error",
+                "src/lib.rs",
+                &symbol,
+            ));
+        }
+        let html = to_html(&c);
+        assert!(html
+            .contains("<details class=\"group\"><summary><code>crap.over_threshold</code> · 60"));
+        assert_eq!(
+            html.matches("<div class=\"card finding error\">").count(),
+            GROUP_LIMIT
+        );
+        assert!(html.contains(
+            "10 more <code>crap.over_threshold</code> findings are in the JSON and SARIF reports."
+        ));
+    }
+
+    #[test]
+    fn html_folds_untested_into_the_matching_crap_card() {
+        let mut c = card();
+        c.findings.push(finding(
+            "complexity.untested",
+            "complexity",
+            "error",
+            "src/lib.rs",
+            "classify",
+        ));
+        c.findings.push(finding(
+            "complexity.untested",
+            "complexity",
+            "error",
+            "src/lib.rs",
+            "other",
+        ));
+        let html = to_html(&c);
+        assert!(html.contains("also <code>complexity.untested</code>"));
+        assert!(html.contains("<summary><code>complexity.untested</code> · 1"));
+        assert!(html.contains("1 <code>complexity.untested</code> finding is folded"));
+    }
+
+    #[test]
+    fn html_points_a11y_findings_to_their_section_and_drops_bare_dot() {
+        let mut c = card();
+        c.findings.push(finding(
+            "a11y.img_alt",
+            "a11y",
+            "warning",
+            "index.html",
+            "img",
+        ));
+        c.findings
+            .push(finding("coverage.missing", "coverage", "warning", ".", ""));
+        let html = to_html(&c);
+        assert!(!html.contains("<summary><code>a11y.img_alt</code>"));
+        assert!(html.contains("1 accessibility finding is grouped under accessibility above."));
+        assert!(!html.contains("<div style=\"font-size:12px;color:var(--dim)\">.</div>"));
     }
 
     #[test]
