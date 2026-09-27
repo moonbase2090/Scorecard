@@ -4,6 +4,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- The macOS disk image ships `INSTALL.txt` and a double-clickable `Install Scorecard.command` that installs `sc` and `sc-mcp` to `/usr/local/bin` (or `~/.local/bin` without admin rights).
+
 ### Fixed
 
 - The `sca` gate stays advisory when it passes, so JSON, Markdown, HTML, and the terminal layout agree. A failing dependency check still does not change the exit code.
