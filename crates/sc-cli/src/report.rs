@@ -95,6 +95,7 @@ tr:last-child td{border-bottom:none}
 .bar{height:8px;border-radius:4px;background:#16223f;overflow:hidden;
 min-width:90px}
 .bar i{display:block;height:100%;border-radius:4px}
+.cov{display:block;font-size:11.5px;color:var(--dim);margin-top:3px}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));
 gap:10px;margin-top:12px}
 .tile{background:var(--card);border:1px solid var(--line);border-radius:12px;
@@ -406,11 +407,15 @@ fn scores_metrics(out: &mut String, card: &Scorecard) {
     out.push_str("</table></div>\n<div class=\"tiles\">");
     tile(out, card.metrics.loc_changed.to_string(), "loc changed");
     tile(out, card.metrics.files_changed.to_string(), "files changed");
-    tile(
-        out,
-        format!("{:.0}%", card.metrics.coverage_changed * 100.0),
-        "coverage",
-    );
+    if coverage_measured(card) {
+        tile(
+            out,
+            format!("{:.0}%", card.metrics.coverage_changed * 100.0),
+            "coverage",
+        );
+    } else {
+        tile(out, "—".into(), "coverage not measured");
+    }
     tile(out, fmt_num(card.metrics.crap_max), "crap max");
     tile(
         out,
@@ -420,7 +425,7 @@ fn scores_metrics(out: &mut String, card: &Scorecard) {
     tile(
         out,
         card.metrics.hallucinated_imports.to_string(),
-        "hallucinated imports",
+        "undeclared deps",
     );
     out.push_str("</div>\n");
 }
@@ -460,10 +465,27 @@ fn gates(out: &mut String, card: &Scorecard) {
     out.push_str("</table></div>\n");
 }
 
+/// Coverage counts as measured only when the coverage engine ran. Otherwise
+/// every CRAP number assumes 0% coverage, and 0% must not read as a result.
+pub(crate) fn coverage_measured(card: &Scorecard) -> bool {
+    card.engines_run.iter().any(|engine| engine == "coverage")
+}
+
+/// One sentence for every renderer when coverage was not measured.
+pub(crate) const COVERAGE_NOT_MEASURED: &str =
+    "Coverage was not measured, so CRAP assumes 0% coverage. These numbers are an upper bound.";
+
 fn crap(out: &mut String, card: &Scorecard) {
+    let measured = coverage_measured(card);
     out.push_str("<h2>worst crap · threshold ");
     out.push_str(&card.crap.threshold.to_string());
-    out.push_str("</h2>\n<div class=\"card\"><table>");
+    out.push_str("</h2>\n<div class=\"card\">");
+    if !measured {
+        out.push_str("<p style=\"color:var(--dim);margin:0 0 8px\">");
+        out.push_str(COVERAGE_NOT_MEASURED);
+        out.push_str("</p>");
+    }
+    out.push_str("<table>");
     out.push_str("<tr><th>crap</th><th>cc</th><th>coverage</th><th>symbol</th><th>file</th></tr>");
     if card.crap.worst.is_empty() {
         out.push_str("<tr><td colspan=\"5\" style=\"color:var(--dim)\">No functions over the reporting window.</td></tr>");
@@ -477,11 +499,17 @@ fn crap(out: &mut String, card: &Scorecard) {
         out.push_str(&esc(&fmt_num(row.crap)));
         out.push_str("</span></td><td>");
         out.push_str(&row.cc.to_string());
-        out.push_str("</td><td><div class=\"bar\"><i style=\"width:");
-        out.push_str(&cov.to_string());
-        out.push_str("%;background:");
-        out.push_str(score_color(row.coverage));
-        out.push_str("\"></i></div></td><td><code>");
+        if measured {
+            out.push_str("</td><td><div class=\"bar\"><i style=\"width:");
+            out.push_str(&cov.to_string());
+            out.push_str("%;background:");
+            out.push_str(score_color(row.coverage));
+            out.push_str("\"></i></div>");
+            out.push_str(&format!("<span class=\"cov\">{cov}%</span>"));
+        } else {
+            out.push_str("</td><td><span class=\"cov\">not measured</span>");
+        }
+        out.push_str("</td><td><code>");
         out.push_str(&esc(&row.symbol));
         out.push_str("</code></td><td><code>");
         out.push_str(&esc(&row.file));
@@ -678,6 +706,35 @@ mod tests {
             disposition: "fix".into(),
         });
         card
+    }
+
+    #[test]
+    fn html_says_coverage_not_measured_instead_of_zero() {
+        // card() never ran the coverage engine.
+        let html = to_html(&card());
+        assert!(html.contains("<b>—</b><span>coverage not measured</span>"));
+        assert!(html.contains("<span class=\"cov\">not measured</span>"));
+        assert!(html.contains("CRAP assumes 0% coverage"));
+        assert!(!html.contains("<span>coverage</span>"));
+    }
+
+    #[test]
+    fn html_shows_measured_coverage_as_a_number() {
+        let mut c = card();
+        c.engines_run.push("coverage".into());
+        c.crap.worst[0].coverage = 0.5;
+        c.metrics.coverage_changed = 0.5;
+        let html = to_html(&c);
+        assert!(html.contains("<b>50%</b><span>coverage</span>"));
+        assert!(html.contains("<span class=\"cov\">50%</span>"));
+        assert!(!html.contains("not measured"));
+    }
+
+    #[test]
+    fn html_tile_calls_sca_misses_undeclared_deps() {
+        let html = to_html(&card());
+        assert!(html.contains("<span>undeclared deps</span>"));
+        assert!(!html.contains("hallucinated imports"));
     }
 
     #[test]

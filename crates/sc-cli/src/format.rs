@@ -94,13 +94,23 @@ pub fn to_markdown(card: &Scorecard) -> String {
 
     out.push_str("## Worst CRAP\n\n");
     out.push_str(&format!("Threshold {}.\n\n", card.crap.threshold));
+    let measured = crate::report::coverage_measured(card);
+    if !measured {
+        out.push_str(crate::report::COVERAGE_NOT_MEASURED);
+        out.push_str("\n\n");
+    }
     out.push_str("| CRAP | CC | Coverage | Symbol | File |\n|---|---|---|---|---|\n");
     for row in &card.crap.worst {
+        let coverage = if measured {
+            format!("{}%", pct(row.coverage))
+        } else {
+            "not measured".into()
+        };
         out.push_str(&format!(
-            "| {} | {} | {}% | {} | {} |\n",
+            "| {} | {} | {} | {} | {} |\n",
             fmt_num(row.crap),
             row.cc,
-            pct(row.coverage),
+            coverage,
             cell(&row.symbol),
             cell(&row.file)
         ));
@@ -161,6 +171,28 @@ fn fmt_num(value: f64) -> String {
 mod tests {
     use super::*;
     use sc_core::{CrapFunction, CrapSection, Finding, Gate, Scorecard};
+
+    #[test]
+    fn markdown_marks_unmeasured_coverage() {
+        let mut card = Scorecard::skeleton(".", 30);
+        card.crap = CrapSection {
+            threshold: 30,
+            worst: vec![CrapFunction {
+                symbol: "classify".into(),
+                file: "src/lib.rs".into(),
+                cc: 11,
+                coverage: 0.0,
+                crap: 132.0,
+            }],
+        };
+        let md = to_markdown(&card);
+        assert!(md.contains("Coverage was not measured, so CRAP assumes 0% coverage."));
+        assert!(md.contains("| 132 | 11 | not measured | classify | src/lib.rs |"));
+        card.engines_run.push("coverage".into());
+        let md = to_markdown(&card);
+        assert!(md.contains("| 132 | 11 | 0% | classify | src/lib.rs |"));
+        assert!(!md.contains("not measured"));
+    }
 
     #[test]
     fn markdown_includes_verdict_and_crap() {

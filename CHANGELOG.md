@@ -15,6 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `sca.hallucinated_import` treats workspace member package names and their dependencies as declared. A path dep written with a hyphen matches the underscore name used in source.
 - A report-only run (`--fail-on ""` with failing gates) no longer reads as a clean pass anywhere. The HTML flow strip and page title say `report only`, the markdown verdict line adds the failing count, and the terminal shows a `REPORT ONLY` banner and `exit 0: no enforced gate failed`. A run whose enforced gates pass while an advisory gate such as `sca` fails stays `PASS`, with a note such as `1 advisory gate failing`, instead of switching to `REPORT ONLY`.
 - The HTML flow strip's scope box counts paths (`tree · 42 paths`) instead of calling them skipped, and the markdown scope line no longer claims every tree is `src`.
+- Reports no longer show unmeasured coverage as 0%. When the coverage engine did not run, the HTML coverage tile reads `coverage not measured`, CRAP rows say `not measured` (`--` in the terminal), and the HTML, markdown, and terminal CRAP tables note that the numbers assume 0% coverage. Measured coverage now shows its percentage next to the bar.
+- The HTML metric tile for `sca` misses reads `undeclared deps` instead of `hallucinated imports`. The JSON field is unchanged.
 
 ## [0.1.3] - 2026-09-27
 

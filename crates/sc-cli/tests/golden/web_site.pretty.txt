@@ -17,9 +17,10 @@ scores
   a11y             1.00  [##########]
 
 worst crap  threshold 30
+  coverage not measured: CRAP assumes 0% coverage (upper bound)
   CRAP   CC   COV  SYMBOL            LOCATION
-     2    1    0%  ready             index.html
-     2    1    0%  greet             site.js
+     2    1    --  ready             index.html
+     2    1    --  greet             site.js
 
 findings
 warning

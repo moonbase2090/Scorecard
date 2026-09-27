@@ -171,9 +171,19 @@ fn push_crap(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize
         out.push_str("  (none)\n\n");
         return;
     }
+    let measured = crate::report::coverage_measured(card);
+    if !measured {
+        let note = "  coverage not measured: CRAP assumes 0% coverage (upper bound)";
+        out.push_str(&paint(opts.color, dim(), &fit(note, width, opts.color)));
+        out.push('\n');
+    }
     out.push_str("  CRAP   CC   COV  SYMBOL            LOCATION\n");
     for row in rows {
-        let cov = format!("{}%", (row.coverage.clamp(0.0, 1.0) * 100.0).round() as i64);
+        let cov = if measured {
+            format!("{}%", (row.coverage.clamp(0.0, 1.0) * 100.0).round() as i64)
+        } else {
+            "--".into()
+        };
         let loc = location_for(card, &row.file, &row.symbol);
         let line = format!(
             "  {:>4}  {:>3}  {:>4}  {:<16}  {}",
@@ -509,5 +519,32 @@ mod tests {
         assert!(text.contains("PASS  1 advisory gate failing"));
         assert!(!text.contains("REPORT ONLY"));
         assert!(text.contains("exit 0: gates passed"));
+    }
+
+    #[test]
+    fn crap_rows_show_dashes_when_coverage_was_not_measured() {
+        let mut card = Scorecard::skeleton("demo", 30);
+        card.verdict = "pass".into();
+        card.crap.worst = vec![CrapFunction {
+            symbol: "classify".into(),
+            file: "src/lib.rs".into(),
+            cc: 11,
+            coverage: 0.0,
+            crap: 132.0,
+        }];
+        let opts = PrettyOpts {
+            color: false,
+            width: 120,
+            version: "0.1.0".into(),
+            report: None,
+            exit_code: 0,
+        };
+        let text = to_pretty(&card, &opts);
+        assert!(text.contains("coverage not measured: CRAP assumes 0% coverage (upper bound)"));
+        assert!(text.contains("   132   11    --  classify"));
+        card.engines_run.push("coverage".into());
+        let text = to_pretty(&card, &opts);
+        assert!(text.contains("   132   11    0%  classify"));
+        assert!(!text.contains("not measured"));
     }
 }
