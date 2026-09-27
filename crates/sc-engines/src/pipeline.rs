@@ -18,7 +18,7 @@ use crate::cargo_test::{targeted_test_names, test_findings};
 use crate::command::{run_cargo, run_cmd, CommandError};
 use crate::compile::{generic_compile_failure, parse_compiler_messages};
 use crate::coverage::parse_coverage_json;
-use crate::crap::{evaluate, unmatched_count};
+use crate::crap::{evaluate, unmatched_functions};
 
 use crate::mutation::run_mutation;
 use crate::scope::{empty_selection, select, Selection};
@@ -38,6 +38,15 @@ pub struct AnalyzeRequest {
     pub mutation_override: Option<String>,
     pub llm_override: Option<bool>,
     pub intent: Option<String>,
+}
+
+const MAX_UNMATCHED_FUNCTION_EVIDENCE: usize = 20;
+
+#[derive(serde::Serialize)]
+struct UnmatchedFunctionEvidence<'a> {
+    file: &'a str,
+    symbol: &'a str,
+    line: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -904,9 +913,9 @@ fn coverage_phase(
     match run_coverage(root, manifest, deadline, &mut state.runs) {
         Ok(data) => {
             state.ran.push("coverage".into());
-            let unmatched = unmatched_count(&selection.crap_functions, &data);
-            if unmatched > 0 {
-                state.findings.push(Finding {
+            let unmatched: Vec<_> = unmatched_functions(&selection.crap_functions, &data).collect();
+            if !unmatched.is_empty() {
+                let mut finding = Finding {
                     id: "coverage:unmatched".into(),
                     rule: "coverage.unmatched".into(),
                     engine: "coverage".into(),
@@ -915,14 +924,32 @@ fn coverage_phase(
                     span: None,
                     symbol: None,
                     message: format!(
-                        "coverage was not measured for {unmatched} analyzed function(s) without llvm-cov records"
+                        "coverage was not measured for {} analyzed function(s) without llvm-cov records",
+                        unmatched.len()
                     ),
-                    evidence: serde_json::json!({"unmatched": unmatched}),
+                    evidence: serde_json::json!({
+                        "unmatched": unmatched.len(),
+                        "functions": unmatched
+                            .iter()
+                            .take(MAX_UNMATCHED_FUNCTION_EVIDENCE)
+                            .map(|function| UnmatchedFunctionEvidence {
+                                file: &function.file,
+                                symbol: &function.symbol,
+                                line: function.span.start_line,
+                            })
+                            .collect::<Vec<_>>(),
+                    }),
                     suggested_action: Some(
                         "Check that the function is compiled into the test binary".into(),
                     ),
                     disposition: String::new(),
-                });
+                };
+                if let [function] = unmatched.as_slice() {
+                    finding.file = function.file.clone();
+                    finding.symbol = Some(function.symbol.clone());
+                    finding.span = Some(function.span.clone());
+                }
+                state.findings.push(finding);
             }
             state.line_rate = data.line_rate;
             state.coverage_data = Some(data);
