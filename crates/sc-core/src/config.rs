@@ -56,6 +56,9 @@ pub struct LlmConfig {
     pub enabled: bool,
     pub endpoint: String,
     pub model: String,
+    /// `ollama` (default) or `cursor`. `cursor` sends the spec and the files
+    /// the agent reads to Cursor. It is opt-in.
+    pub backend: String,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -112,6 +115,7 @@ impl Default for LlmConfig {
             enabled: false,
             endpoint: "http://127.0.0.1:11434/v1".into(),
             model: "qwen2.5-coder".into(),
+            backend: "ollama".into(),
         }
     }
 }

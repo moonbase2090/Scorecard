@@ -55,7 +55,7 @@ sc analyze [PATH] [--diff [BASE]] [--diff-head REV] [--paths FILE] [--spec PATH]
 | `--fail-on` | `types,tests,crap,secrets,lint` |
 | `--pack` | detect one pack. `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, `web`, or `command` |
 | `--mutation` | `off` |
-| `--llm` | `off` |
+| `--llm` | `off`. `on` uses local Ollama unless `[llm] backend` is `cursor` |
 | `--intent` | none |
 | `--budget-seconds` | `120` |
 | `--config` | `analyzer.toml` in the tree, then `~/.config/sc/analyzer.toml` |
