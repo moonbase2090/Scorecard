@@ -2,10 +2,35 @@
 //! Function line coverage from `cargo llvm-cov --json`.
 //!
 //! Names are demangled and crate disambiguator hashes are stripped, then matched
-//! to syn symbols. A miss is coverage 0 for that function.
+//! to syn symbols. A miss means coverage was not measured for that function.
 
+use sc_core::Finding;
 use serde_json::Value;
 use std::collections::BTreeMap;
+
+pub fn missing_finding(reason: &str) -> Finding {
+    let reason = if reason.trim().is_empty() {
+        "coverage data is unavailable"
+    } else {
+        reason
+    };
+    Finding {
+        id: "coverage:missing".into(),
+        rule: "coverage.missing".into(),
+        engine: "coverage".into(),
+        severity: "warning".into(),
+        file: ".".into(),
+        span: None,
+        symbol: None,
+        message: format!("coverage was not measured ({reason})"),
+        evidence: serde_json::json!({}),
+        suggested_action: Some(
+            "Run tests with coverage enabled and verify function names and source paths match"
+                .into(),
+        ),
+        disposition: String::new(),
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CovFunction {

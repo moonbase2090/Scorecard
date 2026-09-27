@@ -30,11 +30,10 @@ pub fn go_coverage(profile: &str, functions: &[FunctionInfo]) -> crate::coverage
                 hit += 1;
             }
         }
-        let coverage = if total == 0 {
-            0.0
-        } else {
-            f64::from(hit) / f64::from(total)
-        };
+        if total == 0 {
+            continue;
+        }
+        let coverage = f64::from(hit) / f64::from(total);
         covered.push(crate::coverage::CovFunction {
             file: function.file.clone(),
             demangled: function.symbol.clone(),

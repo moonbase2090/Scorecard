@@ -2,7 +2,7 @@
 //! Line coverage reports for the non-Rust packs.
 //!
 //! Each parser returns statement hits inside a function span. Missing reports
-//! leave CRAP at coverage 0.
+//! leave those functions without a CRAP row.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -259,14 +259,14 @@ fn from_hits(
     let mut covered = Vec::new();
     let mut seen = BTreeSet::new();
     for function in functions {
+        let Some((hit, total)) = hits(function).filter(|(_, total)| *total > 0) else {
+            continue;
+        };
         let key = format!("{}:{}", function.file, function.symbol);
         if !seen.insert(key) {
             continue;
         }
-        let coverage = match hits(function) {
-            Some((hit, total)) if total > 0 => f64::from(hit) / f64::from(total),
-            _ => 0.0,
-        };
+        let coverage = f64::from(hit) / f64::from(total);
         covered.push(CovFunction {
             file: function.file.clone(),
             demangled: function.symbol.clone(),
