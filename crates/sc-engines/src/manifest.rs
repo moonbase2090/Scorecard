@@ -18,6 +18,51 @@ pub fn package_name(text: &str) -> Option<String> {
     None
 }
 
+/// Dependency and package names from every `Cargo.toml` under `root`.
+/// Member crates and `[workspace.dependencies]` count. `target` and dot
+/// directories are skipped.
+pub fn manifest_crate_names(root: &std::path::Path) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    collect_manifest_names(root, 0, &mut names);
+    names
+}
+
+fn collect_manifest_names(dir: &std::path::Path, depth: u32, names: &mut BTreeSet<String>) {
+    if depth > 6 {
+        return;
+    }
+    add_manifest_file(&dir.join("Cargo.toml"), names);
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        walk_child(&entry.path(), depth, names);
+    }
+}
+
+fn walk_child(path: &std::path::Path, depth: u32, names: &mut BTreeSet<String>) {
+    if path.is_dir() && !skip_manifest_dir(path) {
+        collect_manifest_names(path, depth + 1, names);
+    }
+}
+
+fn add_manifest_file(path: &std::path::Path, names: &mut BTreeSet<String>) {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return;
+    };
+    names.extend(dependency_names(&text));
+    if let Some(name) = package_name(&text) {
+        names.insert(name);
+    }
+}
+
+fn skip_manifest_dir(path: &std::path::Path) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return true;
+    };
+    name.starts_with('.') || name == "target" || name == "node_modules"
+}
+
 pub fn dependency_names(text: &str) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     let mut in_deps = false;
@@ -76,6 +121,28 @@ pub fn normalize(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn member_manifests_count_as_declared_crates() {
+        let dir = std::env::temp_dir().join(format!("sc-manifests-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("host")).unwrap();
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"host\"]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("host/Cargo.toml"),
+            "[package]\nname = \"sc-core\"\nversion = \"0.1.0\"\n\n[dependencies]\nprismattyc-mux = { path = \"../mux\" }\nhtml5ever = \"0.1\"\n",
+        )
+        .unwrap();
+        let names = manifest_crate_names(&dir);
+        assert!(names.contains("sc_core"), "{names:?}");
+        assert!(names.contains("prismattyc_mux"), "{names:?}");
+        assert!(names.contains("html5ever"), "{names:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn reads_package_and_dependencies() {
