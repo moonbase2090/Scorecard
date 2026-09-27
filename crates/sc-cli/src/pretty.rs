@@ -92,6 +92,15 @@ fn push_header(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usi
 }
 
 fn push_banner(out: &mut String, card: &Scorecard, opts: &PrettyOpts) {
+    let failing = crate::report::report_only_failures(card);
+    if failing > 0 {
+        out.push_str(&paint(opts.color, blue().bold(), "REPORT ONLY"));
+        out.push_str("  ");
+        out.push_str(&crate::report::report_only_note(failing));
+        out.push('\n');
+        out.push('\n');
+        return;
+    }
     let pass = card.verdict == "pass";
     let word = if pass { "PASS" } else { "FAIL" };
     let style = if pass { green() } else { red() };
@@ -236,12 +245,16 @@ fn push_footer(out: &mut String, card: &Scorecard, opts: &PrettyOpts) {
         out.push_str(path);
         out.push('\n');
     }
-    out.push_str(&exit_line(opts.exit_code));
+    out.push_str(&exit_line(
+        opts.exit_code,
+        crate::report::report_only_failures(card) > 0,
+    ));
     out.push('\n');
 }
 
-fn exit_line(code: i32) -> String {
+fn exit_line(code: i32, report_only: bool) -> String {
     let meaning = match code {
+        0 if report_only => "no enforced gate failed",
         0 => "gates passed",
         1 => "a gate failed",
         _ => "the analyzer could not finish",
@@ -353,6 +366,10 @@ fn green() -> Style {
     Style::new().fg_color(Some(Color::Ansi(AnsiColor::Green)))
 }
 
+fn blue() -> Style {
+    Style::new().fg_color(Some(Color::Ansi(AnsiColor::Blue)))
+}
+
 fn red() -> Style {
     Style::new().fg_color(Some(Color::Ansi(AnsiColor::Red)))
 }
@@ -435,5 +452,30 @@ mod tests {
         assert!(!text.contains('\u{1b}'));
         assert!(text.contains("[ok]") || text.contains("(none)"));
         assert!(text.contains("exit 0: gates passed"));
+    }
+
+    #[test]
+    fn report_only_banner_replaces_pass() {
+        let mut card = Scorecard::skeleton("demo", 30);
+        card.verdict = "pass".into();
+        card.gates.push(Gate {
+            id: "crap".into(),
+            pass: false,
+            enforced: false,
+            reason: Some("1 function over threshold".into()),
+        });
+        let text = to_pretty(
+            &card,
+            &PrettyOpts {
+                color: false,
+                width: 80,
+                version: "0.1.0".into(),
+                report: None,
+                exit_code: 0,
+            },
+        );
+        assert!(text.contains("REPORT ONLY  1 failing gate, none enforced"));
+        assert!(!text.contains("PASS"));
+        assert!(text.contains("exit 0: no enforced gate failed"));
     }
 }

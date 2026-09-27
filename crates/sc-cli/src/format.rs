@@ -31,11 +31,25 @@ pub fn to_markdown(card: &Scorecard) -> String {
     let head = card.git.head.as_deref().unwrap_or("none");
     let dirty = if card.git.dirty { "dirty" } else { "clean" };
     out.push_str("# scorecard\n\n");
-    out.push_str(&format!("**Verdict:** {}\n\n", card.verdict));
+    let failing = crate::report::report_only_failures(card);
+    if failing > 0 {
+        out.push_str(&format!(
+            "**Verdict:** {} (report only: {})\n\n",
+            card.verdict,
+            crate::report::report_only_note(failing)
+        ));
+    } else {
+        out.push_str(&format!("**Verdict:** {}\n\n", card.verdict));
+    }
     out.push_str(&format!("**Repo:** {}\n\n", card.repo));
     out.push_str(&format!("**Git:** {head} ({dirty})\n\n"));
+    let paths = match card.scope.paths.len() {
+        0 => String::new(),
+        1 => ", 1 path".into(),
+        n => format!(", {n} paths"),
+    };
     out.push_str(&format!(
-        "**Scope:** {} of `src`. `loc_changed`, `files_changed`, and `coverage_changed` describe that tree.\n\n",
+        "**Scope:** {}{paths}. `loc_changed`, `files_changed`, and `coverage_changed` describe that scope.\n\n",
         card.scope.mode
     ));
     if let Some(intent) = &card.intent {
@@ -185,6 +199,21 @@ mod tests {
         assert!(md.contains("**Verdict:** fail"));
         assert!(md.contains("classify"));
         assert!(md.contains("crap.over_threshold"));
+    }
+
+    #[test]
+    fn markdown_marks_pass_with_failures_report_only() {
+        let mut card = Scorecard::skeleton(".", 30);
+        card.verdict = "pass".into();
+        card.gates.push(Gate {
+            id: "crap".into(),
+            pass: false,
+            enforced: false,
+            reason: Some("1 function over threshold".into()),
+        });
+        let md = to_markdown(&card);
+        assert!(md.contains("**Verdict:** pass (report only: 1 failing gate, none enforced)"));
+        assert!(!md.contains("of `src`"));
     }
 
     #[test]

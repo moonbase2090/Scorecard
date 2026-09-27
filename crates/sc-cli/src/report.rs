@@ -16,7 +16,8 @@ pub fn to_html(card: &Scorecard) -> String {
     );
     out.push_str(&esc(&format!(
         "scorecard: {} — {}",
-        card.repo, card.verdict
+        card.repo,
+        verdict_word(card)
     )));
     out.push_str("</title>\n<style>\n");
     out.push_str(CSS);
@@ -114,15 +115,36 @@ font-size:11.5px;overflow-x:auto;white-space:nowrap}
 footer{margin-top:32px;color:var(--dim);font-size:11.5px;text-align:center}
 "#;
 
-fn hero(out: &mut String, card: &Scorecard) {
-    // A passing verdict with failing gates (empty --fail-on, or advisory
-    // misses) must never read as a clean pass: neutral report-only badge
-    // plus the failing count. Exit code and verdict text are untouched.
-    let failing = card
-        .gates
+/// Gates that failed on a passing verdict (empty --fail-on, or advisory
+/// misses). Non-zero means the run is report-only: it must never read as a
+/// clean pass in any renderer. Exit code and verdict text are untouched.
+pub(crate) fn report_only_failures(card: &Scorecard) -> usize {
+    if card.verdict != "pass" {
+        return 0;
+    }
+    card.gates
         .iter()
         .filter(|gate| provided(gate) && !gate.pass)
-        .count();
+        .count()
+}
+
+/// "1 failing gate, none enforced" for the report-only renderers.
+pub(crate) fn report_only_note(failing: usize) -> String {
+    let noun = if failing == 1 { "gate" } else { "gates" };
+    format!("{failing} failing {noun}, none enforced")
+}
+
+/// Verdict word shared by the page title and the flow strip.
+fn verdict_word(card: &Scorecard) -> &str {
+    if report_only_failures(card) > 0 {
+        "report only"
+    } else {
+        &card.verdict
+    }
+}
+
+fn hero(out: &mut String, card: &Scorecard) {
+    let failing = report_only_failures(card);
     let (cls, label) = if card.verdict != "pass" {
         ("fail", "FAIL".to_string())
     } else if failing > 0 {
@@ -144,16 +166,9 @@ fn hero(out: &mut String, card: &Scorecard) {
     out.push_str("</code> · <code>");
     out.push_str(&esc(&card.id));
     out.push_str("</code>");
-    if card.verdict == "pass" && failing > 0 {
-        out.push_str(&format!(
-            " · {} {}, none enforced",
-            failing,
-            if failing == 1 {
-                "failing gate"
-            } else {
-                "failing gates"
-            }
-        ));
+    if failing > 0 {
+        out.push_str(" · ");
+        out.push_str(&report_only_note(failing));
     }
     out.push_str("</div></div></div><div class=\"meta\">");
     meta(out, "git", &git(card));
@@ -260,13 +275,12 @@ fn pipeline(out: &mut String, card: &Scorecard) {
         format!("{passed}/{} pass", provided.len())
     };
     out.push_str("<h2>flow</h2>\n<div class=\"flow\">");
-    step(
-        out,
-        "scope",
-        &card.scope.mode,
-        card.scope.paths.len(),
-        false,
-    );
+    let scope = match card.scope.paths.len() {
+        0 => card.scope.mode.clone(),
+        1 => format!("{} · 1 path", card.scope.mode),
+        n => format!("{} · {n} paths", card.scope.mode),
+    };
+    step(out, "scope", &scope, 0, false);
     step(out, "pack", &card.pack, 0, false);
     step(
         out,
@@ -278,11 +292,11 @@ fn pipeline(out: &mut String, card: &Scorecard) {
     step(out, "gates", &ratio, 0, true);
     out.push_str("<div class=\"sep\">→</div>");
     out.push_str("<div class=\"step");
-    if card.verdict == "pass" {
+    if card.verdict == "pass" && report_only_failures(card) == 0 {
         out.push_str(" hi");
     }
     out.push_str("\"><b>verdict</b><span>");
-    out.push_str(&esc(&card.verdict));
+    out.push_str(&esc(verdict_word(card)));
     out.push_str("</span></div></div>\n");
 }
 
@@ -698,6 +712,18 @@ mod tests {
         assert!(html.contains("<span class=\"verdict report\">REPORT ONLY</span>"));
         assert!(html.contains("1 failing gate, none enforced"));
         assert!(!html.contains("verdict pass"));
+        // The flow strip and page title agree with the badge.
+        assert!(html.contains("<div class=\"step\"><b>verdict</b><span>report only</span>"));
+        assert!(html.contains("— report only</title>"));
+    }
+
+    #[test]
+    fn html_flow_scope_counts_paths_not_skips() {
+        let mut c = card();
+        c.scope.paths = vec!["src/a.rs".into(), "src/b.rs".into()];
+        let html = to_html(&c);
+        assert!(html.contains("<b>scope</b><span>tree · 2 paths</span>"));
+        assert!(!html.contains("2 skipped"));
     }
 
     #[test]
