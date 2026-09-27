@@ -162,14 +162,41 @@ fn meta(out: &mut String, label: &str, value: &str) {
     out.push_str("</div>");
 }
 
+/// Reason marker for gates the active pack does not evaluate. Such gates
+/// carry no signal: they render as skipped and stay out of the pass ratio.
+pub(crate) const NOT_PROVIDED: &str = "not provided by this pack";
+
+fn provided(gate: &sc_core::Gate) -> bool {
+    gate.reason.as_deref() != Some(NOT_PROVIDED)
+}
+
 fn git(card: &Scorecard) -> String {
-    let head = card.git.head.as_deref().unwrap_or("none");
     let state = if card.git.dirty { "dirty" } else { "clean" };
-    esc(&format!("{head} ({state})"))
+    match card.git.head.as_deref().filter(|head| !head.is_empty()) {
+        // Long SHAs overflow the header meta column, so show a short SHA
+        // with the full one on hover. The <code> wrapper keeps the cell
+        // inside its column via break-all wrapping.
+        Some(head) => {
+            let short: String = head.chars().take(12).collect();
+            format!(
+                "<code title=\"{}\">{} ({})</code>",
+                esc(head),
+                esc(&short),
+                state
+            )
+        }
+        _ => format!("<code>none ({state})</code>"),
+    }
 }
 
 fn pipeline(out: &mut String, card: &Scorecard) {
-    let passed = card.gates.iter().filter(|gate| gate.pass).count();
+    let provided: Vec<_> = card.gates.iter().filter(|gate| provided(gate)).collect();
+    let passed = provided.iter().filter(|gate| gate.pass).count();
+    let ratio = if provided.is_empty() {
+        "n/a".to_string()
+    } else {
+        format!("{passed}/{} pass", provided.len())
+    };
     out.push_str("<h2>flow</h2>\n<div class=\"flow\">");
     step(
         out,
@@ -189,7 +216,7 @@ fn pipeline(out: &mut String, card: &Scorecard) {
     step(
         out,
         "gates",
-        &format!("{passed}/{} pass", card.gates.len()),
+        &ratio,
         0,
         true,
     );
@@ -272,7 +299,9 @@ fn gates(out: &mut String, card: &Scorecard) {
         out.push_str("<tr><td><code>");
         out.push_str(&esc(&gate.id));
         out.push_str("</code></td><td>");
-        if gate.pass {
+        if !provided(gate) {
+            out.push_str("<span class=\"pill dim\">skipped</span>");
+        } else if gate.pass {
             out.push_str("<span class=\"pill pass\">pass</span>");
         } else {
             out.push_str("<span class=\"pill fail\">fail</span>");
@@ -529,5 +558,36 @@ mod tests {
         for marker in ["unpkg", "cdn.", "http://", "https://"] {
             assert!(!html.contains(marker), "report must not fetch {marker}");
         }
+    }
+
+    #[test]
+    fn html_truncates_long_sha_with_full_sha_on_hover() {
+        let mut c = card();
+        let full = "0123456789abcdef0123456789abcdef01234567";
+        c.git.head = Some(full.into());
+        c.git.dirty = true;
+        let html = to_html(&c);
+        // Full SHA plus state must not appear as flat text (it overflowed
+        // the header column); short SHA shows, full SHA rides in title.
+        assert!(!html.contains(&format!("{full} (dirty)")));
+        assert!(html.contains(&format!("title=\"{full}\"")));
+        assert!(html.contains(&full[..12]));
+    }
+
+    #[test]
+    fn html_renders_unprovided_gates_as_skipped_outside_ratio() {
+        let mut c = card();
+        c.gates.push(Gate {
+            id: "sca".into(),
+            pass: false,
+            enforced: false,
+            reason: Some("not provided by this pack".into()),
+        });
+        let html = to_html(&c);
+        assert!(html.contains("<span class=\"pill dim\">skipped</span>"));
+        // crap fails, sca is not provided: the flow ratio counts provided
+        // gates only instead of "1/3 pass".
+        assert!(html.contains("0/1 pass"));
+        assert!(!html.contains("/2 pass"));
     }
 }

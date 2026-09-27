@@ -27,10 +27,10 @@ If `--out` does not end in `.html`, the HTML sibling uses the `.html` extension.
 
 The page is the report for one run, top to bottom:
 
-1. **Header.** Verdict pill, repository, pack, scope, and the scorecard id. Under that: git commit and clean or dirty, test selection, engines that ran, engines that were skipped, and the paths in scope.
+1. **Header.** Verdict pill, repository, pack, scope, and the scorecard id. Under that: git commit (short SHA, full SHA on hover) and clean or dirty, test selection, engines that ran, engines that were skipped, and the paths in scope. The git probe runs before the engines, so files sc itself creates never flag the tree dirty.
 2. **Flow.** The pipeline strip: scope, pack, engines, gates, verdict, with an arrow between each box. On `testdata/good_crate` the boxes read `tree · 1 skipped`, `rust`, `9 run · 3 skipped`, `6/6 pass`, and `pass`. The skipped engines on that run are spec, mutation, and llm.
 3. **Scores.** correctness, efficiency, maintainability, and security, then the metric tiles (lines and files changed, coverage, CRAP max, functions over the threshold, hallucinated imports).
-4. **Gates.** Each gate, pass or fail, and whether it is enforced. `sca` is reported only. It does not change the exit code.
+4. **Gates.** Each gate, pass or fail, and whether it is enforced. Enforced reflects the run's `--fail-on` set: a failing gate outside `--fail-on` reads "reported only". A gate the pack does not provide renders as skipped and stays out of the flow strip's pass ratio. `sca` is reported only. It does not change the exit code.
 5. **Worst CRAP.** Up to the functions in the reporting window, with the threshold from config.
 6. **Findings.** Count, then each finding. A clean run says `None. Clean gate.`
 7. **Mutation and spec.** Status of the mutation run and whether a spec file was requested.
