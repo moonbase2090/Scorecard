@@ -54,6 +54,13 @@ if [ -n "${APPLE_CERTIFICATE_P12:-}" ]; then
   security create-keychain -p "" "$keychain"
   security set-keychain-settings -lut 21600 "$keychain"
   security unlock-keychain -p "" "$keychain"
+  # The Developer ID Installer certificate chains to Apple's G2
+  # intermediate, which a fresh keychain lacks: without it the
+  # installer identity search finds nothing and productsign fails.
+  # The .cer is public (not a secret) and committed under
+  # packaging/certs.
+  security import "$root/packaging/certs/DeveloperIDG2CA.cer" -k "$keychain" \
+    -T /usr/bin/productsign -T /usr/bin/pkgbuild -T /usr/bin/productbuild
   printf '%s' "$APPLE_CERTIFICATE_P12" | tr -d ' \r\n' | base64 --decode > "$work/cert.p12"
   if ! security import "$work/cert.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign; then
     echo "error: p12 import failed (check APPLE_CERTIFICATE_P12 and APPLE_CERTIFICATE_PASSWORD)" >&2
