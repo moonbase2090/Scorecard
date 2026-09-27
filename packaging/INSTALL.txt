@@ -1,4 +1,4 @@
-Scorecard 0.1.1 — command-line tools, not a Mac app
+Scorecard 0.1.2 — command-line tools, not a Mac app
 ====================================================
 
 This disk image holds two command-line programs, `sc` and `sc-mcp`.
