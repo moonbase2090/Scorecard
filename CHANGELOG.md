@@ -4,17 +4,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added
+## [0.1.3] - 2026-09-27
 
-- A `web` pack for static HTML. It auto-detects a root `.html` file when no manifest is present, parses pages with `html5ever`, checks internal links, and keeps CRAP and secrets. The `html` gate is enforced. The `links` gate is advisory unless configured.
-
-## [0.1.2] - 2026-09-27
+Version 0.1.2 was tagged but never published. This release includes its planned changes and the installer fix.
 
 ### Added
 
 - The Scorecard action installs the prebuilt release for the runner and uploads an HTML report when the format is `html` or `all`.
 - Document the HTML report, including the flow strip, in the readme and in `docs/html-report.md`.
 - The macOS disk image ships `INSTALL.txt` and a signed `Install Scorecard.pkg` that installs `sc` and `sc-mcp` to `/usr/local/bin`. The same package is a release asset named `sc-v<version>-macos.pkg`.
+- The `web` pack detects static HTML projects without a manifest, checks markup and internal links, and runs CRAP and secrets analysis.
 
 ### Fixed
 
@@ -23,6 +22,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Unprovided gates show a skipped pill and no longer count in the HTML flow-strip ratio.
 - Git dirty detection snapshots at analyze start so Scorecard's own outputs do not mark a clean checkout dirty.
 - The `sca` gate stays advisory when it passes, so JSON, Markdown, HTML, and the terminal layout agree. A failing dependency check still does not change the exit code.
+- Local Rust modules no longer trigger undeclared dependency warnings.
+- CRAP findings warn when coverage was not measured. Measured 0% coverage remains an error.
+- Installer packaging reapplies the keychain partition list after importing the PKCS#12 certificate. A five-minute timeout stops signed `productbuild` from hanging on a keychain ACL prompt.
 
 ## [0.1.0] - 2026-09-26
 

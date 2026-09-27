@@ -25,7 +25,7 @@ inputs:
     required: false
     default: ""
   version:
-    description: Release to install, such as 0.1.2. Empty uses the action ref when it is a v* tag, otherwise the latest release.
+    description: Release to install, such as 0.1.3. Empty uses the action ref when it is a v* tag, otherwise the latest release.
     required: false
     default: ""
 runs:
