@@ -77,6 +77,7 @@ Skipping coverage, mutation, or the LLM does not by itself exit 2.
 | `testdata/crap_untested` | CC-heavy `classify`, no tests. Exit 1, finding `crap.over_threshold`. |
 | `testdata/crap_tested` | The same `classify` with tests that cover its branches. Exit 0 when llvm-cov is installed. |
 | `testdata/fake_dep` | Uses `missing_crate` under `cfg(any())`. Exit 0. Warning `sca.hallucinated_import`, disposition `ask`. |
+| `testdata/local_mod` | `pub use` of a local `mod`. Exit 0. No `sca.hallucinated_import`. |
 
 `sc analyze testdata/crap_untested` should finish in well under 30 seconds after dependencies are already fetched. These fixtures have no crates.io dependencies.
 

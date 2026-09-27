@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 
 use crate::secrets::secrets_in_text;
 
-const CACHE_VERSION: u32 = 1;
+const CACHE_VERSION: u32 = 2;
 
 #[derive(Debug, Clone)]
 pub struct AnalyzedFile {
@@ -21,6 +21,8 @@ pub struct AnalyzedFile {
     pub perf: Vec<PerfHit>,
     pub items: Vec<PubItem>,
     pub secrets: Vec<Finding>,
+    /// `mod` declarations and `extern crate` renames in this file.
+    pub local_names: Vec<String>,
 }
 
 pub fn analyze_tree(root: &Path, exclude: &[String]) -> Vec<AnalyzedFile> {
@@ -123,9 +125,15 @@ struct CargoPackage {
 fn parse_file(rel: &str, text: &str) -> AnalyzedFile {
     let loc = text.lines().count() as u64;
     let facts = sc_graph::inspect_source(text, rel);
-    let (functions, imports, perf, items) = match facts {
-        Some(facts) => (facts.functions, facts.imports, facts.perf, facts.items),
-        None => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+    let (functions, imports, perf, items, local_names) = match facts {
+        Some(facts) => (
+            facts.functions,
+            facts.imports,
+            facts.perf,
+            facts.items,
+            facts.local_names,
+        ),
+        None => (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new()),
     };
     AnalyzedFile {
         rel: rel.to_string(),
@@ -135,6 +143,7 @@ fn parse_file(rel: &str, text: &str) -> AnalyzedFile {
         perf,
         items,
         secrets: secrets_in_text(text, rel),
+        local_names,
     }
 }
 
@@ -144,7 +153,7 @@ fn hash_text(text: &str) -> String {
 }
 
 fn cache_path(root: &Path) -> PathBuf {
-    root.join(".sc").join("cache").join("parse-v1.json")
+    root.join(".sc").join("cache").join("parse-v2.json")
 }
 
 fn read_cache(path: &Path) -> CacheDoc {
@@ -192,6 +201,7 @@ struct CachedFile {
     perf: Vec<PerfHit>,
     items: Vec<PubItem>,
     secrets: Vec<Finding>,
+    local_names: Vec<String>,
 }
 
 impl CachedFile {
@@ -204,6 +214,7 @@ impl CachedFile {
             perf: file.perf.clone(),
             items: file.items.clone(),
             secrets: file.secrets.clone(),
+            local_names: file.local_names.clone(),
         }
     }
 
@@ -216,6 +227,7 @@ impl CachedFile {
             perf: self.perf.clone(),
             items: self.items.clone(),
             secrets: self.secrets.clone(),
+            local_names: self.local_names.clone(),
         }
     }
 }
@@ -233,8 +245,8 @@ mod tests {
         let first = analyze_tree(&dir, &[]);
         assert_eq!(first[0].functions[0].symbol, "cached");
         fs::write(
-            dir.join(".sc/cache/parse-v1.json"),
-            fs::read_to_string(dir.join(".sc/cache/parse-v1.json")).unwrap(),
+            dir.join(".sc/cache/parse-v2.json"),
+            fs::read_to_string(dir.join(".sc/cache/parse-v2.json")).unwrap(),
         )
         .unwrap();
         let second = analyze_tree(&dir, &[]);

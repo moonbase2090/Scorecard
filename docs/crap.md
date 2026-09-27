@@ -19,7 +19,7 @@ Coverage needed to stay at or under 30:
 | 25 | ~80% |
 | ≥31 | refactor; tests cannot save it |
 
-Names from the coverage tool are matched to parsed functions on a best-effort basis. A function with no coverage record is treated as uncovered. When that happens and coverage did run, the scorecard includes a `coverage.unmatched` warning.
+Names from the coverage tool are matched to parsed functions on a best-effort basis. A function with no coverage record is treated as uncovered. When that happens and coverage did run, the scorecard includes a `coverage.unmatched` warning. The CRAP number always assumes 0% for unmeasured functions, but when coverage was not measured for a function, `crap.over_threshold` and `complexity.untested` are warnings with a "coverage not measured" note instead of errors. Measured 0% coverage stays an error.
 
 At CC 5 and 0% coverage, CRAP is exactly 30, so the function passes. At CC 12 and 0% coverage, CRAP is 156.
 

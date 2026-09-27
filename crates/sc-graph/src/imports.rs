@@ -78,6 +78,33 @@ fn is_builtin(name: &str) -> bool {
     matches!(name, "self" | "super" | "crate" | "std" | "core" | "alloc")
 }
 
+/// First segments that can never be external crates: modules declared in
+/// this file (`mod name;` or `mod name { ... }`) and `extern crate` rename
+/// targets (`extern crate foo as bar;` used as `bar::...`).
+pub fn local_names_in_file(file: &syn::File) -> Vec<String> {
+    let mut out = Vec::new();
+    for item in &file.items {
+        match item {
+            Item::Mod(item_mod) => {
+                let name = item_mod.ident.to_string();
+                if !out.contains(&name) {
+                    out.push(name);
+                }
+            }
+            Item::ExternCrate(extern_crate) => {
+                if let Some((_, rename)) = &extern_crate.rename {
+                    let name = rename.to_string();
+                    if !out.contains(&name) {
+                        out.push(name);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,5 +122,22 @@ use also_missing::Other;
         let hits = imports_in_file(&file, "src/lib.rs");
         let names: Vec<_> = hits.iter().map(|hit| hit.crate_name.as_str()).collect();
         assert_eq!(names, vec!["also_missing", "missing_crate"]);
+    }
+
+    #[test]
+    fn local_names_covers_mod_decls_and_extern_aliases() {
+        let src = r#"
+mod score;
+mod inline {
+    pub fn f() {}
+}
+extern crate serde as serde_alias;
+extern crate self as this_crate;
+"#;
+        let file = syn::parse_file(src).unwrap();
+        assert_eq!(
+            local_names_in_file(&file),
+            vec!["score", "inline", "serde_alias", "this_crate"]
+        );
     }
 }

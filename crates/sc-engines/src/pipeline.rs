@@ -1260,12 +1260,23 @@ fn import_findings(
     if let Some(name) = package_name(&manifest) {
         allowed.insert(name);
     }
+    // First segments that resolve inside the crate are never external:
+    // declared `mod` names, `extern crate` aliases, and file modules
+    // (`src/score.rs`, `src/foo/mod.rs`) across the analyzed sources.
+    let mut local: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
+    for file in &selection.files {
+        local.extend(file.local_names.iter().cloned());
+        if let Some(module) = file_module(&file.rel) {
+            local.insert(module);
+        }
+    }
     ran.push("sca".into());
     let mut count = 0u64;
     for file in &selection.files {
         for import in &file.imports {
             let name = crate::manifest::normalize(&import.crate_name);
-            if allowed.contains(&name) {
+            if allowed.contains(&name) || local.contains(&name) {
                 continue;
             }
             count += 1;
@@ -1293,6 +1304,28 @@ fn import_findings(
         }
     }
     count
+}
+
+/// Module name a source file contributes: `src/score.rs` is module
+/// `score`, `src/foo/mod.rs` is module `foo`. Crate roots (`main.rs`,
+/// `lib.rs`) and a bare `src/mod.rs` contribute nothing.
+fn file_module(rel: &str) -> Option<String> {
+    let path = Path::new(rel);
+    if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+        return None;
+    }
+    let stem = path.file_stem().and_then(|stem| stem.to_str())?;
+    if stem == "mod" {
+        let parent = path.parent()?.file_name().and_then(|name| name.to_str())?;
+        if parent == "src" {
+            return None;
+        }
+        return Some(parent.to_string());
+    }
+    if stem == "main" || stem == "lib" {
+        return None;
+    }
+    Some(stem.to_string())
 }
 
 fn secret_and_perf(selection: &Selection, ran: &mut Vec<String>, findings: &mut Vec<Finding>) {
@@ -1750,6 +1783,73 @@ mod tests {
         assert_eq!(output.scorecard.git.head.as_ref().unwrap().len(), 40);
         assert!(output.scorecard.gates.iter().all(|gate| !gate.enforced));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn analyzed(rel: &str, imports: &[&str], local_names: &[&str]) -> crate::facts::AnalyzedFile {
+        crate::facts::AnalyzedFile {
+            rel: rel.to_string(),
+            loc: 10,
+            functions: Vec::new(),
+            imports: imports
+                .iter()
+                .map(|name| sc_graph::ImportHit {
+                    file: rel.to_string(),
+                    crate_name: (*name).to_string(),
+                    line: 1,
+                })
+                .collect(),
+            perf: Vec::new(),
+            items: Vec::new(),
+            secrets: Vec::new(),
+            local_names: local_names.iter().map(|name| (*name).to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn hallucinated_import_ignores_local_modules_and_aliases() {
+        use crate::scope::Selection;
+        let dir = std::env::temp_dir().join(format!("sc-sca-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let files = vec![
+            // `mod score;` declared here, `pub use score::...` first segment.
+            analyzed("src/lib.rs", &["score", "missing"], &["score", "renamed"]),
+            // File module: src/score.rs is module `score` with no decl needed.
+            analyzed("src/score.rs", &["renamed"], &[]),
+        ];
+        let selection = Selection {
+            mode: "tree".into(),
+            files,
+            crap_functions: Vec::new(),
+            new_symbols: std::collections::BTreeSet::new(),
+            narrow_untested: false,
+            paths: Vec::new(),
+            loc_changed: 0,
+            files_changed: 0,
+        };
+        let mut ran = Vec::new();
+        let mut skipped = Vec::new();
+        let mut findings = Vec::new();
+        let count = import_findings(&dir, &selection, true, &mut ran, &mut skipped, &mut findings);
+        assert_eq!(count, 1);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].symbol.as_deref(), Some("missing"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn file_module_names_follow_rust_layout() {
+        assert_eq!(file_module("src/score.rs").as_deref(), Some("score"));
+        assert_eq!(file_module("src/foo/mod.rs").as_deref(), Some("foo"));
+        assert_eq!(file_module("src/main.rs"), None);
+        assert_eq!(file_module("src/lib.rs"), None);
+        assert_eq!(file_module("src/mod.rs"), None);
+        assert_eq!(file_module("README.md"), None);
     }
 
     #[test]

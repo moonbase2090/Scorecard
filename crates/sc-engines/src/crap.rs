@@ -63,21 +63,30 @@ pub fn evaluate(
         else {
             continue;
         };
+        // Coverage we never measured reads as 0% in the CRAP number (kept
+        // as-is), but the finding must not claim measured failure: warning
+        // plus an explicit note instead of error-level red.
+        let measured = coverage
+            .and_then(|data| data.for_function(&function.file, &function.symbol))
+            .is_some();
+        let severity = if measured { "error" } else { "warning" };
+        let unknown = if measured { "" } else { "; coverage not measured" };
         if exceeds_threshold(row.crap, threshold) {
             findings.push(Finding {
                 id: format!("crap:{}:{}", function.file, function.symbol),
                 rule: "crap.over_threshold".into(),
                 engine: "crap".into(),
-                severity: "error".into(),
+                severity: severity.into(),
                 file: function.file.clone(),
                 span: Some(function.span.clone()),
                 symbol: Some(function.symbol.clone()),
                 message: format!(
-                    "CRAP {} (CC={}, cov={}%) exceeds threshold {}",
+                    "CRAP {} (CC={}, cov={}%) exceeds threshold {}{}",
                     fmt_num(row.crap),
                     row.cc,
                     pct(row.coverage),
-                    threshold
+                    threshold,
+                    unknown,
                 ),
                 evidence: serde_json::json!({
                     "cc": row.cc,
@@ -94,13 +103,13 @@ pub fn evaluate(
                 id: format!("complexity:{}:{}", function.file, function.symbol),
                 rule: "complexity.untested".into(),
                 engine: "complexity".into(),
-                severity: "error".into(),
+                severity: severity.into(),
                 file: function.file.clone(),
                 span: Some(function.span.clone()),
                 symbol: Some(function.symbol.clone()),
                 message: format!(
-                    "CC {} with 0% coverage meets new_fn_untested_cc {}",
-                    row.cc, untested_cc
+                    "CC {} with 0% coverage meets new_fn_untested_cc {}{}",
+                    row.cc, untested_cc, unknown,
                 ),
                 evidence: serde_json::json!({
                     "cc": row.cc,
@@ -171,9 +180,12 @@ mod tests {
         let finding = &outcome.findings[0];
         assert_eq!(finding.rule, "crap.over_threshold");
         assert_eq!(finding.id, "crap:src/parse.rs:parse_input");
+        // The CRAP number is kept, but unmeasured coverage downgrades the
+        // finding to a warning that says so.
+        assert_eq!(finding.severity, "warning");
         assert_eq!(
             finding.message,
-            "CRAP 156 (CC=12, cov=0%) exceeds threshold 30"
+            "CRAP 156 (CC=12, cov=0%) exceeds threshold 30; coverage not measured"
         );
         assert_eq!(
             finding.suggested_action.as_deref(),
@@ -231,5 +243,42 @@ mod tests {
         assert_eq!(outcome.findings.len(), 1);
         assert_eq!(outcome.findings[0].rule, "complexity.untested");
         assert_eq!(outcome.findings[0].id, "complexity:src/lib.rs:wide");
+        assert_eq!(outcome.findings[0].severity, "warning");
+        assert!(
+            outcome.findings[0].message.contains("coverage not measured"),
+            "{}",
+            outcome.findings[0].message
+        );
+    }
+
+    #[test]
+    fn measured_zero_coverage_stays_error() {
+        let functions = vec![FunctionInfo {
+            file: "src/lib.rs".into(),
+            symbol: "wide".into(),
+            span: Span {
+                start_line: 1,
+                start_col: 1,
+                end_line: 20,
+                end_col: 2,
+            },
+            cc: 15,
+        }];
+        let coverage = CoverageData {
+            functions: vec![crate::coverage::CovFunction {
+                file: "src/lib.rs".into(),
+                demangled: "crate::wide".into(),
+                coverage: 0.0,
+            }],
+            line_rate: 0.0,
+        };
+        let outcome = evaluate(&functions, Some(&coverage), 10_000, 15, |_| true);
+        assert_eq!(outcome.untested, 1);
+        assert_eq!(outcome.findings[0].severity, "error");
+        assert!(
+            !outcome.findings[0].message.contains("not measured"),
+            "{}",
+            outcome.findings[0].message
+        );
     }
 }
