@@ -135,14 +135,19 @@ build_dmg() {
   # dmgbuild writes the styled Finder window (.DS_Store) directly and
   # works headless, unlike AppleScript-driven tools. Pinned so local
   # and CI builds agree; invoked as a module so no PATH setup is needed.
-  if ! python3 -c "import dmgbuild" 2>/dev/null; then
-    python3 -m pip install --user "dmgbuild==1.6.5" || {
+  # Installed into a private venv: Homebrew Python on macOS runners is
+  # externally managed (PEP 668) and refuses pip installs, even --user.
+  venv="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/sc-dmgbuild-venv"
+  if ! "$venv/bin/python" -c "import dmgbuild" 2>/dev/null; then
+    rm -rf "$venv"
+    { python3 -m venv "$venv" &&
+      "$venv/bin/python" -m pip install --quiet --disable-pip-version-check "dmgbuild==1.6.5"; } || {
       echo "error: cannot install dmgbuild==1.6.5" >&2
       exit 1
     }
   fi
   rm -f "$dmg"
-  python3 -m dmgbuild -D "stage=$stage" -D "packaging=$root/packaging" -s "$root/packaging/dmg-settings.py" "Scorecard $ver" "$dmg"
+  "$venv/bin/python" -m dmgbuild -D "stage=$stage" -D "packaging=$root/packaging" -s "$root/packaging/dmg-settings.py" "Scorecard $ver" "$dmg"
 }
 signed=false
 if [ "$signing" = true ]; then
