@@ -19,7 +19,7 @@ use crate::command::{run_cargo, run_cmd, CommandError};
 use crate::compile::{generic_compile_failure, parse_compiler_messages};
 use crate::coverage::parse_coverage_json;
 use crate::crap::{evaluate, unmatched_count};
-use crate::manifest::{dependency_names, package_name};
+
 use crate::mutation::run_mutation;
 use crate::scope::{empty_selection, select, Selection};
 use crate::spec_check::{check_spec, gap_value};
@@ -1579,11 +1579,7 @@ fn import_findings(
         skipped.push("sca".into());
         return 0;
     }
-    let manifest = std::fs::read_to_string(root.join("Cargo.toml")).unwrap_or_default();
-    let mut allowed = dependency_names(&manifest);
-    if let Some(name) = package_name(&manifest) {
-        allowed.insert(name);
-    }
+    let allowed = crate::manifest::manifest_crate_names(root);
     // First segments that resolve inside the crate are never external:
     // declared `mod` names, `extern crate` aliases, and file modules
     // (`src/score.rs`, `src/foo/mod.rs`) across the analyzed sources.
@@ -2171,6 +2167,51 @@ mod tests {
         );
         assert_eq!(count, 1);
         assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].symbol.as_deref(), Some("missing"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn hallucinated_import_allows_member_package_and_path_deps() {
+        use crate::scope::Selection;
+        let dir = std::env::temp_dir().join(format!("sc-sca-member-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("host")).unwrap();
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"host\"]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("host/Cargo.toml"),
+            "[package]\nname = \"sc-core\"\nversion = \"0.1.0\"\n\n[dependencies]\nprismattyc-mux = { path = \"../mux\" }\nhtml5ever = \"0.1\"\n",
+        )
+        .unwrap();
+        let files = vec![analyzed(
+            "host/src/lib.rs",
+            &["sc_core", "prismattyc_mux", "html5ever", "missing"],
+            &[],
+        )];
+        let selection = Selection {
+            mode: "tree".into(),
+            files,
+            crap_functions: Vec::new(),
+            new_symbols: std::collections::BTreeSet::new(),
+            narrow_untested: false,
+            paths: Vec::new(),
+            loc_changed: 0,
+            files_changed: 0,
+        };
+        let mut findings = Vec::new();
+        let count = import_findings(
+            &dir,
+            &selection,
+            true,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut findings,
+        );
+        assert_eq!(count, 1, "{findings:?}");
         assert_eq!(findings[0].symbol.as_deref(), Some("missing"));
         let _ = std::fs::remove_dir_all(&dir);
     }

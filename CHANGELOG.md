@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - The HTML report summary grid keeps the git SHA inside its own cell. A long value wraps or clips instead of painting over the tests column.
+- `sca.hallucinated_import` treats workspace member package names and their dependencies as declared. A path dep written with a hyphen matches the underscore name used in source.
 
 ## [0.1.3] - 2026-09-27
 
