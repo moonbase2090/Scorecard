@@ -4,6 +4,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-27
+
 ### Added
 
 - The Scorecard action installs the prebuilt release for the runner and uploads an HTML report when the format is `html` or `all`.
@@ -12,6 +14,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- HTML report truncates a long git SHA to 12 characters so the header column does not overflow.
+- Gates outside `--fail-on` render as reported-only across JSON, Markdown, HTML, and the terminal.
+- Unprovided gates show a skipped pill and no longer count in the HTML flow-strip ratio.
+- Git dirty detection snapshots at analyze start so Scorecard's own outputs do not mark a clean checkout dirty.
 - The `sca` gate stays advisory when it passes, so JSON, Markdown, HTML, and the terminal layout agree. A failing dependency check still does not change the exit code.
 
 ## [0.1.0] - 2026-09-26

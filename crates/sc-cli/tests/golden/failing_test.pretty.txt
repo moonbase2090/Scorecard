@@ -1,4 +1,4 @@
-sc 0.1.1  testdata/failing_test  rust  GITSHA STATE  scope tree
+sc 0.1.2  testdata/failing_test  rust  GITSHA STATE  scope tree
 
 FAIL
 

@@ -54,12 +54,18 @@ pub struct AnalyzeOutput {
 }
 
 pub fn analyze(request: AnalyzeRequest) -> AnalyzeOutput {
+    // Snapshot git status before any engine runs. Engines create files under
+    // the root (target/, coverage artifacts, .sc/last-scorecard.json), so a
+    // probe at the end of analysis flags sc's own outputs as a dirty tree.
+    let git = git_info(&request.root);
     match crate::pack::detect(&request.root, &request.config.pack) {
-        Ok(crate::pack::Detected::Pack(crate::pack::PackId::Rust)) => analyze_rust(request),
-        Ok(crate::pack::Detected::Pack(crate::pack::PackId::Python)) => analyze_python(request),
-        Ok(crate::pack::Detected::Pack(pack)) => analyze_unsupported(request, pack),
+        Ok(crate::pack::Detected::Pack(crate::pack::PackId::Rust)) => analyze_rust(request, git),
+        Ok(crate::pack::Detected::Pack(crate::pack::PackId::Python)) => {
+            analyze_python(request, git)
+        }
+        Ok(crate::pack::Detected::Pack(pack)) => analyze_unsupported(request, pack, git),
         Ok(crate::pack::Detected::Unknown) => {
-            analyze_blocked(request, "unknown", "no language pack detected")
+            analyze_blocked(request, "unknown", "no language pack detected", git)
         }
         Ok(crate::pack::Detected::Ambiguous(packs)) => {
             let names: Vec<_> = packs.iter().map(|pack| pack.as_str()).collect();
@@ -70,13 +76,19 @@ pub fn analyze(request: AnalyzeRequest) -> AnalyzeOutput {
                     "several language packs match ({}); set pack in analyzer.toml or pass --pack",
                     names.join(", ")
                 ),
+                git,
             )
         }
-        Err(err) => analyze_blocked(request, "unknown", &err),
+        Err(err) => analyze_blocked(request, "unknown", &err, git),
     }
 }
 
-fn analyze_blocked(request: AnalyzeRequest, pack: &str, message: &str) -> AnalyzeOutput {
+fn analyze_blocked(
+    request: AnalyzeRequest,
+    pack: &str,
+    message: &str,
+    git: GitInfo,
+) -> AnalyzeOutput {
     let findings = vec![
         unavailable("compile", message),
         unavailable("tests", message),
@@ -101,7 +113,7 @@ fn analyze_blocked(request: AnalyzeRequest, pack: &str, message: &str) -> Analyz
         repo: request.repo,
         pack: pack.to_string(),
         test_selection: "full-suite".into(),
-        git: git_info(&request.root),
+        git,
         mode: "tree".into(),
         paths: Vec::new(),
         fail_on: request.fail_on,
@@ -130,7 +142,11 @@ fn analyze_blocked(request: AnalyzeRequest, pack: &str, message: &str) -> Analyz
     })
 }
 
-fn analyze_unsupported(request: AnalyzeRequest, pack: crate::pack::PackId) -> AnalyzeOutput {
+fn analyze_unsupported(
+    request: AnalyzeRequest,
+    pack: crate::pack::PackId,
+    git: GitInfo,
+) -> AnalyzeOutput {
     let lint_is_rust_default = request.config.commands.lint.trim()
         == crate::pack::PackId::Rust.lint_default()
         || request.config.commands.lint.trim().is_empty();
@@ -206,7 +222,7 @@ fn analyze_unsupported(request: AnalyzeRequest, pack: crate::pack::PackId) -> An
         repo: request.repo,
         pack: pack.as_str().to_string(),
         test_selection: pack.test_selection().into(),
-        git: git_info(&request.root),
+        git,
         mode: "tree".into(),
         paths: Vec::new(),
         fail_on: request.fail_on,
@@ -247,7 +263,7 @@ fn analyze_unsupported(request: AnalyzeRequest, pack: crate::pack::PackId) -> An
     })
 }
 
-fn analyze_python(request: AnalyzeRequest) -> AnalyzeOutput {
+fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
     let deadline = Instant::now() + request.budget;
     let outcome = crate::python::run(
         &request.root,
@@ -292,7 +308,7 @@ fn analyze_python(request: AnalyzeRequest) -> AnalyzeOutput {
         repo: request.repo,
         pack: "python".into(),
         test_selection: "full-suite".into(),
-        git: git_info(&request.root),
+        git,
         mode: "tree".into(),
         paths: Vec::new(),
         fail_on: request.fail_on,
@@ -318,7 +334,7 @@ fn analyze_python(request: AnalyzeRequest) -> AnalyzeOutput {
     })
 }
 
-fn analyze_rust(request: AnalyzeRequest) -> AnalyzeOutput {
+fn analyze_rust(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
     let deadline = Instant::now() + request.budget;
     let root = &request.root;
     let threshold = request.config.gates.crap_threshold;
@@ -356,7 +372,7 @@ fn analyze_rust(request: AnalyzeRequest) -> AnalyzeOutput {
         );
     }
 
-    assemble_rust_report(&request, &selection, threshold, deadline, state)
+    assemble_rust_report(&request, &selection, threshold, deadline, state, git)
 }
 
 struct RustState {
@@ -637,6 +653,7 @@ fn assemble_rust_report(
     threshold: u32,
     deadline: Instant,
     mut state: RustState,
+    git: GitInfo,
 ) -> AnalyzeOutput {
     let root = &request.root;
     let report_lint = run_lint_engine(
@@ -738,7 +755,7 @@ fn assemble_rust_report(
         } else {
             "full-suite".into()
         },
-        git: git_info(root),
+        git,
         mode: selection.mode.clone(),
         paths: selection.paths.clone(),
         fail_on: request.fail_on.clone(),
@@ -785,6 +802,7 @@ fn finish(mut draft: Draft) -> AnalyzeOutput {
     sort_findings(&mut draft.findings);
     unique_ids(&mut draft.findings);
     apply_disposition(&mut draft.findings);
+    sc_core::apply_fail_on(&mut draft.gates, &draft.fail_on);
     let failed = sc_core::verdict_fails(&draft.gates, &draft.fail_on);
     let scores = compute_scores(&draft.findings);
     let scorecard = Scorecard {
@@ -1650,6 +1668,87 @@ mod tests {
             .findings
             .iter()
             .any(|finding| finding.rule == "engine.unavailable"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn git_repo(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let run = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(status.success());
+        };
+        run(&["init", "-q"]);
+        run(&[
+            "-c",
+            "user.email=sc-test@example.com",
+            "-c",
+            "user.name=sc-test",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "init",
+        ]);
+        dir
+    }
+
+    #[test]
+    fn git_probe_sees_clean_tree_and_later_modifications() {
+        let dir = git_repo("sc-git-probe");
+        let clean = git_info(&dir);
+        assert_eq!(clean.head.as_ref().unwrap().len(), 40);
+        assert!(!clean.dirty);
+        std::fs::write(dir.join("note.txt"), "x").unwrap();
+        assert!(git_info(&dir).dirty);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn analyzer_own_outputs_trip_a_late_probe() {
+        // Dogfood root cause: files sc itself creates read as a dirty tree
+        // once written, so the probe must run before the engines, not after.
+        let dir = git_repo("sc-git-own-outputs");
+        assert!(!git_info(&dir).dirty);
+        std::fs::create_dir_all(dir.join(".sc")).unwrap();
+        std::fs::write(dir.join(".sc").join("last-scorecard.json"), "{}").unwrap();
+        std::fs::write(dir.join("scorecard.html"), "x").unwrap();
+        assert!(
+            git_info(&dir).dirty,
+            "own outputs look dirty after the fact"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn blocked_analysis_reports_pre_analysis_git_state() {
+        // analyze() snapshots git before any engine runs: a clean repo with
+        // no detectable pack reports clean with the committed head, and an
+        // empty --fail-on set reconciles every gate to reported-only.
+        let dir = git_repo("sc-git-blocked");
+        let output = analyze(AnalyzeRequest {
+            root: dir.clone(),
+            repo: "blocked".into(),
+            fail_on: Vec::new(),
+            budget: Duration::from_secs(30),
+            config: Config::default(),
+            diff_base: None,
+            diff_head: None,
+            path_list: Vec::new(),
+            spec_path: None,
+            mutation_override: None,
+            llm_override: None,
+            intent: None,
+        });
+        assert!(!output.scorecard.git.dirty);
+        assert_eq!(output.scorecard.git.head.as_ref().unwrap().len(), 40);
+        assert!(output.scorecard.gates.iter().all(|gate| !gate.enforced));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
