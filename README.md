@@ -4,7 +4,7 @@
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-blue.svg)](LICENSE)
 [![MSRV 1.85](https://img.shields.io/badge/MSRV-1.85-blue.svg)](https://github.com/moonbase2090/Scorecard/blob/main/Cargo.toml)
 
-`sc` checks that a project type-checks, its tests pass, coverage and [CRAP](docs/crap.md) stay in bounds, secrets are absent, and the linter is clean. It also reports undeclared dependencies. Nine language packs are built in. The report is for AI coding agents and for CI. The project site is [scorecardcli.com](https://scorecardcli.com).
+`sc` checks that a project type-checks, its tests pass, coverage and [CRAP](docs/crap.md) stay in bounds, secrets are absent, and the linter is clean. It also reports undeclared dependencies. Ten language packs are built in. The report is for AI coding agents and for CI. The project site is [scorecardcli.com](https://scorecardcli.com).
 
 ## Install
 

@@ -5,7 +5,7 @@
 //! finding subtracts 0.25 and a warning subtracts 0.05, then the result is
 //! clamped to 0.0.
 //!
-//! - correctness: `compile`, `tests`, and `config` findings
+//! - correctness: `compile`, `tests`, `config`, `lint`, and `html` findings
 //! - maintainability: `complexity`, `crap`, and `coverage` findings
 //! - efficiency: `perf` findings (none in M1, so this stays 1.0)
 //! - security: `secrets` and `sca` findings (none in M1, so this stays 1.0)
@@ -28,7 +28,7 @@ pub fn compute_scores(findings: &[Finding]) -> Scores {
             continue;
         }
         let slot = match finding.engine.as_str() {
-            "compile" | "tests" | "config" | "lint" => &mut correctness,
+            "compile" | "tests" | "config" | "lint" | "html" => &mut correctness,
             "perf" => &mut efficiency,
             "secrets" | "sca" => &mut security,
             _ => &mut maintainability,

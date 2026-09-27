@@ -95,6 +95,17 @@ fn parse_go_cover(profile: &str) -> Vec<GoStmt> {
     out
 }
 
+pub fn javascript_in(rel: &str, text: &str, line_offset: u32) -> Vec<FunctionInfo> {
+    let mut functions = scan_text(rel, text, &Lang::C);
+    if line_offset > 0 {
+        for function in &mut functions {
+            function.span.start_line = function.span.start_line.saturating_add(line_offset);
+            function.span.end_line = function.span.end_line.saturating_add(line_offset);
+        }
+    }
+    functions
+}
+
 pub fn functions_for_pack(root: &Path, pack: &str) -> Vec<FunctionInfo> {
     match pack {
         "python" => python_functions(root),
