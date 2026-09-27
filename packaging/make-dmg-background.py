@@ -44,14 +44,11 @@ def font(size, bold=False):
     return ImageFont.load_default()
 
 
-def label_pill(d, cx, cy, text, font_face):
-    """White pill behind one icon label so Finder's black text reads
-    on the dark background. Sized from the text plus padding."""
-    left, _, right, bottom = d.textbbox((0, 0), text, font=font_face)
-    pad_x, pad_y = 16, 5
-    w = (right - left) + pad_x * 2
-    h = (bottom - 0) + pad_y * 2
-    d.rounded_rectangle([cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2], radius=h / 2, fill=(255, 255, 255))
+def label_band(d, x0, x1, cy, s):
+    """Orange band behind a label row so Finder's black text reads on
+    the dark background. Symmetric about the row center."""
+    h = 30 * s
+    d.rounded_rectangle([x0 * s, cy * s - h / 2, x1 * s, cy * s + h / 2], radius=h / 2, fill=ACCENT)
 
 
 def draw_logo(d, cx, cy, size):
@@ -95,18 +92,11 @@ def draw(scale):
             px[x, y] = rgb
     d = ImageDraw.Draw(img)
     s = scale
-    # White pills behind each icon label so Finder's black text reads
-    # on the dark background (label rows only; icons stay on dark).
-    pill_face = font(13 * s)
-    for cx, cy, name in (
-        (330, 272, "Install Scorecard.command"),
-        (470, 272, "INSTALL.txt"),
-        (130, 430, "sc"),
-        (310, 430, "sc-mcp"),
-        (490, 430, "README.md"),
-        (670, 430, "LICENSE.txt"),
-    ):
-        label_pill(d, cx * s, cy * s, name, pill_face)
+    # Orange label bands so Finder's black text reads on the dark
+    # background. The top band is shortened to the installer pair so
+    # the row stays centered; icons stay on dark.
+    label_band(d, 200, 600, 272, s)
+    label_band(d, 60, 740, 430, s)
     # Heading group: logo plus centered headline, 40px+ top padding.
     face = font(28 * s, bold=True)
     label = "Double-click Install Scorecard"
