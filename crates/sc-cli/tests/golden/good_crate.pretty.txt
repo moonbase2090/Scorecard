@@ -28,4 +28,3 @@ engines run: compile, tests, coverage, complexity, crap, sca, secrets, perf, lin
 engines skipped: spec, mutation, llm
 duration: DURs
 exit 0: gates passed
-

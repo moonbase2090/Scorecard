@@ -192,10 +192,9 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         request.config.gates.new_fn_untested_cc,
         |_| true,
     );
-    if !functions.is_empty() {
-        findings.push(unavailable(
-            "coverage",
-            "no coverage report; CRAP treats each function as uncovered",
+    if !crap.coverage_complete {
+        findings.push(crate::coverage::missing_finding(
+            "coverage report is not collected for this pack",
         ));
     }
     findings.extend(crap.findings.clone());
@@ -249,14 +248,11 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
                 format!("{missing_links} missing files")
             },
         ),
-        gate(
-            "crap",
-            crap.over == 0 && crap.untested == 0,
-            &crap_gate_reason(
-                crap.over,
-                crap.untested,
-                request.config.gates.new_fn_untested_cc,
-            ),
+        crap_gate(
+            crap.coverage_complete,
+            crap.over,
+            crap.untested,
+            request.config.gates.new_fn_untested_cc,
         ),
         gate(
             "secrets",
@@ -516,21 +512,21 @@ fn analyze_unsupported(
         request.config.gates.new_fn_untested_cc,
         |_| true,
     );
-    if coverage.is_none() && !functions.is_empty() {
-        findings.push(unavailable(
-            "coverage",
-            "no coverage report; CRAP treats each function as uncovered",
-        ));
+    if !crap.coverage_complete {
+        let unmatched = coverage
+            .as_ref()
+            .map(|data| crate::crap::unmatched_count(&functions, data))
+            .unwrap_or(functions.len() as u64);
+        findings.push(crate::coverage::missing_finding(&format!(
+            "coverage data is missing for {unmatched} analyzed function(s)"
+        )));
     }
     findings.extend(crap.findings.clone());
-    gates.push(gate(
-        "crap",
-        crap.over == 0 && crap.untested == 0,
-        &crap_gate_reason(
-            crap.over,
-            crap.untested,
-            request.config.gates.new_fn_untested_cc,
-        ),
+    gates.push(crap_gate(
+        crap.coverage_complete,
+        crap.over,
+        crap.untested,
+        request.config.gates.new_fn_untested_cc,
     ));
     gates.push(gate(
         "secrets",
@@ -606,14 +602,11 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         } else {
             gate_reported("tests")
         },
-        gate(
-            "crap",
-            outcome.crap_over == 0 && outcome.crap_untested == 0,
-            &crap_gate_reason(
-                outcome.crap_over,
-                outcome.crap_untested,
-                request.config.gates.new_fn_untested_cc,
-            ),
+        crap_gate(
+            outcome.crap_coverage_complete,
+            outcome.crap_over,
+            outcome.crap_untested,
+            request.config.gates.new_fn_untested_cc,
         ),
         advisory_gate("sca", outcome.sca_errors, "undeclared dependencies"),
         gate("lint", outcome.lint_pass, &outcome.lint_reason),
@@ -872,7 +865,37 @@ fn coverage_phase(
     coverage_enabled: bool,
     state: &mut RustState,
 ) {
-    if !state.tests_pass || !coverage_enabled {
+    if !state.tests_pass {
+        if !state.skipped.iter().any(|engine| engine == "coverage") {
+            state.skipped.push("coverage".into());
+        }
+        let failed_test = state
+            .runs
+            .iter()
+            .rev()
+            .find(|run| run.engine == "tests" && run.exit_code != Some(0));
+        let reason = match failed_test {
+            Some(run) => format!(
+                "coverage skipped: tests gate failed (test command exit code {})",
+                run.exit_code
+                    .map(|code| code.to_string())
+                    .unwrap_or_else(|| "unavailable".into())
+            ),
+            None => format!(
+                "coverage skipped: tests gate failed ({})",
+                if state.tests_reason.is_empty() {
+                    "test command was not run"
+                } else {
+                    &state.tests_reason
+                }
+            ),
+        };
+        state
+            .findings
+            .push(crate::coverage::missing_finding(&reason));
+        return;
+    }
+    if !coverage_enabled {
         if !state.skipped.iter().any(|engine| engine == "coverage") {
             state.skipped.push("coverage".into());
         }
@@ -892,7 +915,7 @@ fn coverage_phase(
                     span: None,
                     symbol: None,
                     message: format!(
-                        "{unmatched} analyzed function(s) had no llvm-cov record; coverage treated as 0"
+                        "coverage was not measured for {unmatched} analyzed function(s) without llvm-cov records"
                     ),
                     evidence: serde_json::json!({"unmatched": unmatched}),
                     suggested_action: Some(
@@ -906,7 +929,11 @@ fn coverage_phase(
         }
         Err(err) => {
             state.skipped.push("coverage".into());
-            state.findings.push(coverage_missing(&err));
+            state
+                .findings
+                .push(crate::coverage::missing_finding(&format!(
+                    "coverage tooling unavailable: {err}"
+                )));
         }
     }
 }
@@ -1007,8 +1034,22 @@ fn assemble_rust_report(
         },
     );
     state.ran.push("crap".into());
-    let crap_pass = crap.over == 0 && crap.untested == 0;
-    let crap_reason = crap_gate_reason(crap.over, crap.untested, untested_cc);
+    if !crap.coverage_complete
+        && !state
+            .findings
+            .iter()
+            .any(|finding| finding.engine == "coverage")
+    {
+        state.findings.push(crate::coverage::missing_finding(
+            "coverage was not run for all analyzed functions",
+        ));
+    }
+    let crap_gate = crap_gate(
+        crap.coverage_complete,
+        crap.over,
+        crap.untested,
+        untested_cc,
+    );
     state.findings.extend(crap.findings);
 
     let hallucinated = import_findings(
@@ -1058,7 +1099,7 @@ fn assemble_rust_report(
     let mut gates = vec![
         gate("types", state.types_pass, &state.types_reason),
         gate("tests", state.tests_pass, &state.tests_reason),
-        gate("crap", crap_pass, &crap_reason),
+        crap_gate,
     ];
     push_optional_gates(
         &mut gates,
@@ -1185,7 +1226,22 @@ fn note_run(
         command: command.to_string(),
         exit_code,
         duration_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
+        budget_ms: None,
     });
+}
+
+fn note_run_with_budget(
+    runs: &mut Vec<RunRecord>,
+    engine: &str,
+    command: &str,
+    exit_code: Option<i32>,
+    elapsed: Duration,
+    budget: Duration,
+) {
+    note_run(runs, engine, command, exit_code, elapsed);
+    if let Some(run) = runs.last_mut() {
+        run.budget_ms = Some(u64::try_from(budget.as_millis()).unwrap_or(u64::MAX));
+    }
 }
 
 fn run_test_set(
@@ -1418,6 +1474,7 @@ fn run_coverage(
     let manifest_s = manifest.to_string_lossy().to_string();
     let out_s = out_path.to_string_lossy().to_string();
     let started = Instant::now();
+    let budget = deadline.saturating_duration_since(started);
     let captured = run_cargo(
         root,
         &[
@@ -1431,19 +1488,21 @@ fn run_coverage(
         deadline,
     );
     match &captured {
-        Ok(captured) => note_run(
+        Ok(captured) => note_run_with_budget(
             runs,
             "coverage",
             "cargo llvm-cov --json",
             captured.status.code(),
             captured.elapsed,
+            budget,
         ),
-        Err(_) => note_run(
+        Err(_) => note_run_with_budget(
             runs,
             "coverage",
             "cargo llvm-cov --json",
             None,
             started.elapsed(),
+            budget,
         ),
     }
     let captured = captured.map_err(|err| err.message("cargo llvm-cov"))?;
@@ -1526,29 +1585,6 @@ fn unavailable(engine: &str, message: &str) -> Finding {
     }
 }
 
-fn coverage_missing(reason: &str) -> Finding {
-    let reason = if reason.is_empty() {
-        "unknown error".to_string()
-    } else {
-        reason.to_string()
-    };
-    Finding {
-        id: "coverage:missing".into(),
-        rule: "coverage.missing".into(),
-        engine: "coverage".into(),
-        severity: "warning".into(),
-        file: ".".into(),
-        span: None,
-        symbol: None,
-        message: format!(
-            "coverage tooling unavailable ({reason}); treating function coverage as 0"
-        ),
-        evidence: serde_json::json!({}),
-        suggested_action: Some("Install rustup component llvm-tools and cargo-llvm-cov".into()),
-        disposition: String::new(),
-    }
-}
-
 fn crap_gate_reason(over: u64, untested: u64, untested_cc: u32) -> String {
     match (over, untested) {
         (0, 0) => String::new(),
@@ -1565,6 +1601,22 @@ fn crap_gate_reason(over: u64, untested: u64, untested_cc: u32) -> String {
             "{over} functions over threshold; {untested} functions at or above CC {untested_cc} with no coverage"
         ),
     }
+}
+
+fn crap_gate(coverage_complete: bool, over: u64, untested: u64, untested_cc: u32) -> Gate {
+    if !coverage_complete {
+        return Gate {
+            id: "crap".into(),
+            pass: false,
+            enforced: false,
+            reason: Some("coverage was not measured for all analyzed functions".into()),
+        };
+    }
+    gate(
+        "crap",
+        over == 0 && untested == 0,
+        &crap_gate_reason(over, untested, untested_cc),
+    )
 }
 
 fn import_findings(
@@ -1878,15 +1930,15 @@ fn mean_coverage(
     if functions.is_empty() {
         return coverage.line_rate;
     }
-    let sum: f64 = functions
+    let measured: Vec<f64> = functions
         .iter()
-        .map(|function| {
-            coverage
-                .for_function(&function.file, &function.symbol)
-                .unwrap_or(0.0)
-        })
-        .sum();
-    sum / functions.len() as f64
+        .filter_map(|function| coverage.for_function(&function.file, &function.symbol))
+        .collect();
+    if measured.is_empty() {
+        0.0
+    } else {
+        measured.iter().sum::<f64>() / measured.len() as f64
+    }
 }
 
 fn write_last_scorecard(root: &Path, card: &Scorecard) {

@@ -5,7 +5,7 @@ FAIL
 gates
   [ok]  types            enforced
   [xx]  tests            enforced  test failures
-  [ok]  crap             enforced
+  [xx]  crap             advisory  coverage was not measured for all analyzed f~
   [ok]  sca              advisory
   [ok]  secrets          enforced
   [ok]  lint             enforced
@@ -13,16 +13,18 @@ gates
 scores
   correctness      0.75  [########..]
   efficiency       1.00  [##########]
-  maintainability  1.00  [##########]
+  maintainability  0.95  [##########]
   security         1.00  [##########]
   a11y             1.00  [##########]
 
 worst crap  threshold 30
-  coverage not measured: CRAP assumes 0% coverage (upper bound)
-  CRAP   CC   COV  SYMBOL            LOCATION
-     2    1    --  add               src/lib.rs
+  (none)
 
 findings
+warning
+  coverage.missing
+  .
+  Run tests with coverage enabled and verify function names and source paths ma~
 error
   test.failed
   src/lib.rs:12  tests::it_adds
@@ -32,4 +34,3 @@ engines run: compile, tests, complexity, crap, sca, secrets, perf, lint
 engines skipped: coverage, spec, mutation, llm
 duration: DURs
 exit 1: a gate failed
-

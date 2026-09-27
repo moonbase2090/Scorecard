@@ -30,6 +30,7 @@ pub struct PythonOutcome {
     pub crap_max: f64,
     pub crap_over: u64,
     pub crap_untested: u64,
+    pub crap_coverage_complete: bool,
     pub crap_worst: Vec<sc_core::CrapFunction>,
 }
 
@@ -66,13 +67,6 @@ pub fn run(root: &Path, deadline: Instant, threshold: u32, untested_cc: u32) -> 
     let sca_errors = check_imports(root, &mut findings, &mut ran);
     let functions = crate::poly_cc::functions_for_pack(root, "python");
     let coverage = read_coverage(root, &functions);
-    if coverage.is_none() && !functions.is_empty() {
-        findings.push(unavailable(
-            "coverage",
-            "pytest-cov did not report line coverage; CRAP treats each function as uncovered",
-        ));
-        skipped.push("coverage".into());
-    }
     let crap = crate::crap::evaluate(
         &functions,
         coverage.as_ref(),
@@ -80,11 +74,24 @@ pub fn run(root: &Path, deadline: Instant, threshold: u32, untested_cc: u32) -> 
         untested_cc,
         |_| true,
     );
+    if !crap.coverage_complete {
+        let unmatched = coverage
+            .as_ref()
+            .map(|data| crate::crap::unmatched_count(&functions, data))
+            .unwrap_or(functions.len() as u64);
+        findings.push(crate::coverage::missing_finding(&format!(
+            "coverage data is missing for {unmatched} analyzed function(s)"
+        )));
+        if coverage.is_none() {
+            skipped.push("coverage".into());
+        }
+    }
     findings.extend(crap.findings);
     ran.push("crap".into());
     let crap_max = crap.crap_max;
     let crap_over = crap.over;
     let crap_untested = crap.untested;
+    let crap_coverage_complete = crap.coverage_complete;
     let crap_worst = crap.worst;
     let secrets = crate::pack::text_secrets(root);
     let secret_errors = secrets
@@ -113,6 +120,7 @@ pub fn run(root: &Path, deadline: Instant, threshold: u32, untested_cc: u32) -> 
         crap_max,
         crap_over,
         crap_untested,
+        crap_coverage_complete,
         crap_worst,
     }
 }
@@ -703,11 +711,10 @@ fn read_coverage(
                 miss += 1;
             }
         }
-        let coverage = if hit + miss == 0 {
-            0.0
-        } else {
-            f64::from(hit) / f64::from(hit + miss)
-        };
+        if hit + miss == 0 {
+            continue;
+        }
+        let coverage = f64::from(hit) / f64::from(hit + miss);
         covered.push(crate::coverage::CovFunction {
             file: function.file.clone(),
             demangled: function.symbol.clone(),
@@ -749,6 +756,7 @@ fn note(
         command: command.to_string(),
         exit_code,
         duration_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
+        budget_ms: None,
     });
 }
 

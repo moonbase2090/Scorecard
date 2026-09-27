@@ -348,6 +348,7 @@ fn apply(root: &Path, deadline: Instant, step: Step, report: &mut ToolReport) {
                 command: command.clone(),
                 exit_code: captured.status.code(),
                 duration_ms: u64::try_from(captured.elapsed.as_millis()).unwrap_or(u64::MAX),
+                budget_ms: None,
             });
             if captured.status.success() {
                 report.ran.push(step.engine.into());

@@ -188,6 +188,9 @@ pub struct RunRecord {
     pub command: String,
     pub exit_code: Option<i32>,
     pub duration_ms: u64,
+    /// Remaining analysis budget when this run started, if tracked by the engine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -355,6 +358,7 @@ mod tests {
                 command: "cargo test".into(),
                 exit_code: Some(0),
                 duration_ms: 12,
+                budget_ms: None,
             }],
         };
 
