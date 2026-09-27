@@ -1,5 +1,9 @@
 #!/bin/sh
 # Package universal sc and sc-mcp, plus per-arch tarballs and a dmg.
+# The dmg also ships INSTALL.txt and a double-clickable
+# Install Scorecard.command (both unsigned data files inside the
+# signed image) alongside the current README and LICENSE. The dmg
+# window is styled with pinned dmgbuild and committed settings art.
 # Signs and notarizes when APPLE_CERTIFICATE_P12 and the notary secrets are set.
 # The per-arch binaries are signed before the tarballs are packed, so every
 # shipped binary is signed. Bare binaries cannot be stapled, so they are
@@ -74,10 +78,20 @@ if [ "$signing" = true ]; then
   codesign --force --options runtime --timestamp --sign "$identity" "$stage/sc" "$stage/sc-mcp"
 fi
 lipo -info "$stage/sc" | grep -q x86_64
-lipo -info "$stage/sc" | grep -q arm64
 lipo -info "$stage/sc-mcp" | grep -q x86_64
-lipo -info "$stage/sc-mcp" | grep -q arm64
+# verify_arch order is x86_64 then arm64 (reversed fails on newer
+# lipo); older lipo takes one arch per flag, so call it twice.
+for bin in "$stage/sc" "$stage/sc-mcp"; do
+  lipo "$bin" -verify_arch x86_64
+  lipo "$bin" -verify_arch arm64
+done
 cp "$root/LICENSE" "$root/README.md" "$stage/"
+cp "$root/packaging/INSTALL.txt" "$stage/"
+cp "$root/packaging/Install Scorecard.command" "$stage/"
+# Finder double-click needs the exec bit; a checkout may not preserve
+# it, so set it explicitly. INSTALL.txt and the script are data files:
+# they ride inside the signed DMG and need no individual signature.
+chmod +x "$stage/Install Scorecard.command"
 
 # A prerelease tag (v0.1.0-rc.2) may ship binaries that report the base
 # Cargo.toml version (0.1.0); a final tag must match exactly.
@@ -113,10 +127,22 @@ if [ "$signing" = true ]; then
 fi
 
 dmg="$dist/sc-v${ver}-universal-apple-darwin.dmg"
+build_dmg() {
+  # dmgbuild writes the styled Finder window (.DS_Store) directly and
+  # works headless, unlike AppleScript-driven tools. Pinned so local
+  # and CI builds agree; invoked as a module so no PATH setup is needed.
+  if ! python3 -c "import dmgbuild" 2>/dev/null; then
+    python3 -m pip install --user "dmgbuild==1.6.5" || {
+      echo "error: cannot install dmgbuild==1.6.5" >&2
+      exit 1
+    }
+  fi
+  rm -f "$dmg"
+  python3 -m dmgbuild -D "stage=$stage" -D "packaging=$root/packaging" -s "$root/packaging/dmg-settings.py" "Scorecard $ver" "$dmg"
+}
 signed=false
 if [ "$signing" = true ]; then
-  rm -f "$dmg"
-  hdiutil create -volname "Scorecard $ver" -srcfolder "$stage" -ov -format UDZO "$dmg"
+  build_dmg
   codesign --force --timestamp --sign "$identity" "$dmg"
   # Accept the .p8 either as PEM text or base64 of the PEM file.
   case "$APPLE_NOTARY_KEY" in
@@ -169,8 +195,7 @@ if [ "$signing" = true ]; then
   fi
   signed=true
 else
-  rm -f "$dmg"
-  hdiutil create -volname "Scorecard $ver" -srcfolder "$stage" -ov -format UDZO "$dmg"
+  build_dmg
 fi
 
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
