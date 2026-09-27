@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- productbuild distribution descriptor for Install Scorecard.pkg.
+     @VER@ is substituted by scripts/release-apple.sh from the tag.
+     Shape matches synthesized output: the choice
+     carries its own pkg-ref child or productbuild drops the package. -->
+<installer-gui-script minSpecVersion="2">
+  <title>Scorecard @VER@</title>
+  <options customize="never" require-scripts="false" hostArchitectures="arm64,x86_64"/>
+  <choices-outline>
+    <line choice="default">
+      <line choice="com.moonbase2090.scorecard"/>
+    </line>
+  </choices-outline>
+  <choice id="default"/>
+  <choice id="com.moonbase2090.scorecard" visible="false">
+    <pkg-ref id="com.moonbase2090.scorecard"/>
+  </choice>
+  <pkg-ref id="com.moonbase2090.scorecard" version="@VER@" onConclusion="none">scorecard-component.pkg</pkg-ref>
+</installer-gui-script>

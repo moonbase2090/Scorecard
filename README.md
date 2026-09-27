@@ -10,7 +10,7 @@
 
 Release [v0.1.0](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.0).
 
-macOS, Apple silicon and Intel in one disk image: [sc-v0.1.0-universal-apple-darwin.dmg](https://github.com/moonbase2090/Scorecard/releases/download/v0.1.0/sc-v0.1.0-universal-apple-darwin.dmg).
+macOS, Apple silicon and Intel in one disk image: [sc-v0.1.0-universal-apple-darwin.dmg](https://github.com/moonbase2090/Scorecard/releases/download/v0.1.0/sc-v0.1.0-universal-apple-darwin.dmg). Double-click `Install Scorecard.pkg` inside it, or download the package directly: [sc-v0.1.0-macos.pkg](https://github.com/moonbase2090/Scorecard/releases/download/v0.1.0/sc-v0.1.0-macos.pkg). Both install `sc` and `sc-mcp` to `/usr/local/bin`.
 
 Each `.tar.gz` contains `sc`, `sc-mcp`, `LICENSE`, and `README.md` at the top of the archive.
 
@@ -58,7 +58,7 @@ Exit 0 means the configured gates passed. Exit 1 means a gate failed. Exit 2 mea
 `sc analyze testdata/good_crate --format pretty` on a terminal. Color is off in this copy. The same run and `testdata/failing_test` are in [examples/terminal](examples/terminal/).
 
 ```text
-sc 0.1.0  testdata/good_crate  rust  5ac851c clean  scope tree
+sc 0.1.1  testdata/good_crate  rust  5ac851c clean  scope tree
 
 PASS
 

@@ -2,12 +2,15 @@ Scorecard 0.1.1 — command-line tools, not a Mac app
 ====================================================
 
 This disk image holds two command-line programs, `sc` and `sc-mcp`.
-There is nothing to drag to Applications. Either double-click
-`Install Scorecard.command` in this window, or install by hand:
+There is nothing to drag to Applications. Double-click
+`Install Scorecard.pkg` in this window and follow the installer,
+which puts both tools in `/usr/local/bin`.
 
-  sudo cp sc sc-mcp /usr/local/bin/
+To install from the terminal instead:
 
-Without admin rights, use your own bin directory instead (no sudo):
+  sudo installer -pkg "Install Scorecard.pkg" -target /
+
+Without admin rights, copy the two programs by hand (no sudo):
 
   mkdir -p ~/.local/bin
   cp sc sc-mcp ~/.local/bin/

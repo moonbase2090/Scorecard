@@ -2,7 +2,7 @@
 # Built with dmgbuild==1.6.5: dmgbuild -s packaging/dmg-settings.py
 # "Scorecard $ver" dist/sc-....dmg
 # Icon positions are fixed Finder content coordinates. The installer
-# script sits prominent at left center with INSTALL.txt beside it;
+# package sits prominent at left center with INSTALL.txt beside it;
 # the binaries, README, and LICENSE form a lower row. No
 # /Applications link: these are CLI tools, dragging them to
 # Applications would not put them on PATH.
@@ -21,7 +21,7 @@ filesystem = "HFS+"
 size = None
 
 files = [os.path.join(stage, name) for name in (
-    "Install Scorecard.command",
+    "Install Scorecard.pkg",
     "INSTALL.txt",
     "sc",
     "sc-mcp",
@@ -45,7 +45,7 @@ show_pathbar = False
 show_sidebar = False
 
 icon_locations = {
-    "Install Scorecard.command": (330, 210),
+    "Install Scorecard.pkg": (330, 210),
     "INSTALL.txt": (470, 210),
     "sc": (130, 368),
     "sc-mcp": (310, 368),

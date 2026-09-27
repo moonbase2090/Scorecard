@@ -1,10 +1,13 @@
 #!/bin/sh
-# Package universal sc and sc-mcp, plus per-arch tarballs and a dmg.
-# The dmg also ships INSTALL.txt and a double-clickable
-# Install Scorecard.command (both unsigned data files inside the
-# signed image) alongside the current README and LICENSE. The dmg
-# window is styled with pinned dmgbuild and committed settings art.
+# Package universal sc and sc-mcp, plus per-arch tarballs, a signed
+# Install Scorecard.pkg, and a dmg holding the pkg alongside INSTALL.txt
+# and the current README and LICENSE. The dmg window is styled with
+# pinned dmgbuild and committed settings art.
 # Signs and notarizes when APPLE_CERTIFICATE_P12 and the notary secrets are set.
+# The installer .pkg needs a Developer ID Installer identity: it is read
+# from the same keychain, or from an optional APPLE_INSTALLER_P12 plus
+# APPLE_INSTALLER_PASSWORD. A signed build without one fails loudly;
+# an unsigned local build only warns (dry-run, never shipped).
 # The per-arch binaries are signed before the tarballs are packed, so every
 # shipped binary is signed. Bare binaries cannot be stapled, so they are
 # notarized via a zip submitted alongside the dmg.
@@ -28,7 +31,7 @@ intel="$root/target/x86_64-apple-darwin/release"
 work=$(mktemp -d)
 keychain="$work/build.keychain"
 cleanup() {
-  rm -f "$work/cert.p12" "$work/AuthKey.p8"
+  rm -f "$work/cert.p12" "$work/installer.p12" "$work/AuthKey.p8"
   security delete-keychain "$keychain" 2>/dev/null || true
   rm -rf "$work"
 }
@@ -39,6 +42,7 @@ mkdir -p "$stage"
 # Resolve signing secrets and the Developer ID identity before building
 # any artifact, so a bad cert fails fast instead of mid-packaging.
 signing=false
+installer_identity=""
 if [ -n "${APPLE_CERTIFICATE_P12:-}" ]; then
   signing=true
   for v in APPLE_CERTIFICATE_PASSWORD APPLE_NOTARY_ISSUER APPLE_NOTARY_KEY_ID APPLE_NOTARY_KEY; do
@@ -51,6 +55,13 @@ if [ -n "${APPLE_CERTIFICATE_P12:-}" ]; then
   security create-keychain -p "" "$keychain"
   security set-keychain-settings -lut 21600 "$keychain"
   security unlock-keychain -p "" "$keychain"
+  # The Developer ID Installer certificate chains to Apple's G2
+  # intermediate, which a fresh keychain lacks: without it the
+  # installer identity search finds nothing and productsign fails.
+  # The .cer is public (not a secret) and committed under
+  # packaging/certs.
+  security import "$root/packaging/certs/DeveloperIDG2CA.cer" -k "$keychain" \
+    -T /usr/bin/productsign -T /usr/bin/pkgbuild -T /usr/bin/productbuild
   printf '%s' "$APPLE_CERTIFICATE_P12" | tr -d ' \r\n' | base64 --decode > "$work/cert.p12"
   if ! security import "$work/cert.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign; then
     echo "error: p12 import failed (check APPLE_CERTIFICATE_P12 and APPLE_CERTIFICATE_PASSWORD)" >&2
@@ -91,11 +102,6 @@ cp "$root/LICENSE" "$root/README.md" "$stage/"
 cp "$stage/LICENSE" "$stage/LICENSE.txt"
 rm "$stage/LICENSE"
 cp "$root/packaging/INSTALL.txt" "$stage/"
-cp "$root/packaging/Install Scorecard.command" "$stage/"
-# Finder double-click needs the exec bit; a checkout may not preserve
-# it, so set it explicitly. INSTALL.txt and the script are data files:
-# they ride inside the signed DMG and need no individual signature.
-chmod +x "$stage/Install Scorecard.command"
 
 # A prerelease tag (v0.1.0-rc.2) may ship binaries that report the base
 # Cargo.toml version (0.1.0); a final tag must match exactly.
@@ -130,6 +136,50 @@ if [ "$signing" = true ]; then
     "$stage/sc" "$stage/sc-mcp"
 fi
 
+# Resolve the Developer ID Installer identity for the .pkg. The main
+# APPLE_CERTIFICATE_P12 usually holds only the Application identity,
+# so an optional APPLE_INSTALLER_P12 plus APPLE_INSTALLER_PASSWORD is
+# accepted as a second source.
+installer_identity=""
+if [ "$signing" = true ]; then
+  installer_identity=$(security find-identity -v -p basic "$keychain" | awk -F'"' '/Developer ID Installer/{print $2; exit}')
+  if [ -z "$installer_identity" ] && [ -n "${APPLE_INSTALLER_P12:-}" ]; then
+    if [ -z "${APPLE_INSTALLER_PASSWORD:-}" ]; then
+      echo "error: APPLE_INSTALLER_PASSWORD is not set" >&2
+      exit 1
+    fi
+    printf '%s' "$APPLE_INSTALLER_P12" | tr -d ' \r\n' | base64 --decode > "$work/installer.p12"
+    if ! security import "$work/installer.p12" -k "$keychain" -P "$APPLE_INSTALLER_PASSWORD" -T /usr/bin/productsign -T /usr/bin/pkgbuild -T /usr/bin/productbuild; then
+      echo "error: installer p12 import failed (check APPLE_INSTALLER_P12 and APPLE_INSTALLER_PASSWORD)" >&2
+      exit 1
+    fi
+    installer_identity=$(security find-identity -v -p basic "$keychain" | awk -F'"' '/Developer ID Installer/{print $2; exit}')
+  fi
+  if [ -z "$installer_identity" ]; then
+    echo "error: no 'Developer ID Installer' identity (add it to APPLE_CERTIFICATE_P12 or set APPLE_INSTALLER_P12 + APPLE_INSTALLER_PASSWORD); refusing to ship an unsigned pkg" >&2
+    exit 1
+  fi
+fi
+
+# Build Install Scorecard.pkg: the universal binaries go to
+# /usr/local/bin under the com.moonbase2090.scorecard identifier.
+# The product pkg lands in dist/ (release asset + checksums) and a
+# copy rides in the DMG next to INSTALL.txt.
+mkdir -p "$work/pkgroot/usr/local/bin"
+cp "$stage/sc" "$stage/sc-mcp" "$work/pkgroot/usr/local/bin/"
+pkgbuild --root "$work/pkgroot" --identifier com.moonbase2090.scorecard \
+  --version "$ver" --install-location / "$work/scorecard-component.pkg"
+sed "s/@VER@/$ver/g" "$root/packaging/distribution.xml.in" > "$work/distribution.xml"
+pkg="$dist/sc-v${ver}-macos.pkg"
+if [ -n "$installer_identity" ]; then
+  productbuild --distribution "$work/distribution.xml" --package-path "$work" \
+    --sign "$installer_identity" "$pkg"
+else
+  echo "warning: building an unsigned pkg (no installer identity; local dry-run only, never ship this)" >&2
+  productbuild --distribution "$work/distribution.xml" --package-path "$work" "$pkg"
+fi
+cp "$pkg" "$stage/Install Scorecard.pkg"
+
 dmg="$dist/sc-v${ver}-universal-apple-darwin.dmg"
 build_dmg() {
   # dmgbuild writes the styled Finder window (.DS_Store) directly and
@@ -151,13 +201,12 @@ build_dmg() {
 }
 signed=false
 if [ "$signing" = true ]; then
-  build_dmg
-  codesign --force --timestamp --sign "$identity" "$dmg"
-  # Accept the .p8 either as PEM text or base64 of the PEM file.
   case "$APPLE_NOTARY_KEY" in
     *"BEGIN PRIVATE KEY"*) printf '%s\n' "$APPLE_NOTARY_KEY" > "$work/AuthKey.p8" ;;
     *) printf '%s' "$APPLE_NOTARY_KEY" | tr -d ' \r\n' | base64 --decode > "$work/AuthKey.p8" ;;
   esac
+  build_dmg
+  codesign --force --timestamp --sign "$identity" "$dmg"
   set +e
   xcrun notarytool submit "$dmg" --wait --output-format json \
     --issuer "$APPLE_NOTARY_ISSUER" \
@@ -181,6 +230,31 @@ if [ "$signing" = true ]; then
   fi
   xcrun stapler staple "$dmg"
   xcrun stapler validate "$dmg"
+  # The installer pkg notarizes and staples on its own, so Gatekeeper
+  # accepts it even when opened outside the DMG.
+  set +e
+  xcrun notarytool submit "$pkg" --wait --output-format json \
+    --issuer "$APPLE_NOTARY_ISSUER" \
+    --key-id "$APPLE_NOTARY_KEY_ID" \
+    --key "$work/AuthKey.p8" > "$work/notary-pkg.json"
+  rc=$?
+  set -e
+  cat "$work/notary-pkg.json"
+  echo
+  pkg_sub_id=$(plutil -extract id raw -o - "$work/notary-pkg.json" 2>/dev/null || true)
+  pkg_status=$(plutil -extract status raw -o - "$work/notary-pkg.json" 2>/dev/null || true)
+  if [ "$rc" -ne 0 ] || [ "$pkg_status" != "Accepted" ]; then
+    echo "error: pkg notarization failed (notarytool exit $rc, status ${pkg_status:-unknown})" >&2
+    if [ -n "$pkg_sub_id" ]; then
+      xcrun notarytool log "$pkg_sub_id" \
+        --issuer "$APPLE_NOTARY_ISSUER" \
+        --key-id "$APPLE_NOTARY_KEY_ID" \
+        --key "$work/AuthKey.p8" || true
+    fi
+    exit 1
+  fi
+  xcrun stapler staple "$pkg"
+  xcrun stapler validate "$pkg"
   # Bare binaries cannot be stapled, so notarize them via a zip of the
   # signed per-arch binaries. Gatekeeper picks up the ticket online.
   rm -rf "$work/notary-bin"
