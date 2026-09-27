@@ -86,6 +86,10 @@ for bin in "$stage/sc" "$stage/sc-mcp"; do
   lipo "$bin" -verify_arch arm64
 done
 cp "$root/LICENSE" "$root/README.md" "$stage/"
+# LICENSE ships in the image as LICENSE.txt so Finder shows a text
+# icon instead of the generic '?' document.
+cp "$stage/LICENSE" "$stage/LICENSE.txt"
+rm "$stage/LICENSE"
 cp "$root/packaging/INSTALL.txt" "$stage/"
 cp "$root/packaging/Install Scorecard.command" "$stage/"
 # Finder double-click needs the exec bit; a checkout may not preserve

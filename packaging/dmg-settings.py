@@ -26,13 +26,15 @@ files = [os.path.join(stage, name) for name in (
     "sc",
     "sc-mcp",
     "README.md",
-    "LICENSE",
+    # LICENSE ships with a .txt suffix so Finder shows a text icon
+    # instead of the generic '?' document.
+    "LICENSE.txt",
 )]
 
-icon_size = 80
-text_size = 12
+icon_size = 96
+text_size = 13
 
-window_rect = ((200, 120), (600, 400))
+window_rect = ((200, 120), (800, 560))
 
 background = os.path.join(packaging, "dmg-background.png")
 
@@ -43,10 +45,10 @@ show_pathbar = False
 show_sidebar = False
 
 icon_locations = {
-    "Install Scorecard.command": (150, 175),
-    "INSTALL.txt": (320, 175),
-    "sc": (90, 285),
-    "sc-mcp": (230, 285),
-    "README.md": (370, 285),
-    "LICENSE": (510, 285),
+    "Install Scorecard.command": (330, 210),
+    "INSTALL.txt": (470, 210),
+    "sc": (130, 368),
+    "sc-mcp": (310, 368),
+    "README.md": (490, 368),
+    "LICENSE.txt": (670, 368),
 }

@@ -25,5 +25,5 @@ To remove them later, delete the two files from wherever you put them:
 
   sudo rm /usr/local/bin/sc /usr/local/bin/sc-mcp
 
-The `README.md` in this window is the full manual. `LICENSE` covers
+The `README.md` in this window is the full manual. `LICENSE.txt` covers
 the terms (MPL-2.0).
