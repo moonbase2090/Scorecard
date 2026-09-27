@@ -9,6 +9,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The Scorecard action builds from source when the latest-release lookup fails, instead of stopping the job.
 - An `a11y` engine with its own gate and score. It checks HTML in the web pack and JSX or TSX in the node pack against WCAG 2.2 criteria. It is advisory unless `--fail-on` names `a11y` or config enforces it. Rules can be disabled by id. See `docs/a11y.md`.
 
+### Fixed
+
+- The HTML report summary grid keeps the git SHA inside its own cell. A long value wraps or clips instead of painting over the tests column.
+
 ## [0.1.3] - 2026-09-27
 
 Version 0.1.2 was tagged but never published. This release includes its planned changes and the installer fix.

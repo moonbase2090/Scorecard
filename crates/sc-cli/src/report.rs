@@ -64,11 +64,11 @@ summary{cursor:pointer;color:var(--accent);font-size:12px}
 .pathlist{margin-top:6px;max-height:240px;overflow:auto}
 .pathlist div{margin:1px 0}
 .pathlist code{word-break:normal}
-.meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+.meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));
 gap:8px 20px;margin-top:14px;font-size:12.5px;color:var(--dim)}
-.meta>div{min-width:0}
+.meta>div{min-width:0;overflow:hidden}
 .meta b{color:var(--ink);font-weight:600}
-.meta code{overflow-wrap:anywhere;word-break:break-all}
+.meta code{display:block;max-width:100%;overflow-wrap:anywhere;word-break:break-all}
 .meta code,.card code{background:#16223f;padding:1px 6px;border-radius:6px;
 font-size:11.5px;color:var(--ink)}
 .flow{display:flex;align-items:stretch;gap:0;margin-top:12px;flex-wrap:wrap}
@@ -723,6 +723,10 @@ mod tests {
         assert!(!html.contains(&format!("{full} (dirty)")));
         assert!(html.contains(&format!("title=\"{full}\"")));
         assert!(html.contains(&full[..12]));
+        // A long value stays inside its cell. The old 180px minimum let the
+        // SHA paint across the tests column.
+        assert!(html.contains("minmax(min(100%,220px),1fr)"));
+        assert!(html.contains(".meta>div{min-width:0;overflow:hidden}"));
     }
 
     #[test]
