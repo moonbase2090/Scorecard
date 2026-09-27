@@ -64,6 +64,9 @@ pub struct GitInfo {
 pub struct Scope {
     pub mode: String,
     pub paths: Vec<String>,
+    /// Resolved git base of a diff-scoped run (`--diff`). Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -238,6 +241,7 @@ impl Scorecard {
             scope: Scope {
                 mode: "tree".to_string(),
                 paths: Vec::new(),
+                base: None,
             },
             intent: None,
             verdict: "fail".to_string(),
@@ -272,6 +276,20 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn scope_base_is_optional_and_omitted_when_absent() {
+        let mut card = Scorecard::skeleton("demo", 30);
+        let json = serde_json::to_value(&card).unwrap();
+        assert!(json["scope"].get("base").is_none());
+        card.scope.mode = "diff".into();
+        card.scope.base = Some("origin/main".into());
+        let json = serde_json::to_value(&card).unwrap();
+        assert_eq!(json["scope"]["base"], "origin/main");
+        // Scorecards written before the field existed still load.
+        let old: Scope = serde_json::from_str(r#"{"mode":"tree","paths":[]}"#).unwrap();
+        assert_eq!(old.base, None);
+    }
+
+    #[test]
     fn field_names_match_the_contract() {
         let card = Scorecard {
             version: "0.1".into(),
@@ -286,6 +304,7 @@ mod tests {
             scope: Scope {
                 mode: "tree".into(),
                 paths: vec!["src/parse.rs".into()],
+                base: None,
             },
             intent: Some("keep parse_input under the CRAP threshold".into()),
             verdict: "fail".into(),

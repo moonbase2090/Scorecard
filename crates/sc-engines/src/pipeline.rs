@@ -117,6 +117,7 @@ fn analyze_blocked(
         git,
         mode: "tree".into(),
         paths: Vec::new(),
+        base: None,
         fail_on: request.fail_on,
         findings,
         ran: Vec::new(),
@@ -272,6 +273,7 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         git,
         mode: "tree".into(),
         paths: Vec::new(),
+        base: None,
         fail_on,
         findings,
         ran: {
@@ -545,6 +547,7 @@ fn analyze_unsupported(
         git,
         mode: "tree".into(),
         paths: Vec::new(),
+        base: None,
         fail_on,
         findings,
         ran: {
@@ -628,6 +631,7 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         git,
         mode: "tree".into(),
         paths: Vec::new(),
+        base: None,
         fail_on: request.fail_on,
         findings: outcome.findings,
         ran: outcome.ran,
@@ -1123,6 +1127,7 @@ fn assemble_rust_report(
         git,
         mode: selection.mode.clone(),
         paths: selection.paths.clone(),
+        base: selection.base.clone(),
         fail_on: request.fail_on.clone(),
         findings: state.findings,
         ran: state.ran,
@@ -1147,6 +1152,7 @@ struct Draft {
     git: GitInfo,
     mode: String,
     paths: Vec<String>,
+    base: Option<String>,
     fail_on: Vec<String>,
     findings: Vec<Finding>,
     ran: Vec<String>,
@@ -1180,6 +1186,7 @@ fn finish(mut draft: Draft) -> AnalyzeOutput {
         scope: Scope {
             mode: draft.mode,
             paths: draft.paths,
+            base: draft.base,
         },
         intent: draft.intent,
         verdict: if failed { "fail" } else { "pass" }.to_string(),
@@ -2205,6 +2212,7 @@ mod tests {
             paths: Vec::new(),
             loc_changed: 0,
             files_changed: 0,
+            base: None,
         };
         let mut ran = Vec::new();
         let mut skipped = Vec::new();
@@ -2253,6 +2261,7 @@ mod tests {
             paths: Vec::new(),
             loc_changed: 0,
             files_changed: 0,
+            base: None,
         };
         let mut findings = Vec::new();
         let count = import_findings(
