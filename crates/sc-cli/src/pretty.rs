@@ -258,7 +258,6 @@ fn push_footer(out: &mut String, card: &Scorecard, opts: &PrettyOpts) {
         opts.exit_code,
         matches!(Outcome::of(card), Outcome::ReportOnly(_)),
     ));
-    out.push('\n');
 }
 
 fn exit_line(code: i32, report_only: bool) -> String {

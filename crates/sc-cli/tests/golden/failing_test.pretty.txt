@@ -34,4 +34,3 @@ engines run: compile, tests, complexity, crap, sca, secrets, perf, lint
 engines skipped: coverage, spec, mutation, llm
 duration: DURs
 exit 1: a gate failed
-
