@@ -1,4 +1,4 @@
-sc 0.1.1  testdata/good_crate  rust  2f0d4d9 clean  scope tree
+sc 0.1.2  testdata/good_crate  rust  2f0d4d9 clean  scope tree
 
 PASS
 
