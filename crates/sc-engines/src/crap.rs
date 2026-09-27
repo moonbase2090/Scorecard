@@ -70,7 +70,11 @@ pub fn evaluate(
             .and_then(|data| data.for_function(&function.file, &function.symbol))
             .is_some();
         let severity = if measured { "error" } else { "warning" };
-        let unknown = if measured { "" } else { "; coverage not measured" };
+        let unknown = if measured {
+            ""
+        } else {
+            "; coverage not measured"
+        };
         if exceeds_threshold(row.crap, threshold) {
             findings.push(Finding {
                 id: format!("crap:{}:{}", function.file, function.symbol),
@@ -245,7 +249,9 @@ mod tests {
         assert_eq!(outcome.findings[0].id, "complexity:src/lib.rs:wide");
         assert_eq!(outcome.findings[0].severity, "warning");
         assert!(
-            outcome.findings[0].message.contains("coverage not measured"),
+            outcome.findings[0]
+                .message
+                .contains("coverage not measured"),
             "{}",
             outcome.findings[0].message
         );

@@ -1263,8 +1263,7 @@ fn import_findings(
     // First segments that resolve inside the crate are never external:
     // declared `mod` names, `extern crate` aliases, and file modules
     // (`src/score.rs`, `src/foo/mod.rs`) across the analyzed sources.
-    let mut local: std::collections::BTreeSet<String> =
-        std::collections::BTreeSet::new();
+    let mut local: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for file in &selection.files {
         local.extend(file.local_names.iter().cloned());
         if let Some(module) = file_module(&file.rel) {
@@ -1835,7 +1834,14 @@ mod tests {
         let mut ran = Vec::new();
         let mut skipped = Vec::new();
         let mut findings = Vec::new();
-        let count = import_findings(&dir, &selection, true, &mut ran, &mut skipped, &mut findings);
+        let count = import_findings(
+            &dir,
+            &selection,
+            true,
+            &mut ran,
+            &mut skipped,
+            &mut findings,
+        );
         assert_eq!(count, 1);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].symbol.as_deref(), Some("missing"));
