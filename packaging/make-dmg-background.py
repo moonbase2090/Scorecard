@@ -99,7 +99,7 @@ def draw(scale):
     label_band(d, 60, 740, 430, s)
     # Heading group: logo plus centered headline, 40px+ top padding.
     face = font(28 * s, bold=True)
-    label = "Double-click Install Scorecard"
+    label = "Open Install Scorecard.pkg"
     left, _, right, _ = d.textbbox((0, 0), label, font=face)
     gap = 16 * s
     logo_size = 44 * s

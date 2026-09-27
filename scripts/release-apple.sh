@@ -31,7 +31,7 @@ intel="$root/target/x86_64-apple-darwin/release"
 work=$(mktemp -d)
 keychain="$work/build.keychain"
 cleanup() {
-  rm -f "$work/cert.p12" "$work/AuthKey.p8"
+  rm -f "$work/cert.p12" "$work/installer.p12" "$work/AuthKey.p8"
   security delete-keychain "$keychain" 2>/dev/null || true
   rm -rf "$work"
 }
@@ -42,6 +42,7 @@ mkdir -p "$stage"
 # Resolve signing secrets and the Developer ID identity before building
 # any artifact, so a bad cert fails fast instead of mid-packaging.
 signing=false
+installer_identity=""
 if [ -n "${APPLE_CERTIFICATE_P12:-}" ]; then
   signing=true
   for v in APPLE_CERTIFICATE_PASSWORD APPLE_NOTARY_ISSUER APPLE_NOTARY_KEY_ID APPLE_NOTARY_KEY; do
@@ -200,13 +201,12 @@ build_dmg() {
 }
 signed=false
 if [ "$signing" = true ]; then
-  build_dmg
-  codesign --force --timestamp --sign "$identity" "$dmg"
-  # Accept the .p8 either as PEM text or base64 of the PEM file.
   case "$APPLE_NOTARY_KEY" in
     *"BEGIN PRIVATE KEY"*) printf '%s\n' "$APPLE_NOTARY_KEY" > "$work/AuthKey.p8" ;;
     *) printf '%s' "$APPLE_NOTARY_KEY" | tr -d ' \r\n' | base64 --decode > "$work/AuthKey.p8" ;;
   esac
+  build_dmg
+  codesign --force --timestamp --sign "$identity" "$dmg"
   set +e
   xcrun notarytool submit "$dmg" --wait --output-format json \
     --issuer "$APPLE_NOTARY_ISSUER" \

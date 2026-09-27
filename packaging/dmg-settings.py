@@ -2,7 +2,7 @@
 # Built with dmgbuild==1.6.5: dmgbuild -s packaging/dmg-settings.py
 # "Scorecard $ver" dist/sc-....dmg
 # Icon positions are fixed Finder content coordinates. The installer
-# script sits prominent at left center with INSTALL.txt beside it;
+# package sits prominent at left center with INSTALL.txt beside it;
 # the binaries, README, and LICENSE form a lower row. No
 # /Applications link: these are CLI tools, dragging them to
 # Applications would not put them on PATH.
