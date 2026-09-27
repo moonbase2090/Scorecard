@@ -157,6 +157,12 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
             &rel,
             &parsed.elements,
         ));
+        findings.extend(crate::a11y::check_elements(
+            &rel,
+            &parsed.elements,
+            &request.config.a11y.disable,
+            true,
+        ));
         for script in parsed.scripts {
             functions.extend(crate::poly_cc::javascript_in(
                 &rel,
@@ -196,12 +202,21 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
     let html_enforced = html_gate_enforced(&request.config, &request.fail_on);
     let links_enforced =
         request.config.links.enforce || request.fail_on.iter().any(|gate| gate == "links");
+    let a11y_enforced =
+        request.config.a11y.enforce || request.fail_on.iter().any(|gate| gate == "a11y");
+    let a11y_count = findings
+        .iter()
+        .filter(|finding| finding.engine == "a11y")
+        .count();
     let mut fail_on = request.fail_on.clone();
     if html_enforced && !fail_on.iter().any(|gate| gate == "html") {
         fail_on.push("html".into());
     }
     if links_enforced && !fail_on.iter().any(|gate| gate == "links") {
         fail_on.push("links".into());
+    }
+    if a11y_enforced && !fail_on.iter().any(|gate| gate == "a11y") {
+        fail_on.push("a11y".into());
     }
     let gates = vec![
         mode_gate(
@@ -212,6 +227,16 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
                 String::new()
             } else {
                 format!("{html_errors} markup findings")
+            },
+        ),
+        mode_gate(
+            "a11y",
+            a11y_count == 0,
+            a11y_enforced,
+            &if a11y_count == 0 {
+                String::new()
+            } else {
+                format!("{a11y_count} accessibility findings")
             },
         ),
         mode_gate(
@@ -256,6 +281,7 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         ran: {
             let mut ran = vec![
                 "html".into(),
+                "a11y".into(),
                 "links".into(),
                 "secrets".into(),
                 "crap".into(),
@@ -297,6 +323,43 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         runs: Vec::new(),
         analyzer_error: false,
     })
+}
+
+fn markup_files(root: &Path, exts: &[&str]) -> Vec<String> {
+    let mut out = Vec::new();
+    fn walk(root: &Path, dir: &Path, depth: u32, exts: &[&str], out: &mut Vec<String>) {
+        if depth > 6 || out.len() >= 200 {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
+            if name.starts_with('.') || name == "node_modules" || name == "dist" || name == "target"
+            {
+                continue;
+            }
+            if path.is_dir() {
+                walk(root, &path, depth + 1, exts, out);
+            } else if path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| exts.contains(&ext))
+            {
+                if let Ok(rel) = path.strip_prefix(root) {
+                    out.push(rel.to_string_lossy().replace('\\', "/"));
+                }
+            }
+        }
+    }
+    walk(root, root, 0, exts, &mut out);
+    out.sort();
+    out
 }
 
 fn html_files(root: &Path) -> Vec<String> {
@@ -397,7 +460,43 @@ fn analyze_unsupported(
         .filter(|finding| finding.severity == "error")
         .count();
     findings.extend(secrets);
+    let jsx_files = if pack == crate::pack::PackId::Node {
+        markup_files(&request.root, &["jsx", "tsx"])
+    } else {
+        Vec::new()
+    };
+    for rel in &jsx_files {
+        let Ok(text) = std::fs::read_to_string(request.root.join(rel)) else {
+            continue;
+        };
+        findings.extend(crate::a11y::check_jsx(
+            rel,
+            &text,
+            &request.config.a11y.disable,
+        ));
+    }
+    let a11y_count = findings
+        .iter()
+        .filter(|finding| finding.engine == "a11y")
+        .count();
+    let mut fail_on = request.fail_on.clone();
     let mut gates = tools.gates;
+    if !jsx_files.is_empty() {
+        let enforced = request.config.a11y.enforce || fail_on.iter().any(|gate| gate == "a11y");
+        if enforced && !fail_on.iter().any(|gate| gate == "a11y") {
+            fail_on.push("a11y".into());
+        }
+        gates.push(mode_gate(
+            "a11y",
+            a11y_count == 0,
+            enforced,
+            &if a11y_count == 0 {
+                String::new()
+            } else {
+                format!("{a11y_count} accessibility findings")
+            },
+        ));
+    }
     gates.push(gate_reported("sca"));
     let mut ran = tools.ran;
     let mut skipped = tools.skipped;
@@ -450,7 +549,7 @@ fn analyze_unsupported(
         git,
         mode: "tree".into(),
         paths: Vec::new(),
-        fail_on: request.fail_on,
+        fail_on,
         findings,
         ran: {
             ran.push("secrets".into());
@@ -1860,6 +1959,7 @@ fn order_engines(ran: &mut Vec<String>, skipped: &mut Vec<String>) {
         "crap",
         "sca",
         "html",
+        "a11y",
         "links",
         "secrets",
         "perf",

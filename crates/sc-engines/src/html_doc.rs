@@ -19,7 +19,6 @@ pub struct Elem {
     pub col: u32,
     pub attrs: Vec<(String, String)>,
     /// Descendant text, excluding `script` and `style`.
-    #[allow(dead_code)]
     pub text: String,
 }
 
@@ -450,7 +449,11 @@ impl TreeSink for Sink {
                     line: node.line.max(1),
                     col: 1,
                     attrs: node.attrs.clone(),
-                    text: visible_text(&nodes, id),
+                    text: if node.name == "style" {
+                        node.text.clone()
+                    } else {
+                        visible_text(&nodes, id)
+                    },
                 }),
                 _ => None,
             })
@@ -666,6 +669,11 @@ fn visible_text(nodes: &[Node], id: usize) -> String {
         return String::new();
     }
     let mut out = node.text.clone();
+    if node.name == "img" {
+        if let Some((_, alt)) = node.attrs.iter().find(|(key, _)| key == "alt") {
+            out.push_str(alt);
+        }
+    }
     for child in &node.children {
         out.push_str(&visible_text(nodes, *child));
     }

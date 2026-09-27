@@ -4,6 +4,7 @@ PASS
 
 gates
   [ok]  html             enforced
+  [ok]  a11y             advisory
   [ok]  links            advisory
   [ok]  crap             enforced
   [ok]  secrets          enforced
@@ -13,6 +14,7 @@ scores
   efficiency       1.00  [##########]
   maintainability  0.95  [##########]
   security         1.00  [##########]
+  a11y             1.00  [##########]
 
 worst crap  threshold 30
   CRAP   CC   COV  SYMBOL            LOCATION
@@ -25,7 +27,7 @@ warning
   .
   Install the required toolchain and re-run
 
-engines run: complexity, crap, html, links, secrets
+engines run: complexity, crap, html, a11y, links, secrets
 engines skipped: compile, tests, coverage, sca, lint, mutation, llm
 duration: DURs
 exit 0: gates passed

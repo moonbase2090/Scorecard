@@ -145,6 +145,7 @@ fn push_scores(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usi
         width,
     );
     score_line(out, "security", card.scores.security, opts, width);
+    score_line(out, "a11y", card.scores.a11y, opts, width);
     out.push('\n');
 }
 
