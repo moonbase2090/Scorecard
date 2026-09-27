@@ -89,6 +89,14 @@ duration: 0.7s
 exit 0: gates passed
 ```
 
+## HTML report
+
+`sc analyze testdata/good_crate --format html --out scorecard.html` writes one self-contained page. The flow strip is the row under the header: scope, pack, engines, gates, and verdict.
+
+![HTML report for testdata/good_crate, including the flow strip](docs/images/good-crate-html-report.png)
+
+The same command with `--format all --out scorecard.html` also writes `scorecard.json`, `scorecard.md`, and `scorecard.sarif`. Details are in [HTML report](docs/html-report.md).
+
 ## Languages
 
 | Pack | Marker |
@@ -153,6 +161,7 @@ More is in [MCP](docs/mcp.md).
 - [Config](docs/config.md)
 - [MCP](docs/mcp.md)
 - [CRAP](docs/crap.md)
+- [HTML report](docs/html-report.md)
 
 ## License
 
