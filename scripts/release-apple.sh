@@ -1,10 +1,13 @@
 #!/bin/sh
 # Package universal sc and sc-mcp, plus per-arch tarballs and a dmg.
-# The dmg also ships INSTALL.txt and a double-clickable
-# Install Scorecard.command (both unsigned data files inside the
-# signed image) alongside the current README and LICENSE. The dmg
-# window is styled with pinned dmgbuild and committed settings art.
+# The dmg ships INSTALL.txt and Install Scorecard.pkg (a signed,
+# notarized, stapled installer when the Developer ID Installer
+# identity is available) alongside the current README and LICENSE.
+# The dmg window is styled with pinned dmgbuild and committed settings art.
 # Signs and notarizes when APPLE_CERTIFICATE_P12 and the notary secrets are set.
+# APPLE_CERTIFICATE_P12 holds Developer ID Application only. The
+# installer identity comes from that keychain if present, otherwise
+# from APPLE_INSTALLER_P12. An unsigned pkg is never shipped.
 # The per-arch binaries are signed before the tarballs are packed, so every
 # shipped binary is signed. Bare binaries cannot be stapled, so they are
 # notarized via a zip submitted alongside the dmg.
@@ -28,7 +31,7 @@ intel="$root/target/x86_64-apple-darwin/release"
 work=$(mktemp -d)
 keychain="$work/build.keychain"
 cleanup() {
-  rm -f "$work/cert.p12" "$work/AuthKey.p8"
+  rm -f "$work/cert.p12" "$work/installer.p12" "$work/AuthKey.p8"
   security delete-keychain "$keychain" 2>/dev/null || true
   rm -rf "$work"
 }
@@ -39,6 +42,7 @@ mkdir -p "$stage"
 # Resolve signing secrets and the Developer ID identity before building
 # any artifact, so a bad cert fails fast instead of mid-packaging.
 signing=false
+installer_identity=""
 if [ -n "${APPLE_CERTIFICATE_P12:-}" ]; then
   signing=true
   for v in APPLE_CERTIFICATE_PASSWORD APPLE_NOTARY_ISSUER APPLE_NOTARY_KEY_ID APPLE_NOTARY_KEY; do
@@ -61,6 +65,23 @@ if [ -n "${APPLE_CERTIFICATE_P12:-}" ]; then
   identity=$(security find-identity -v -p codesigning "$keychain" | awk -F'"' '/Developer ID Application/{print $2; exit}')
   if [ -z "$identity" ]; then
     echo "error: no 'Developer ID Application' codesigning identity in $keychain (check APPLE_CERTIFICATE_P12)" >&2
+    exit 1
+  fi
+  if [ -n "${APPLE_INSTALLER_P12:-}" ]; then
+    if [ -z "${APPLE_INSTALLER_PASSWORD:-}" ]; then
+      echo "error: APPLE_INSTALLER_PASSWORD is not set" >&2
+      exit 1
+    fi
+    printf '%s' "$APPLE_INSTALLER_P12" | tr -d ' \r\n' | base64 --decode > "$work/installer.p12"
+    if ! security import "$work/installer.p12" -k "$keychain" -P "$APPLE_INSTALLER_PASSWORD" -T /usr/bin/productbuild -T /usr/bin/pkgbuild; then
+      echo "error: installer p12 import failed (check APPLE_INSTALLER_P12 and APPLE_INSTALLER_PASSWORD)" >&2
+      exit 1
+    fi
+    security set-key-partition-list -S apple-tool:,apple:,apple-tool:productbuild -s -k "" "$keychain" >/dev/null
+  fi
+  installer_identity=$(security find-identity -v "$keychain" | awk -F'"' '/Developer ID Installer/{print $2; exit}')
+  if [ -z "$installer_identity" ]; then
+    echo "error: no 'Developer ID Installer' identity. APPLE_CERTIFICATE_P12 has Developer ID Application only. Set APPLE_INSTALLER_P12 and APPLE_INSTALLER_PASSWORD. Refusing to ship an unsigned pkg." >&2
     exit 1
   fi
 fi
@@ -91,11 +112,6 @@ cp "$root/LICENSE" "$root/README.md" "$stage/"
 cp "$stage/LICENSE" "$stage/LICENSE.txt"
 rm "$stage/LICENSE"
 cp "$root/packaging/INSTALL.txt" "$stage/"
-cp "$root/packaging/Install Scorecard.command" "$stage/"
-# Finder double-click needs the exec bit; a checkout may not preserve
-# it, so set it explicitly. INSTALL.txt and the script are data files:
-# they ride inside the signed DMG and need no individual signature.
-chmod +x "$stage/Install Scorecard.command"
 
 # A prerelease tag (v0.1.0-rc.2) may ship binaries that report the base
 # Cargo.toml version (0.1.0); a final tag must match exactly.
@@ -122,6 +138,33 @@ pack_arch() {
 mkdir -p "$dist"
 pack_arch aarch64-apple-darwin
 pack_arch x86_64-apple-darwin
+
+# Component package of the universal binaries, then a product archive.
+# productbuild --sign is what Gatekeeper checks. An unsigned product is
+# only produced when no release signing secrets are set; that path does
+# not publish a GitHub release.
+build_pkg() {
+  payload="$work/pkg-root"
+  rm -rf "$payload"
+  mkdir -p "$payload"
+  cp "$stage/sc" "$stage/sc-mcp" "$payload/"
+  chmod 755 "$payload/sc" "$payload/sc-mcp"
+  pkgbuild \
+    --root "$payload" \
+    --identifier com.moonbase2090.scorecard \
+    --version "$ver" \
+    --install-location /usr/local/bin \
+    --ownership recommended \
+    "$work/scorecard-component.pkg"
+  if [ "$signing" = true ]; then
+    productbuild --sign "$installer_identity" --package "$work/scorecard-component.pkg" "$1"
+  else
+    productbuild --package "$work/scorecard-component.pkg" "$1"
+  fi
+}
+pkg="$dist/sc-v${ver}-macos.pkg"
+build_pkg "$pkg"
+cp "$pkg" "$stage/Install Scorecard.pkg"
 
 # Offline check that every shipped binary carries a valid signature.
 if [ "$signing" = true ]; then
@@ -150,27 +193,20 @@ build_dmg() {
   "$venv/bin/python" -m dmgbuild -D "stage=$stage" -D "packaging=$root/packaging" -s "$root/packaging/dmg-settings.py" "Scorecard $ver" "$dmg"
 }
 signed=false
-if [ "$signing" = true ]; then
-  build_dmg
-  codesign --force --timestamp --sign "$identity" "$dmg"
-  # Accept the .p8 either as PEM text or base64 of the PEM file.
-  case "$APPLE_NOTARY_KEY" in
-    *"BEGIN PRIVATE KEY"*) printf '%s\n' "$APPLE_NOTARY_KEY" > "$work/AuthKey.p8" ;;
-    *) printf '%s' "$APPLE_NOTARY_KEY" | tr -d ' \r\n' | base64 --decode > "$work/AuthKey.p8" ;;
-  esac
+notarize() {
   set +e
-  xcrun notarytool submit "$dmg" --wait --output-format json \
+  xcrun notarytool submit "$1" --wait --output-format json \
     --issuer "$APPLE_NOTARY_ISSUER" \
     --key-id "$APPLE_NOTARY_KEY_ID" \
-    --key "$work/AuthKey.p8" > "$work/notary.json"
+    --key "$work/AuthKey.p8" > "$2"
   rc=$?
   set -e
-  cat "$work/notary.json"
+  cat "$2"
   echo
-  sub_id=$(plutil -extract id raw -o - "$work/notary.json" 2>/dev/null || true)
-  status=$(plutil -extract status raw -o - "$work/notary.json" 2>/dev/null || true)
+  status=$(plutil -extract status raw -o - "$2" 2>/dev/null || true)
   if [ "$rc" -ne 0 ] || [ "$status" != "Accepted" ]; then
-    echo "error: notarization failed (notarytool exit $rc, status ${status:-unknown})" >&2
+    echo "error: notarization of $1 failed (notarytool exit $rc, status ${status:-unknown})" >&2
+    sub_id=$(plutil -extract id raw -o - "$2" 2>/dev/null || true)
     if [ -n "$sub_id" ]; then
       xcrun notarytool log "$sub_id" \
         --issuer "$APPLE_NOTARY_ISSUER" \
@@ -179,6 +215,20 @@ if [ "$signing" = true ]; then
     fi
     exit 1
   fi
+}
+
+if [ "$signing" = true ]; then
+  case "$APPLE_NOTARY_KEY" in
+    *"BEGIN PRIVATE KEY"*) printf '%s\n' "$APPLE_NOTARY_KEY" > "$work/AuthKey.p8" ;;
+    *) printf '%s' "$APPLE_NOTARY_KEY" | tr -d ' \r\n' | base64 --decode > "$work/AuthKey.p8" ;;
+  esac
+  notarize "$pkg" "$work/notary-pkg.json"
+  xcrun stapler staple "$pkg"
+  xcrun stapler validate "$pkg"
+  cp "$pkg" "$stage/Install Scorecard.pkg"
+  build_dmg
+  codesign --force --timestamp --sign "$identity" "$dmg"
+  notarize "$dmg" "$work/notary.json"
   xcrun stapler staple "$dmg"
   xcrun stapler validate "$dmg"
   # Bare binaries cannot be stapled, so notarize them via a zip of the
@@ -188,20 +238,7 @@ if [ "$signing" = true ]; then
   cp "$arm/sc" "$arm/sc-mcp" "$work/notary-bin/aarch64-apple-darwin/"
   cp "$intel/sc" "$intel/sc-mcp" "$work/notary-bin/x86_64-apple-darwin/"
   (cd "$work" && ditto -c -k --sequesterRsrc --keepParent notary-bin "sc-v${ver}-macos-binaries.zip")
-  set +e
-  xcrun notarytool submit "$work/sc-v${ver}-macos-binaries.zip" --wait --output-format json \
-    --issuer "$APPLE_NOTARY_ISSUER" \
-    --key-id "$APPLE_NOTARY_KEY_ID" \
-    --key "$work/AuthKey.p8" > "$work/notary-bin.json"
-  rc=$?
-  set -e
-  cat "$work/notary-bin.json"
-  echo
-  bin_status=$(plutil -extract status raw -o - "$work/notary-bin.json" 2>/dev/null || true)
-  if [ "$rc" -ne 0 ] || [ "$bin_status" != "Accepted" ]; then
-    echo "error: binary notarization failed (notarytool exit $rc, status ${bin_status:-unknown})" >&2
-    exit 1
-  fi
+  notarize "$work/sc-v${ver}-macos-binaries.zip" "$work/notary-bin.json"
   signed=true
 else
   build_dmg
