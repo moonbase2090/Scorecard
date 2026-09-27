@@ -1,5 +1,5 @@
 name: sc
-description: Run the sc scorecard gate and upload SARIF
+description: Run the sc scorecard gate and upload the report
 branding:
   icon: check-circle
   color: green
@@ -9,7 +9,7 @@ inputs:
     required: false
     default: ""
   fail-on:
-    description: Comma-separated gates that fail the process. sca is advisory and is not in the default.
+    description: Comma-separated gates that fail the process. sca is advisory and is not in the default. Empty reports without failing.
     required: false
     default: types,tests,crap,secrets,lint
   mutation:
@@ -24,12 +24,70 @@ inputs:
     description: Git base ref. Empty skips --diff
     required: false
     default: ""
+  version:
+    description: Release to install, such as 0.1.1. Empty uses the action ref when it is a v* tag, otherwise the latest release.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
     - name: Install sc
       shell: bash
-      run: cargo install --path "${{ github.action_path }}/../crates/sc-cli" --locked --force
+      env:
+        SC_VERSION: ${{ inputs.version }}
+        SC_ACTION_REF: ${{ github.action_ref }}
+      run: |
+        set -eu
+        ver="$SC_VERSION"
+        if [ -z "$ver" ]; then
+          case "${SC_ACTION_REF:-}" in
+            v*) ver="${SC_ACTION_REF#v}" ;;
+          esac
+        fi
+        if [ -z "$ver" ]; then
+          ver=$(curl -fsSL https://api.github.com/repos/moonbase2090/Scorecard/releases/latest \
+            | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p' | head -1)
+        fi
+        case "${RUNNER_OS}-${RUNNER_ARCH}" in
+          Linux-X64) triple=x86_64-unknown-linux-gnu ;;
+          Linux-ARM64) triple=aarch64-unknown-linux-gnu ;;
+          macOS-X64) triple=x86_64-apple-darwin ;;
+          macOS-ARM64) triple=aarch64-apple-darwin ;;
+          *) triple="" ;;
+        esac
+        install_from_source() {
+          echo "building sc from source"
+          cargo install --path "${{ github.action_path }}/../crates/sc-cli" --locked --force
+        }
+        asset="sc-v${ver}-${triple}.tar.gz"
+        base="https://github.com/moonbase2090/Scorecard/releases/download/v${ver}"
+        tmp=$(mktemp -d)
+        if [ -n "$triple" ] && [ -n "$ver" ] \
+          && curl -fsSL -o "$tmp/$asset" "$base/$asset" \
+          && curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS"; then
+          want=$(awk -v f="$asset" '$2 == f { print $1; exit }' "$tmp/SHA256SUMS")
+          if command -v sha256sum >/dev/null 2>&1; then
+            got=$(sha256sum "$tmp/$asset" | awk '{ print $1 }')
+          else
+            got=$(shasum -a 256 "$tmp/$asset" | awk '{ print $1 }')
+          fi
+          if [ -n "$want" ] && [ "$want" = "$got" ]; then
+            tar -xzf "$tmp/$asset" -C "$tmp"
+            mkdir -p "$HOME/.local/bin"
+            install -m 755 "$tmp/sc" "$HOME/.local/bin/sc"
+            if [ -f "$tmp/sc-mcp" ]; then
+              install -m 755 "$tmp/sc-mcp" "$HOME/.local/bin/sc-mcp"
+            fi
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+            echo "installed sc v${ver} (${triple})"
+          else
+            echo "checksum mismatch for ${asset}; building from source"
+            install_from_source
+          fi
+        else
+          echo "no matching asset ${asset}; building from source"
+          install_from_source
+        fi
     - name: Analyze
       shell: bash
       env:
@@ -42,8 +100,8 @@ runs:
         case "$SC_FORMAT" in
           md) out=sc-results.md ;;
           json) out=sc-results.json ;;
-          html) out=sc-results.html ;;
-          *) out=sc-results.sarif ;;
+          sarif) out=sc-results.sarif ;;
+          *) out=sc-results.html ;;
         esac
         args=(analyze . --format "$SC_FORMAT" --out "$out" --fail-on "$SC_FAIL_ON" --mutation "$SC_MUTATION")
         if [ -n "$SC_SPEC" ]; then
@@ -53,8 +111,19 @@ runs:
           args+=(--diff "$SC_DIFF")
         fi
         sc "${args[@]}"
+    - name: Upload report
+      if: always() && (inputs.format == 'html' || inputs.format == 'all')
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: scorecard-report
+        path: |
+          sc-results.html
+          sc-results.md
+          sc-results.json
+          sc-results.sarif
+        if-no-files-found: warn
     - name: Upload SARIF
-      if: always() && (inputs.format == 'sarif' || inputs.format == 'all')
+      if: always() && (inputs.format == 'sarif' || inputs.format == 'all') && github.event.repository.visibility == 'public'
       uses: github/codeql-action/upload-sarif@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
       with:
         sarif_file: sc-results.sarif
