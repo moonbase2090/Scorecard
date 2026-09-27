@@ -18,6 +18,7 @@ pub enum PackId {
     Php,
     Cpp,
     Command,
+    Web,
 }
 
 impl PackId {
@@ -34,6 +35,7 @@ impl PackId {
             Self::Php => "php",
             Self::Cpp => "cpp",
             Self::Command => "command",
+            Self::Web => "web",
         }
     }
 
@@ -50,6 +52,7 @@ impl PackId {
             "php" => Some(Self::Php),
             "cpp" | "c++" | "cxx" => Some(Self::Cpp),
             "command" => Some(Self::Command),
+            "web" | "html" => Some(Self::Web),
             _ => None,
         }
     }
@@ -69,6 +72,7 @@ impl PackId {
             | Self::Php
             | Self::Cpp
             | Self::Command => &["secrets"],
+            Self::Web => &["html", "crap", "secrets"],
         }
     }
 
@@ -147,6 +151,11 @@ pub const ROUND1: &[PackFixture] = &[
         pass_fixture: "testdata/command_pack",
         fail_fixture: "testdata/command_pack_fail",
     },
+    PackFixture {
+        id: PackId::Web,
+        pass_fixture: "testdata/web_site",
+        fail_fixture: "testdata/web_site_bad",
+    },
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -214,7 +223,10 @@ fn collect_text(_root: &Path, dir: &Path, depth: u32, out: &mut Vec<std::path::P
                     | "h"
                     | "hh"
                     | "hpp"
-                    | "hxx",
+                    | "hxx"
+                    | "html"
+                    | "htm"
+                    | "css",
             )
         ) {
             out.push(path);
@@ -261,6 +273,7 @@ pub fn detect(root: &Path, override_pack: &str) -> Result<Detected, String> {
         found.push(PackId::Cpp);
     }
     match found.len() {
+        0 if has_root_html(root) => Ok(Detected::Pack(PackId::Web)),
         0 if has_shell(root) => Ok(Detected::Pack(PackId::Bash)),
         0 => Ok(Detected::Unknown),
         1 => Ok(Detected::Pack(found[0])),
@@ -279,6 +292,13 @@ fn has_extension(root: &Path, exts: &[&str]) -> bool {
             .and_then(|ext| ext.to_str())
             .is_some_and(|ext| exts.iter().any(|wanted| wanted.eq_ignore_ascii_case(ext)))
     })
+}
+
+fn has_root_html(root: &Path) -> bool {
+    if root.join("index.html").is_file() || root.join("index.htm").is_file() {
+        return true;
+    }
+    has_extension(root, &["html", "htm"])
 }
 
 fn has_shell(root: &Path) -> bool {
@@ -328,6 +348,8 @@ mod tests {
             ("php", PackId::Php),
             ("cxx", PackId::Cpp),
             ("command", PackId::Command),
+            ("web", PackId::Web),
+            ("html", PackId::Web),
         ];
         for (name, id) in names {
             assert_eq!(PackId::parse(name), Some(id));
@@ -363,7 +385,7 @@ mod tests {
     #[test]
     fn round1_fixtures_exist_and_detect() {
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-        assert_eq!(ROUND1.len(), 10);
+        assert_eq!(ROUND1.len(), 11);
         for spec in ROUND1 {
             let pass = root.join(spec.pass_fixture);
             let fail = root.join(spec.fail_fixture);

@@ -5,10 +5,11 @@
 //! finding subtracts 0.25 and a warning subtracts 0.05, then the result is
 //! clamped to 0.0.
 //!
-//! - correctness: `compile`, `tests`, and `config` findings
+//! - correctness: `compile`, `tests`, `config`, `lint`, and `html` findings
 //! - maintainability: `complexity`, `crap`, and `coverage` findings
 //! - efficiency: `perf` findings (none in M1, so this stays 1.0)
 //! - security: `secrets` and `sca` findings (none in M1, so this stays 1.0)
+//! - a11y: `a11y` findings
 
 use crate::{Finding, Gate, Scores};
 
@@ -17,6 +18,7 @@ pub fn compute_scores(findings: &[Finding]) -> Scores {
     let mut efficiency: f64 = 1.0;
     let mut maintainability: f64 = 1.0;
     let mut security: f64 = 1.0;
+    let mut a11y: f64 = 1.0;
 
     for finding in findings {
         let penalty = match finding.severity.as_str() {
@@ -28,9 +30,10 @@ pub fn compute_scores(findings: &[Finding]) -> Scores {
             continue;
         }
         let slot = match finding.engine.as_str() {
-            "compile" | "tests" | "config" | "lint" => &mut correctness,
+            "compile" | "tests" | "config" | "lint" | "html" => &mut correctness,
             "perf" => &mut efficiency,
             "secrets" | "sca" => &mut security,
+            "a11y" => &mut a11y,
             _ => &mut maintainability,
         };
         *slot -= penalty;
@@ -41,6 +44,7 @@ pub fn compute_scores(findings: &[Finding]) -> Scores {
         efficiency: efficiency.max(0.0),
         maintainability: maintainability.max(0.0),
         security: security.max(0.0),
+        a11y: a11y.max(0.0),
     }
 }
 

@@ -1,5 +1,5 @@
 # Scorecard configuration.
-# pack = "rust"   # rust, node, python, bash, go, java, csharp, php, cpp, or command
+# pack = "rust"   # rust, node, python, bash, go, java, csharp, php, cpp, web, or command
 # Set this when the repo contains more than one manifest. Same as --pack.
 # Copy to analyzer.toml in the project you analyze, or to ~/.config/sc/analyzer.toml.
 # CLI flags override the matching settings.
@@ -29,6 +29,19 @@ model = "qwen2.5-coder"
 [engines]
 coverage = true
 sca = true
+
+[html]
+# auto | on | off. auto enforces html on the built-in fail_on list.
+enforce = "auto"
+
+[links]
+# Missing internal files stay advisory until this is true or fail_on names links.
+enforce = false
+
+[a11y]
+# Advisory until this is true or fail_on names a11y. disable lists rule ids.
+enforce = false
+disable = []
 
 [commands]
 # Empty skips lint. Non-zero exit is `lint.failed`.

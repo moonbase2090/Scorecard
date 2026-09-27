@@ -252,6 +252,20 @@ fn fake_dep_warns_on_hallucinated_import() {
 }
 
 #[test]
+fn local_mod_pub_use_is_not_hallucinated() {
+    let (code, card, _, stderr) = analyze(&["testdata/local_mod"]);
+    assert_eq!(code, 0, "stderr={stderr}\ncard={card}");
+    let hallucinated: Vec<_> = card["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|finding| finding["rule"] == "sca.hallucinated_import")
+        .collect();
+    assert!(hallucinated.is_empty(), "{hallucinated:?}");
+    assert_eq!(card["metrics"]["hallucinated_imports"].as_u64().unwrap(), 0);
+}
+
+#[test]
 fn secret_token_fails_the_secrets_gate() {
     let (code, card, _, stderr) = analyze(&["testdata/secret_token"]);
     assert_eq!(code, 1, "stderr={stderr}\ncard={card}");
@@ -285,6 +299,7 @@ fn pack_contract_passes_clean_trees_and_fails_secrets() {
         "testdata/csharp_pack",
         "testdata/php_pack",
         "testdata/cpp_pack",
+        "testdata/web_site",
     ];
     for path in passes {
         let (code, card, _, stderr) = analyze(&[path]);
@@ -311,6 +326,7 @@ fn pack_contract_passes_clean_trees_and_fails_secrets() {
         "testdata/csharp_pack_fail",
         "testdata/php_pack_fail",
         "testdata/cpp_pack_fail",
+        "testdata/web_site_bad",
     ];
     for path in fails {
         let (code, card, _, stderr) = analyze(&[path]);
@@ -323,6 +339,60 @@ fn pack_contract_passes_clean_trees_and_fails_secrets() {
     let (code, card, _, stderr) = analyze(&["testdata/command_pack_fail", "--pack", "command"]);
     assert_eq!(code, 1, "stderr={stderr}\ncard={card}");
     assert!(rules(&card).iter().any(|rule| rule.starts_with("secrets.")));
+}
+
+#[test]
+fn web_pack_reports_markup_and_missing_files_with_locations() {
+    let (code, card, _, stderr) = analyze(&["testdata/web_site"]);
+    assert_eq!(code, 0, "stderr={stderr}\ncard={card}");
+    assert_eq!(card["pack"], "web");
+    assert!(card["gates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|gate| { gate["id"] == "html" && gate["pass"] == true && gate["enforced"] == true }));
+    assert!(card["gates"].as_array().unwrap().iter().any(|gate| {
+        gate["id"] == "links" && gate["pass"] == true && gate["enforced"] == false
+    }));
+
+    let (code, markdown, stderr) = analyze_raw(&["testdata/web_site_bad", "--format", "md"]);
+    assert_eq!(code, 1, "stderr={stderr}\n{markdown}");
+    assert!(
+        markdown.contains("html.doctype") && markdown.contains("index.html:"),
+        "{markdown}"
+    );
+    assert!(markdown.contains("links.missing"), "{markdown}");
+    assert!(
+        markdown.contains("html.unclosed") || markdown.contains("html.misnested"),
+        "{markdown}"
+    );
+    let (pretty_code, pretty, pretty_err) =
+        analyze_raw(&["testdata/web_site", "--format", "pretty"]);
+    assert_eq!(pretty_code, 0, "{pretty_err}");
+    assert_eq!(
+        scrub_pretty(&pretty),
+        include_str!("golden/web_site.pretty.txt")
+    );
+}
+
+#[test]
+fn a11y_stays_advisory_until_fail_on_names_it() {
+    let (code, card, _, stderr) = analyze(&["testdata/a11y_page"]);
+    assert_eq!(code, 0, "stderr={stderr}\ncard={card}");
+    assert!(
+        !rules(&card).iter().any(|rule| rule.starts_with("a11y.")),
+        "{card}"
+    );
+    let (code, card, _, stderr) = analyze(&["testdata/a11y_page_bad", "--fail-on", ""]);
+    assert_eq!(code, 0, "stderr={stderr}\ncard={card}");
+    assert!(rules(&card).contains(&"a11y.img-alt"), "{card}");
+    let (code, card, _, stderr) = analyze(&["testdata/a11y_page_bad", "--fail-on", "a11y"]);
+    assert_eq!(code, 1, "stderr={stderr}\ncard={card}");
+    assert!(card["gates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|gate| { gate["id"] == "a11y" && gate["pass"] == false && gate["enforced"] == true }));
 }
 
 #[test]

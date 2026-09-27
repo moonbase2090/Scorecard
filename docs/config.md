@@ -2,7 +2,7 @@
 
 See `analyzer.toml.example`. Copy it to `analyzer.toml` or `~/.config/sc/analyzer.toml`. `--fail-on` overrides `gates.fail_on`. CLI flags override the matching settings.
 
-`secrets` matches a small token set (AWS access keys, GitHub tokens, Slack tokens, Stripe live keys, and private-key blocks). An undeclared dependency is a strongly advised warning (`sca.hallucinated_import`, disposition `ask`). The `sca` gate is `enforced: false` when it passes and when it fails, so it does not change the exit code under the default `--fail-on` list. `std`, `core`, `alloc`, `crate`, `self`, and `super` are allowed. Python uses the same warning for an import that is not in `pyproject.toml`.
+`secrets` matches a small token set (AWS access keys, GitHub tokens, Slack tokens, Stripe live keys, and private-key blocks). An undeclared dependency is a strongly advised warning (`sca.hallucinated_import`, disposition `ask`). The `sca` gate is `enforced: false` when it passes and when it fails, so it does not change the exit code under the default `--fail-on` list. `std`, `core`, `alloc`, `crate`, `self`, and `super` are allowed, as are modules declared in the crate (`mod x;`, `mod x {}`, file modules) and `extern crate` aliases. Python uses the same warning for an import that is not in `pyproject.toml`.
 
 `--spec FILE` checks that paths named in the file exist and that `fn`, `struct`, `enum`, `trait`, `type`, and `const` names in the file are public items. Gaps fill `spec.gaps`. The `spec` gate fails when `--spec` is set or when `spec` is in `--fail-on` and the file is missing.
 

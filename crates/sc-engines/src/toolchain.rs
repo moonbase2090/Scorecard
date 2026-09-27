@@ -61,7 +61,7 @@ fn plan(pack: PackId, root: &Path) -> Vec<Step> {
         PackId::CSharp => csharp_plan(),
         PackId::Php => php_plan(root),
         PackId::Cpp => cpp_plan(root),
-        PackId::Command | PackId::Rust | PackId::Python => Vec::new(),
+        PackId::Command | PackId::Rust | PackId::Python | PackId::Web => Vec::new(),
     }
 }
 

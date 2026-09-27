@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 pub const KNOWN_GATES: &[&str] = &[
-    "types", "tests", "crap", "secrets", "sca", "spec", "mutation", "lint",
+    "types", "tests", "crap", "secrets", "sca", "spec", "mutation", "lint", "html", "links", "a11y",
 ];
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
@@ -21,7 +21,10 @@ pub struct Config {
     pub llm: LlmConfig,
     pub engines: EnginesConfig,
     pub commands: CommandsConfig,
-    /// Empty detects a pack from the tree: `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, or `command`.
+    pub html: HtmlConfig,
+    pub links: LinksConfig,
+    pub a11y: A11yConfig,
+    /// Empty detects a pack from the tree: `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, `web`, or `command`.
     pub pack: String,
 }
 
@@ -109,6 +112,40 @@ impl Default for LlmConfig {
             enabled: false,
             endpoint: "http://127.0.0.1:11434/v1".into(),
             model: "qwen2.5-coder".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct HtmlConfig {
+    /// `auto` (default), `on`, or `off`.
+    ///
+    /// `auto` enforces the html gate when `fail_on` is the built-in list or
+    /// already names `html`. A custom list enforces it only when it names `html`.
+    pub enforce: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct LinksConfig {
+    /// When true, a missing internal file fails the process.
+    pub enforce: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct A11yConfig {
+    /// When true, accessibility findings fail the process.
+    pub enforce: bool,
+    /// Rule ids to skip, such as `img-alt` or `contrast`.
+    pub disable: Vec<String>,
+}
+
+impl Default for HtmlConfig {
+    fn default() -> Self {
+        Self {
+            enforce: "auto".into(),
         }
     }
 }

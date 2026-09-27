@@ -72,6 +72,13 @@ pub struct Scores {
     pub efficiency: f64,
     pub maintainability: f64,
     pub security: f64,
+    /// Accessibility. Missing from older scorecards, which score as 1.0.
+    #[serde(default = "one_score")]
+    pub a11y: f64,
+}
+
+fn one_score() -> f64 {
+    1.0
 }
 
 impl Scores {
@@ -81,6 +88,7 @@ impl Scores {
             efficiency: 1.0,
             maintainability: 1.0,
             security: 1.0,
+            a11y: 1.0,
         }
     }
 }
@@ -285,6 +293,7 @@ mod tests {
                 efficiency: 0.81,
                 maintainability: 0.54,
                 security: 0.9,
+                a11y: 1.0,
             },
             gates: vec![
                 Gate {

@@ -70,11 +70,12 @@ pub fn to_markdown(card: &Scorecard) -> String {
 
     out.push_str("## Scores\n\n");
     out.push_str(&format!(
-        "- correctness: {:.2}\n- efficiency: {:.2}\n- maintainability: {:.2}\n- security: {:.2}\n\n",
+        "- correctness: {:.2}\n- efficiency: {:.2}\n- maintainability: {:.2}\n- security: {:.2}\n- a11y: {:.2}\n\n",
         card.scores.correctness,
         card.scores.efficiency,
         card.scores.maintainability,
-        card.scores.security
+        card.scores.security,
+        card.scores.a11y
     ));
 
     out.push_str("## Worst CRAP\n\n");

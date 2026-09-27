@@ -13,8 +13,11 @@
 | a root `.csproj` or `.sln` | C# |
 | `composer.json` | PHP |
 | `CMakeLists.txt` | C++ |
+| `index.html` or another root `.html` file, and no manifest | Web |
 
-Two markers and no override is an error. Set `pack` in `analyzer.toml`, or pass `--pack`, to name the pack. `command` is only an override: it runs secrets plus a lint command you set yourself.
+Two markers and no override is an error. Set `pack` in `analyzer.toml`, or pass `--pack`, to name the pack. `command` is only an override: it runs secrets plus a lint command you set yourself. A root HTML file does not override a manifest such as `package.json`. Pass `--pack web` when a manifest is present and the tree is still a static site.
+
+The web pack needs no external tools. It parses HTML with `html5ever`, checks internal `href` and `src` paths against the tree, and scores CRAP on `.js` files and inline scripts. Secrets use the same patterns as the other packs. The `html` gate is enforced when `fail_on` is the built-in list or names `html`. Set `[html] enforce = "off"` to report markup without failing the process, or `"on"` to enforce it on a custom `fail_on` list. The `links` gate is advisory unless `fail_on` names `links` or `[links] enforce = true`. Accessibility checks are the `a11y` engine. See `docs/a11y.md`. The gate is advisory unless `fail_on` names `a11y` or `[a11y] enforce = true`.
 
 A gate with `enforced: false` is reported and does not fail the process. Rust enforces types, tests, CRAP, secrets, and lint. An undeclared dependency is advisory (`sca`) and does not change the exit code. Python enforces `python3 -m compileall`, pytest when a test suite is present, Ruff, secrets, and CRAP. An import that is not in `pyproject.toml` is the same advisory. Pytest writes line coverage when pytest-cov is available. The other packs use the same CRAP formula.
 
@@ -50,7 +53,7 @@ sc analyze [PATH] [--diff [BASE]] [--diff-head REV] [--paths FILE] [--spec PATH]
 | `PATH` | `.` |
 | `--format` | `pretty` on a terminal, otherwise `json`. Also `md`, `sarif`, `html`, `all`. |
 | `--fail-on` | `types,tests,crap,secrets,lint` |
-| `--pack` | detect one pack. `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, or `command` |
+| `--pack` | detect one pack. `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, `web`, or `command` |
 | `--mutation` | `off` |
 | `--llm` | `off` |
 | `--intent` | none |
@@ -77,6 +80,9 @@ Skipping coverage, mutation, or the LLM does not by itself exit 2.
 | `testdata/crap_untested` | CC-heavy `classify`, no tests. Exit 1, finding `crap.over_threshold`. |
 | `testdata/crap_tested` | The same `classify` with tests that cover its branches. Exit 0 when llvm-cov is installed. |
 | `testdata/fake_dep` | Uses `missing_crate` under `cfg(any())`. Exit 0. Warning `sca.hallucinated_import`, disposition `ask`. |
+| `testdata/local_mod` | `pub use` of a local `mod`. Exit 0. No `sca.hallucinated_import`. |
+| `testdata/web_site` | Static HTML. Exit 0. Pack `web`. |
+| `testdata/web_site_bad` | Missing doctype and viewport, a misnested tag, a missing local link, and a token. Exit 1. |
 
 `sc analyze testdata/crap_untested` should finish in well under 30 seconds after dependencies are already fetched. These fixtures have no crates.io dependencies.
 

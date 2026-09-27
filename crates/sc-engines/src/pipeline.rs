@@ -63,6 +63,7 @@ pub fn analyze(request: AnalyzeRequest) -> AnalyzeOutput {
         Ok(crate::pack::Detected::Pack(crate::pack::PackId::Python)) => {
             analyze_python(request, git)
         }
+        Ok(crate::pack::Detected::Pack(crate::pack::PackId::Web)) => analyze_web(request, git),
         Ok(crate::pack::Detected::Pack(pack)) => analyze_unsupported(request, pack, git),
         Ok(crate::pack::Detected::Unknown) => {
             analyze_blocked(request, "unknown", "no language pack detected", git)
@@ -142,6 +143,293 @@ fn analyze_blocked(
     })
 }
 
+fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
+    let mut findings = Vec::new();
+    let mut functions = crate::poly_cc::functions_for_pack(&request.root, "node");
+    for rel in html_files(&request.root) {
+        let Ok(text) = std::fs::read_to_string(request.root.join(&rel)) else {
+            continue;
+        };
+        let (html, parsed) = crate::html_doc::html_findings(&rel, &text);
+        findings.extend(html);
+        findings.extend(crate::links::link_findings(
+            &request.root,
+            &rel,
+            &parsed.elements,
+        ));
+        findings.extend(crate::a11y::check_elements(
+            &rel,
+            &parsed.elements,
+            &request.config.a11y.disable,
+            true,
+        ));
+        for script in parsed.scripts {
+            functions.extend(crate::poly_cc::javascript_in(
+                &rel,
+                &script.body,
+                script.line.saturating_sub(1),
+            ));
+        }
+    }
+    let secrets = crate::pack::text_secrets(&request.root);
+    let secret_errors = secrets
+        .iter()
+        .filter(|finding| finding.severity == "error")
+        .count();
+    findings.extend(secrets);
+    let html_errors = findings
+        .iter()
+        .filter(|finding| finding.engine == "html" && finding.severity == "error")
+        .count();
+    let missing_links = findings
+        .iter()
+        .filter(|finding| finding.rule == "links.missing")
+        .count();
+    let crap = crate::crap::evaluate(
+        &functions,
+        None,
+        request.config.gates.crap_threshold,
+        request.config.gates.new_fn_untested_cc,
+        |_| true,
+    );
+    if !functions.is_empty() {
+        findings.push(unavailable(
+            "coverage",
+            "no coverage report; CRAP treats each function as uncovered",
+        ));
+    }
+    findings.extend(crap.findings.clone());
+    let html_enforced = html_gate_enforced(&request.config, &request.fail_on);
+    let links_enforced =
+        request.config.links.enforce || request.fail_on.iter().any(|gate| gate == "links");
+    let a11y_enforced =
+        request.config.a11y.enforce || request.fail_on.iter().any(|gate| gate == "a11y");
+    let a11y_count = findings
+        .iter()
+        .filter(|finding| finding.engine == "a11y")
+        .count();
+    let mut fail_on = request.fail_on.clone();
+    if html_enforced && !fail_on.iter().any(|gate| gate == "html") {
+        fail_on.push("html".into());
+    }
+    if links_enforced && !fail_on.iter().any(|gate| gate == "links") {
+        fail_on.push("links".into());
+    }
+    if a11y_enforced && !fail_on.iter().any(|gate| gate == "a11y") {
+        fail_on.push("a11y".into());
+    }
+    let gates = vec![
+        mode_gate(
+            "html",
+            html_errors == 0,
+            html_enforced,
+            &if html_errors == 0 {
+                String::new()
+            } else {
+                format!("{html_errors} markup findings")
+            },
+        ),
+        mode_gate(
+            "a11y",
+            a11y_count == 0,
+            a11y_enforced,
+            &if a11y_count == 0 {
+                String::new()
+            } else {
+                format!("{a11y_count} accessibility findings")
+            },
+        ),
+        mode_gate(
+            "links",
+            missing_links == 0,
+            links_enforced,
+            &if missing_links == 0 {
+                String::new()
+            } else {
+                format!("{missing_links} missing files")
+            },
+        ),
+        gate(
+            "crap",
+            crap.over == 0 && crap.untested == 0,
+            &crap_gate_reason(
+                crap.over,
+                crap.untested,
+                request.config.gates.new_fn_untested_cc,
+            ),
+        ),
+        gate(
+            "secrets",
+            secret_errors == 0,
+            &if secret_errors == 0 {
+                String::new()
+            } else {
+                format!("{secret_errors} secrets")
+            },
+        ),
+    ];
+    finish(Draft {
+        root: request.root.clone(),
+        repo: request.repo,
+        pack: "web".into(),
+        test_selection: "full-suite".into(),
+        git,
+        mode: "tree".into(),
+        paths: Vec::new(),
+        fail_on,
+        findings,
+        ran: {
+            let mut ran = vec![
+                "html".into(),
+                "a11y".into(),
+                "links".into(),
+                "secrets".into(),
+                "crap".into(),
+            ];
+            if !functions.is_empty() {
+                ran.push("complexity".into());
+            }
+            ran
+        },
+        skipped: {
+            let mut skipped = vec![
+                "compile".into(),
+                "tests".into(),
+                "coverage".into(),
+                "sca".into(),
+                "lint".into(),
+                "llm".into(),
+                "mutation".into(),
+            ];
+            if functions.is_empty() {
+                skipped.push("complexity".into());
+            }
+            skipped
+        },
+        gates,
+        metrics: sc_core::Metrics {
+            loc_changed: 0,
+            files_changed: html_files(&request.root).len() as u64,
+            coverage_changed: 0.0,
+            crap_max: crap.crap_max,
+            crap_over_threshold: crap.over,
+            hallucinated_imports: 0,
+        },
+        threshold: request.config.gates.crap_threshold,
+        worst: crap.worst,
+        mutation: MutationSection::skipped(),
+        spec: SpecSection::empty(),
+        intent: request.intent,
+        runs: Vec::new(),
+        analyzer_error: false,
+    })
+}
+
+fn markup_files(root: &Path, exts: &[&str]) -> Vec<String> {
+    let mut out = Vec::new();
+    fn walk(root: &Path, dir: &Path, depth: u32, exts: &[&str], out: &mut Vec<String>) {
+        if depth > 6 || out.len() >= 200 {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
+            if name.starts_with('.') || name == "node_modules" || name == "dist" || name == "target"
+            {
+                continue;
+            }
+            if path.is_dir() {
+                walk(root, &path, depth + 1, exts, out);
+            } else if path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| exts.contains(&ext))
+            {
+                if let Ok(rel) = path.strip_prefix(root) {
+                    out.push(rel.to_string_lossy().replace('\\', "/"));
+                }
+            }
+        }
+    }
+    walk(root, root, 0, exts, &mut out);
+    out.sort();
+    out
+}
+
+fn html_files(root: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    fn walk(root: &Path, dir: &Path, depth: u32, out: &mut Vec<String>) {
+        if depth > 6 || out.len() >= 200 {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
+            if name.starts_with('.') || name == "node_modules" || name == "dist" || name == "target"
+            {
+                continue;
+            }
+            if path.is_dir() {
+                walk(root, &path, depth + 1, out);
+            } else if matches!(
+                path.extension().and_then(|ext| ext.to_str()),
+                Some("html" | "htm")
+            ) {
+                if let Ok(rel) = path.strip_prefix(root) {
+                    out.push(rel.to_string_lossy().replace('\\', "/"));
+                }
+            }
+        }
+    }
+    walk(root, root, 0, &mut out);
+    out.sort();
+    out
+}
+
+fn html_gate_enforced(config: &sc_core::Config, fail_on: &[String]) -> bool {
+    match config.html.enforce.trim().to_ascii_lowercase().as_str() {
+        "on" | "true" | "enforced" => true,
+        "off" | "false" | "advisory" => false,
+        _ => {
+            fail_on.iter().any(|gate| gate == "html") || {
+                let builtin = ["types", "tests", "crap", "secrets", "lint"];
+                fail_on.len() == builtin.len()
+                    && builtin
+                        .iter()
+                        .all(|gate| fail_on.iter().any(|item| item == gate))
+            }
+        }
+    }
+}
+
+fn mode_gate(id: &str, pass: bool, enforced: bool, reason: &str) -> Gate {
+    let reason = if pass {
+        None
+    } else if enforced || reason.is_empty() {
+        Some(reason.to_string())
+    } else {
+        Some(format!("{reason} (advisory; does not fail the process)"))
+    };
+    Gate {
+        id: id.to_string(),
+        pass,
+        enforced,
+        reason,
+    }
+}
+
 fn analyze_unsupported(
     request: AnalyzeRequest,
     pack: crate::pack::PackId,
@@ -172,7 +460,43 @@ fn analyze_unsupported(
         .filter(|finding| finding.severity == "error")
         .count();
     findings.extend(secrets);
+    let jsx_files = if pack == crate::pack::PackId::Node {
+        markup_files(&request.root, &["jsx", "tsx"])
+    } else {
+        Vec::new()
+    };
+    for rel in &jsx_files {
+        let Ok(text) = std::fs::read_to_string(request.root.join(rel)) else {
+            continue;
+        };
+        findings.extend(crate::a11y::check_jsx(
+            rel,
+            &text,
+            &request.config.a11y.disable,
+        ));
+    }
+    let a11y_count = findings
+        .iter()
+        .filter(|finding| finding.engine == "a11y")
+        .count();
+    let mut fail_on = request.fail_on.clone();
     let mut gates = tools.gates;
+    if !jsx_files.is_empty() {
+        let enforced = request.config.a11y.enforce || fail_on.iter().any(|gate| gate == "a11y");
+        if enforced && !fail_on.iter().any(|gate| gate == "a11y") {
+            fail_on.push("a11y".into());
+        }
+        gates.push(mode_gate(
+            "a11y",
+            a11y_count == 0,
+            enforced,
+            &if a11y_count == 0 {
+                String::new()
+            } else {
+                format!("{a11y_count} accessibility findings")
+            },
+        ));
+    }
     gates.push(gate_reported("sca"));
     let mut ran = tools.ran;
     let mut skipped = tools.skipped;
@@ -225,7 +549,7 @@ fn analyze_unsupported(
         git,
         mode: "tree".into(),
         paths: Vec::new(),
-        fail_on: request.fail_on,
+        fail_on,
         findings,
         ran: {
             ran.push("secrets".into());
@@ -1260,12 +1584,22 @@ fn import_findings(
     if let Some(name) = package_name(&manifest) {
         allowed.insert(name);
     }
+    // First segments that resolve inside the crate are never external:
+    // declared `mod` names, `extern crate` aliases, and file modules
+    // (`src/score.rs`, `src/foo/mod.rs`) across the analyzed sources.
+    let mut local: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for file in &selection.files {
+        local.extend(file.local_names.iter().cloned());
+        if let Some(module) = file_module(&file.rel) {
+            local.insert(module);
+        }
+    }
     ran.push("sca".into());
     let mut count = 0u64;
     for file in &selection.files {
         for import in &file.imports {
             let name = crate::manifest::normalize(&import.crate_name);
-            if allowed.contains(&name) {
+            if allowed.contains(&name) || local.contains(&name) {
                 continue;
             }
             count += 1;
@@ -1293,6 +1627,28 @@ fn import_findings(
         }
     }
     count
+}
+
+/// Module name a source file contributes: `src/score.rs` is module
+/// `score`, `src/foo/mod.rs` is module `foo`. Crate roots (`main.rs`,
+/// `lib.rs`) and a bare `src/mod.rs` contribute nothing.
+fn file_module(rel: &str) -> Option<String> {
+    let path = Path::new(rel);
+    if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+        return None;
+    }
+    let stem = path.file_stem().and_then(|stem| stem.to_str())?;
+    if stem == "mod" {
+        let parent = path.parent()?.file_name().and_then(|name| name.to_str())?;
+        if parent == "src" {
+            return None;
+        }
+        return Some(parent.to_string());
+    }
+    if stem == "main" || stem == "lib" {
+        return None;
+    }
+    Some(stem.to_string())
 }
 
 fn secret_and_perf(selection: &Selection, ran: &mut Vec<String>, findings: &mut Vec<Finding>) {
@@ -1602,6 +1958,9 @@ fn order_engines(ran: &mut Vec<String>, skipped: &mut Vec<String>) {
         "complexity",
         "crap",
         "sca",
+        "html",
+        "a11y",
+        "links",
         "secrets",
         "perf",
         "spec",
@@ -1750,6 +2109,80 @@ mod tests {
         assert_eq!(output.scorecard.git.head.as_ref().unwrap().len(), 40);
         assert!(output.scorecard.gates.iter().all(|gate| !gate.enforced));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn analyzed(rel: &str, imports: &[&str], local_names: &[&str]) -> crate::facts::AnalyzedFile {
+        crate::facts::AnalyzedFile {
+            rel: rel.to_string(),
+            loc: 10,
+            functions: Vec::new(),
+            imports: imports
+                .iter()
+                .map(|name| sc_graph::ImportHit {
+                    file: rel.to_string(),
+                    crate_name: (*name).to_string(),
+                    line: 1,
+                })
+                .collect(),
+            perf: Vec::new(),
+            items: Vec::new(),
+            secrets: Vec::new(),
+            local_names: local_names.iter().map(|name| (*name).to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn hallucinated_import_ignores_local_modules_and_aliases() {
+        use crate::scope::Selection;
+        let dir = std::env::temp_dir().join(format!("sc-sca-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let files = vec![
+            // `mod score;` declared here, `pub use score::...` first segment.
+            analyzed("src/lib.rs", &["score", "missing"], &["score", "renamed"]),
+            // File module: src/score.rs is module `score` with no decl needed.
+            analyzed("src/score.rs", &["renamed"], &[]),
+        ];
+        let selection = Selection {
+            mode: "tree".into(),
+            files,
+            crap_functions: Vec::new(),
+            new_symbols: std::collections::BTreeSet::new(),
+            narrow_untested: false,
+            paths: Vec::new(),
+            loc_changed: 0,
+            files_changed: 0,
+        };
+        let mut ran = Vec::new();
+        let mut skipped = Vec::new();
+        let mut findings = Vec::new();
+        let count = import_findings(
+            &dir,
+            &selection,
+            true,
+            &mut ran,
+            &mut skipped,
+            &mut findings,
+        );
+        assert_eq!(count, 1);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].symbol.as_deref(), Some("missing"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn file_module_names_follow_rust_layout() {
+        assert_eq!(file_module("src/score.rs").as_deref(), Some("score"));
+        assert_eq!(file_module("src/foo/mod.rs").as_deref(), Some("foo"));
+        assert_eq!(file_module("src/main.rs"), None);
+        assert_eq!(file_module("src/lib.rs"), None);
+        assert_eq!(file_module("src/mod.rs"), None);
+        assert_eq!(file_module("README.md"), None);
     }
 
     #[test]
