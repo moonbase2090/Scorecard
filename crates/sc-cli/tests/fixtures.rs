@@ -376,6 +376,26 @@ fn web_pack_reports_markup_and_missing_files_with_locations() {
 }
 
 #[test]
+fn a11y_stays_advisory_until_fail_on_names_it() {
+    let (code, card, _, stderr) = analyze(&["testdata/a11y_page"]);
+    assert_eq!(code, 0, "stderr={stderr}\ncard={card}");
+    assert!(
+        !rules(&card).iter().any(|rule| rule.starts_with("a11y.")),
+        "{card}"
+    );
+    let (code, card, _, stderr) = analyze(&["testdata/a11y_page_bad", "--fail-on", ""]);
+    assert_eq!(code, 0, "stderr={stderr}\ncard={card}");
+    assert!(rules(&card).contains(&"a11y.img-alt"), "{card}");
+    let (code, card, _, stderr) = analyze(&["testdata/a11y_page_bad", "--fail-on", "a11y"]);
+    assert_eq!(code, 1, "stderr={stderr}\ncard={card}");
+    assert!(card["gates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|gate| { gate["id"] == "a11y" && gate["pass"] == false && gate["enforced"] == true }));
+}
+
+#[test]
 fn coverage_packs_record_a_hit() {
     let packs = [
         "testdata/cov_node",

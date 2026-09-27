@@ -38,6 +38,11 @@ enforce = "auto"
 # Missing internal files stay advisory until this is true or fail_on names links.
 enforce = false
 
+[a11y]
+# Advisory until this is true or fail_on names a11y. disable lists rule ids.
+enforce = false
+disable = []
+
 [commands]
 # Empty skips lint. Non-zero exit is `lint.failed`.
 # Add `lint` to `gates.fail_on` to make that exit fail the process.

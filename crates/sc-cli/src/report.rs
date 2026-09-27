@@ -24,6 +24,7 @@ pub fn to_html(card: &Scorecard) -> String {
     hero(&mut out, card);
     pipeline(&mut out, card);
     scores_metrics(&mut out, card);
+    a11y_section(&mut out, card);
     gates(&mut out, card);
     crap(&mut out, card);
     findings(&mut out, card);
@@ -303,6 +304,56 @@ fn step(out: &mut String, title: &str, main: &str, skipped: usize, hi: bool) {
     out.push_str("</span></div>");
 }
 
+fn a11y_section(out: &mut String, card: &Scorecard) {
+    out.push_str("<h2>accessibility</h2>\n<div class=\"card\">");
+    let rules = a11y_rules(card);
+    if rules.is_empty() {
+        out.push_str("<p style=\"color:var(--dim)\">No accessibility findings.</p></div>\n");
+        return;
+    }
+    for rule in rules {
+        write_a11y_rule(out, card, rule);
+    }
+    out.push_str("</div>\n");
+}
+
+fn a11y_rules(card: &Scorecard) -> Vec<&str> {
+    let mut rules = Vec::new();
+    for finding in card
+        .findings
+        .iter()
+        .filter(|finding| finding.engine == "a11y")
+    {
+        if !rules.contains(&finding.rule.as_str()) {
+            rules.push(finding.rule.as_str());
+        }
+    }
+    rules
+}
+
+fn write_a11y_rule(out: &mut String, card: &Scorecard, rule: &str) {
+    out.push_str("<h3><code>");
+    out.push_str(&esc(rule));
+    out.push_str("</code></h3><ul>");
+    for finding in card.findings.iter().filter(|finding| finding.rule == rule) {
+        write_a11y_item(out, finding);
+    }
+    out.push_str("</ul>");
+}
+
+fn write_a11y_item(out: &mut String, finding: &sc_core::Finding) {
+    let line = finding
+        .span
+        .as_ref()
+        .map(|span| span.start_line)
+        .unwrap_or(1);
+    out.push_str("<li><code>");
+    out.push_str(&esc(&format!("{}:{line}", finding.file)));
+    out.push_str("</code> ");
+    out.push_str(&esc(&finding.message));
+    out.push_str("</li>");
+}
+
 fn scores_metrics(out: &mut String, card: &Scorecard) {
     out.push_str("<h2>scores</h2>\n<div class=\"card\"><table>");
     for (label, value) in [
@@ -310,6 +361,7 @@ fn scores_metrics(out: &mut String, card: &Scorecard) {
         ("efficiency", card.scores.efficiency),
         ("maintainability", card.scores.maintainability),
         ("security", card.scores.security),
+        ("a11y", card.scores.a11y),
     ] {
         let pct = (value.clamp(0.0, 1.0) * 100.0).round() as i64;
         out.push_str(&format!(
