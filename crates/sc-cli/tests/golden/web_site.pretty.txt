@@ -6,7 +6,7 @@ gates
   [ok]  html             enforced
   [ok]  a11y             advisory
   [ok]  links            advisory
-  [ok]  crap             enforced
+  [xx]  crap             advisory  coverage was not measured for all analyzed f~
   [ok]  secrets          enforced
 
 scores
@@ -17,19 +17,15 @@ scores
   a11y             1.00  [##########]
 
 worst crap  threshold 30
-  coverage not measured: CRAP assumes 0% coverage (upper bound)
-  CRAP   CC   COV  SYMBOL            LOCATION
-     2    1    --  ready             index.html
-     2    1    --  greet             site.js
+  (none)
 
 findings
 warning
-  engine.unavailable
+  coverage.missing
   .
-  Install the required toolchain and re-run
+  Run tests with coverage enabled and verify function names and source paths ma~
 
 engines run: complexity, crap, html, a11y, links, secrets
 engines skipped: compile, tests, coverage, sca, lint, mutation, llm
 duration: DURs
 exit 0: gates passed
-

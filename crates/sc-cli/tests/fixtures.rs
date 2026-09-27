@@ -306,12 +306,22 @@ fn pack_contract_passes_clean_trees_and_fails_secrets() {
         assert_eq!(code, 0, "{path} stderr={stderr}\ncard={card}");
         assert_eq!(card["verdict"], "pass", "{path}");
         assert_eq!(card["test_selection"], "full-suite", "{path}");
-        assert!(
-            card["gates"].as_array().unwrap().iter().any(|gate| {
-                gate["id"] == "crap" && gate["enforced"] == true && gate["pass"] == true
-            }),
-            "{path} {card}"
-        );
+        let crap_gate = card["gates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|gate| gate["id"] == "crap")
+            .unwrap_or_else(|| panic!("{path} has no CRAP gate: {card}"));
+        let coverage_missing = rules(&card)
+            .iter()
+            .any(|rule| matches!(*rule, "coverage.missing" | "coverage.unmatched"));
+        if coverage_missing {
+            assert_eq!(crap_gate["enforced"], false, "{path} {card}");
+            assert_eq!(crap_gate["pass"], false, "{path} {card}");
+        } else {
+            assert_eq!(crap_gate["enforced"], true, "{path} {card}");
+            assert_eq!(crap_gate["pass"], true, "{path} {card}");
+        }
     }
     let (code, card, _, stderr) = analyze(&["testdata/command_pack", "--pack", "command"]);
     assert_eq!(code, 0, "stderr={stderr}\ncard={card}");
