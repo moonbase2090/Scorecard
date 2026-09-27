@@ -17,21 +17,21 @@ Each `.tar.gz` contains `sc`, `sc-mcp`, `LICENSE`, and `README.md` at the top of
 Apple silicon:
 
 ```bash
-curl -fsSL -o sc.tar.gz https://github.com/moonbase2090/Scorecard/releases/download/v0.1.0/sc-v0.1.0-aarch64-apple-darwin.tar.gz
-tar -xzf sc.tar.gz
+curl -fsSLO https://github.com/moonbase2090/Scorecard/releases/download/v0.1.0/sc-v0.1.0-aarch64-apple-darwin.tar.gz
+tar -xzf sc-v0.1.0-aarch64-apple-darwin.tar.gz
 ./sc --version
 ```
 
 Intel Mac: `sc-v0.1.0-x86_64-apple-darwin.tar.gz`. Linux: `sc-v0.1.0-aarch64-unknown-linux-gnu.tar.gz` and `sc-v0.1.0-x86_64-unknown-linux-gnu.tar.gz`. Same `curl` and `tar` steps.
 
-Check the published sums. `SHA256SUMS` lists every asset. On macOS:
+Check the published sums. `SHA256SUMS` lists every asset, so tell the checker to skip the ones you didn't download. Run this in the same directory, keeping the original file name. On macOS:
 
 ```bash
 curl -fsSL -O https://github.com/moonbase2090/Scorecard/releases/download/v0.1.0/SHA256SUMS
-shasum -a 256 -c SHA256SUMS
+shasum -a 256 -c --ignore-missing SHA256SUMS
 ```
 
-On Linux, `sha256sum -c SHA256SUMS` in the directory that holds the files you downloaded.
+On Linux, `sha256sum -c --ignore-missing SHA256SUMS`. Each file you downloaded should print `OK`.
 
 ### From source
 
