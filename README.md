@@ -58,7 +58,7 @@ Exit 0 means the configured gates passed. Exit 1 means a gate failed. Exit 2 mea
 `sc analyze testdata/good_crate --format pretty` on a terminal. Color is off in this copy. The same run and `testdata/failing_test` are in [examples/terminal](examples/terminal/).
 
 ```text
-sc 0.1.2  testdata/good_crate  rust  5ac851c clean  scope tree
+sc 0.1.3  testdata/good_crate  rust  5ac851c clean  scope tree
 
 PASS
 

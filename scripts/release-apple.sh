@@ -63,11 +63,14 @@ if [ -n "${APPLE_CERTIFICATE_P12:-}" ]; then
   security import "$root/packaging/certs/DeveloperIDG2CA.cer" -k "$keychain" \
     -T /usr/bin/productsign -T /usr/bin/pkgbuild -T /usr/bin/productbuild
   printf '%s' "$APPLE_CERTIFICATE_P12" | tr -d ' \r\n' | base64 --decode > "$work/cert.p12"
-  if ! security import "$work/cert.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign; then
+  # This bundle can contain both Developer ID identities. Grant every
+  # signing tool access to the Installer private key without a GUI prompt.
+  if ! security import "$work/cert.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" \
+    -T /usr/bin/codesign -T /usr/bin/productbuild -T /usr/bin/productsign -T /usr/bin/pkgbuild; then
     echo "error: p12 import failed (check APPLE_CERTIFICATE_P12 and APPLE_CERTIFICATE_PASSWORD)" >&2
     exit 1
   fi
-  security set-key-partition-list -S apple-tool:,apple: -s -k "" "$keychain" >/dev/null
+  security set-key-partition-list -S apple-tool:,apple: -s -k "" "$keychain"
   security list-keychains -d user -s "$keychain"
   identity=$(security find-identity -v -p codesigning "$keychain" | awk -F'"' '/Developer ID Application/{print $2; exit}')
   if [ -z "$identity" ]; then
@@ -159,12 +162,9 @@ if [ "$signing" = true ]; then
     echo "error: no 'Developer ID Installer' identity (add it to APPLE_CERTIFICATE_P12 or set APPLE_INSTALLER_P12 + APPLE_INSTALLER_PASSWORD); refusing to ship an unsigned pkg" >&2
     exit 1
   fi
-  # set-key-partition-list only stamps keys already in the keychain, so
-  # re-apply it once the Installer identity is resolved: a key imported
-  # after the first call (APPLE_INSTALLER_P12) would otherwise miss the
-  # apple-tool partition and productbuild would block on an invisible
-  # approval prompt, hanging the Package step until canceled (v0.1.2).
-  security set-key-partition-list -S apple-tool:,apple: -s -k "" "$keychain" >/dev/null
+  # set-key-partition-list only stamps keys already in the keychain. Apply
+  # it again after an optional APPLE_INSTALLER_P12 import.
+  security set-key-partition-list -S apple-tool:,apple: -s -k "" "$keychain"
 fi
 
 # macOS runners have no `timeout(1)`. Bound productbuild with python3
