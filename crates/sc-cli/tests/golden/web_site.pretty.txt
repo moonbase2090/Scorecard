@@ -1,6 +1,6 @@
 sc 0.1.3  testdata/web_site  web  GITSHA STATE  scope tree
 
-PASS
+PASS  1 advisory gate failing
 
 gates
   [ok]  html             enforced
