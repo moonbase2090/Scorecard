@@ -10,7 +10,7 @@
 
 Release [v0.1.0](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.0).
 
-macOS, Apple silicon and Intel in one disk image: [sc-v0.1.0-universal-apple-darwin.dmg](https://github.com/moonbase2090/Scorecard/releases/download/v0.1.0/sc-v0.1.0-universal-apple-darwin.dmg).
+macOS, Apple silicon and Intel in one disk image: [sc-v0.1.0-universal-apple-darwin.dmg](https://github.com/moonbase2090/Scorecard/releases/download/v0.1.0/sc-v0.1.0-universal-apple-darwin.dmg). Open `Install Scorecard.pkg` in that window. It installs `sc` and `sc-mcp` to `/usr/local/bin`. The same installer is also published on its own as `sc-v<version>-macos.pkg`. The v0.1.0 image still has the older install script; the package replaces it in the next release.
 
 Each `.tar.gz` contains `sc`, `sc-mcp`, `LICENSE`, and `README.md` at the top of the archive.
 
