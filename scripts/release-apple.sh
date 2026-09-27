@@ -153,6 +153,11 @@ if [ "$signing" = true ]; then
       echo "error: installer p12 import failed (check APPLE_INSTALLER_P12 and APPLE_INSTALLER_PASSWORD)" >&2
       exit 1
     fi
+    # set-key-partition-list only stamps keys already in the keychain, so
+    # this later import needs it re-applied: without the apple-tool
+    # partition, productbuild blocks on an invisible approval prompt and
+    # the Package step hangs until the job is canceled (v0.1.2).
+    security set-key-partition-list -S apple-tool:,apple: -s -k "" "$keychain" >/dev/null
     installer_identity=$(security find-identity -v -p basic "$keychain" | awk -F'"' '/Developer ID Installer/{print $2; exit}')
   fi
   if [ -z "$installer_identity" ]; then
