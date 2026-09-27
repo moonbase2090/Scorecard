@@ -56,6 +56,13 @@ letter-spacing:.06em}
 border:1px solid var(--ok)}
 .verdict.fail{background:rgba(255,122,144,.12);color:var(--bad);
 border:1px solid var(--bad)}
+.verdict.report{background:rgba(110,168,255,.12);color:#c9d9ff;
+border:1px solid var(--accent)}
+details{margin-top:4px}
+summary{cursor:pointer;color:var(--accent);font-size:12px}
+.pathlist{margin-top:6px;max-height:240px;overflow:auto}
+.pathlist div{margin:1px 0}
+.pathlist code{word-break:normal}
 .meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
 gap:8px 20px;margin-top:14px;font-size:12.5px;color:var(--dim)}
 .meta>div{min-width:0}
@@ -107,12 +114,25 @@ footer{margin-top:32px;color:var(--dim);font-size:11.5px;text-align:center}
 "#;
 
 fn hero(out: &mut String, card: &Scorecard) {
-    let pass = card.verdict == "pass";
+    // A passing verdict with failing gates (empty --fail-on, or advisory
+    // misses) must never read as a clean pass: neutral report-only badge
+    // plus the failing count. Exit code and verdict text are untouched.
+    let failing = card
+        .gates
+        .iter()
+        .filter(|gate| provided(gate) && !gate.pass)
+        .count();
+    let (cls, label) = if card.verdict != "pass" {
+        ("fail", "FAIL".to_string())
+    } else if failing > 0 {
+        ("report", "REPORT ONLY".to_string())
+    } else {
+        ("pass", "PASS".to_string())
+    };
     out.push_str("<h1>scorecard</h1>\n<div class=\"card\"><div class=\"hero\">");
     out.push_str(&format!(
-        "<span class=\"verdict {}\">{}</span>",
-        if pass { "pass" } else { "fail" },
-        esc(&card.verdict.to_uppercase())
+        "<span class=\"verdict {cls}\">{}</span>",
+        esc(&label)
     ));
     out.push_str("<div><div style=\"font-size:16px;font-weight:700\">");
     out.push_str(&esc(&card.repo));
@@ -122,7 +142,15 @@ fn hero(out: &mut String, card: &Scorecard) {
     out.push_str(&esc(&card.scope.mode));
     out.push_str("</code> · <code>");
     out.push_str(&esc(&card.id));
-    out.push_str("</code></div></div></div><div class=\"meta\">");
+    out.push_str("</code>");
+    if card.verdict == "pass" && failing > 0 {
+        out.push_str(&format!(
+            " · {} {}, none enforced",
+            failing,
+            if failing == 1 { "failing gate" } else { "failing gates" }
+        ));
+    }
+    out.push_str("</div></div></div><div class=\"meta\">");
     meta(out, "git", &git(card));
     meta(out, "tests", &esc(&card.test_selection));
     meta(
@@ -149,9 +177,38 @@ fn hero(out: &mut String, card: &Scorecard) {
         }
     }
     if !card.scope.paths.is_empty() {
-        meta(out, "paths", &esc(&card.scope.paths.join(", ")));
+        meta(out, "paths", &paths(card));
     }
     out.push_str("</div></div>\n");
+}
+
+/// Tree scope lists every file in the tree, which buries the report.
+/// Collapse tree scope (or long lists) behind a count plus a <details>
+/// list; paths break after `/` via <wbr> so lines never split mid-segment.
+fn paths(card: &Scorecard) -> String {
+    let total = card.scope.paths.len();
+    if card.scope.mode != "tree" && total <= 10 {
+        return esc(&card.scope.paths.join(", "));
+    }
+    let mut out = format!(
+        "{} {} <details><summary>full list</summary><div class=\"pathlist\">",
+        total,
+        if total == 1 { "path" } else { "paths" }
+    );
+    for path in &card.scope.paths {
+        out.push_str("<div><code>");
+        let mut first = true;
+        for segment in path.split('/') {
+            if !first {
+                out.push_str("/<wbr>");
+            }
+            out.push_str(&esc(segment));
+            first = false;
+        }
+        out.push_str("</code></div>");
+    }
+    out.push_str("</div></details>");
+    out
 }
 
 fn meta(out: &mut String, label: &str, value: &str) {
@@ -558,6 +615,52 @@ mod tests {
         for marker in ["unpkg", "cdn.", "http://", "https://"] {
             assert!(!html.contains(marker), "report must not fetch {marker}");
         }
+    }
+
+    #[test]
+    fn html_collapses_tree_paths_behind_details() {
+        let mut c = card();
+        c.scope.mode = "tree".into();
+        c.scope.paths = (0..12)
+            .map(|i| format!("src/module/file{i}.rs"))
+            .collect();
+        let html = to_html(&c);
+        assert!(html.contains("12 paths <details>"));
+        assert!(html.contains("/<wbr>"));
+        assert!(!html.contains("file0.rs, src/module/file1.rs"));
+    }
+
+    #[test]
+    fn html_keeps_short_diff_paths_inline() {
+        let mut c = card();
+        c.scope.mode = "diff".into();
+        c.scope.paths = vec!["src/a.rs".into(), "src/b.rs".into()];
+        let html = to_html(&c);
+        assert!(!html.contains("<details>"));
+        assert!(html.contains("src/a.rs, src/b.rs"));
+    }
+
+    #[test]
+    fn html_marks_pass_with_failures_report_only() {
+        // Empty --fail-on dogfood case: verdict passes while gates failed.
+        let mut c = card();
+        c.verdict = "pass".into();
+        c.gates[0].enforced = false;
+        let html = to_html(&c);
+        assert!(html.contains("<span class=\"verdict report\">REPORT ONLY</span>"));
+        assert!(html.contains("1 failing gate, none enforced"));
+        assert!(!html.contains("verdict pass"));
+    }
+
+    #[test]
+    fn html_clean_pass_stays_green() {
+        let mut c = card();
+        c.verdict = "pass".into();
+        c.gates[0].pass = true;
+        c.gates[0].reason = None;
+        let html = to_html(&c);
+        assert!(html.contains("<span class=\"verdict pass\">PASS</span>"));
+        assert!(!html.contains("REPORT ONLY"));
     }
 
     #[test]
