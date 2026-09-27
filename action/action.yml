@@ -9,7 +9,7 @@ inputs:
     required: false
     default: ""
   fail-on:
-    description: Comma-separated gates
+    description: Comma-separated gates that fail the process. sca is advisory and is not in the default.
     required: false
     default: types,tests,crap,secrets,lint
   mutation:

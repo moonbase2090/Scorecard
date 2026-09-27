@@ -117,10 +117,10 @@ fn gate_row(gate: &Gate, opts: &PrettyOpts, width: usize) -> String {
     let symbol = mark(gate.pass, opts.color);
     let style = if gate.pass { green() } else { red() };
     let painted = paint(opts.color, style, symbol);
-    let kind = if gate.id == "sca" || !gate.enforced {
-        "advisory"
-    } else {
+    let kind = if gate.enforced {
         "enforced"
+    } else {
+        "advisory"
     };
     let mut line = format!("  {painted}  {:<16} {kind}", gate.id);
     if !gate.pass {

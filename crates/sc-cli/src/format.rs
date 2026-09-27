@@ -55,12 +55,13 @@ pub fn to_markdown(card: &Scorecard) -> String {
     }
 
     out.push_str("## Gates\n\n");
-    out.push_str("| Gate | Result | Reason |\n|---|---|---|\n");
+    out.push_str("| Gate | Result | Enforced | Reason |\n|---|---|---|---|\n");
     for gate in &card.gates {
         let result = if gate.pass { "pass" } else { "fail" };
+        let enforced = if gate.enforced { "yes" } else { "no" };
         let reason = gate.reason.as_deref().unwrap_or("");
         out.push_str(&format!(
-            "| {} | {result} | {} |\n",
+            "| {} | {result} | {enforced} | {} |\n",
             cell(&gate.id),
             cell(reason)
         ));
@@ -183,5 +184,67 @@ mod tests {
         assert!(md.contains("**Verdict:** fail"));
         assert!(md.contains("classify"));
         assert!(md.contains("crap.over_threshold"));
+    }
+
+    #[test]
+    fn sca_enforced_flag_matches_across_formats() {
+        let mut card = Scorecard::skeleton("demo", 30);
+        card.verdict = "pass".into();
+        card.gates = vec![
+            Gate {
+                id: "types".into(),
+                pass: true,
+                reason: None,
+                enforced: true,
+            },
+            Gate {
+                id: "sca".into(),
+                pass: true,
+                reason: None,
+                enforced: false,
+            },
+        ];
+        let json: serde_json::Value = serde_json::from_str(&to_json(&card)).unwrap();
+        assert_eq!(json["gates"][0]["enforced"], true);
+        assert_eq!(json["gates"][1]["enforced"], false);
+
+        let md = to_markdown(&card);
+        assert!(md.contains("| types | pass | yes |"));
+        assert!(md.contains("| sca | pass | no |"));
+
+        let html = crate::report::to_html(&card);
+        let types_at = html.find(">types<").unwrap();
+        let sca_at = html.find(">sca<").unwrap();
+        let types_cell = &html[types_at..html[types_at..].find("</tr>").unwrap() + types_at];
+        let sca_cell = &html[sca_at..html[sca_at..].find("</tr>").unwrap() + sca_at];
+        assert!(types_cell.contains(">yes<"), "{types_cell}");
+        assert!(sca_cell.contains("reported only"), "{sca_cell}");
+        assert!(html.contains("overflow-wrap:anywhere"));
+
+        let pretty = crate::pretty::to_pretty(
+            &card,
+            &crate::pretty::PrettyOpts {
+                color: false,
+                width: 80,
+                version: "0.1.0".into(),
+                report: None,
+                exit_code: 0,
+            },
+        );
+        assert!(pretty.contains("types") && pretty.contains("enforced"));
+        assert!(pretty.contains("sca") && pretty.contains("advisory"));
+        assert!(!pretty
+            .lines()
+            .any(|line| line.contains("sca") && line.contains("enforced")));
+
+        let sarif: serde_json::Value = serde_json::from_str(&sc_sarif::to_sarif(&card)).unwrap();
+        assert_eq!(
+            sarif["runs"][0]["properties"]["scorecardGates"][0]["enforced"],
+            true
+        );
+        assert_eq!(
+            sarif["runs"][0]["properties"]["scorecardGates"][1]["enforced"],
+            false
+        );
     }
 }

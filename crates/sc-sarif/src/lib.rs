@@ -17,6 +17,17 @@ pub fn to_sarif(card: &Scorecard) -> String {
         }
     }
     let results: Vec<Value> = card.findings.iter().map(result).collect();
+    let gates: Vec<Value> = card
+        .gates
+        .iter()
+        .map(|gate| {
+            json!({
+                "id": gate.id,
+                "pass": gate.pass,
+                "enforced": gate.enforced,
+            })
+        })
+        .collect();
     let doc = json!({
         "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
         "version": "2.1.0",
@@ -30,6 +41,7 @@ pub fn to_sarif(card: &Scorecard) -> String {
                 }
             },
             "results": results,
+            "properties": {"scorecardGates": gates},
         }]
     });
     serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".into())
