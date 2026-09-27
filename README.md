@@ -1,18 +1,53 @@
 # Scorecard
 
-[![CI](https://github.com/moonbase2090/Scorecard/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/moonbase2090/Scorecard/actions/workflows/ci.yml?query=branch%3Adevelop)
+[![CI](https://github.com/moonbase2090/Scorecard/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/moonbase2090/Scorecard/actions/workflows/ci.yml?query=branch%3Amain)
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-blue.svg)](LICENSE)
-[![MSRV 1.85](https://img.shields.io/badge/MSRV-1.85-blue.svg)](https://github.com/moonbase2090/Scorecard/blob/develop/Cargo.toml)
+[![MSRV 1.85](https://img.shields.io/badge/MSRV-1.85-blue.svg)](https://github.com/moonbase2090/Scorecard/blob/main/Cargo.toml)
 
-The CI badge is workflow `ci` on `develop`. `ci.yml` is on `main` as well. License is MPL-2.0. The MSRV is Rust 1.85. The crates are not published, so there is no crates.io badge.
+`sc` checks that a project type-checks, its tests pass, coverage and [CRAP](docs/crap.md) stay in bounds, secrets are absent, and the linter is clean. It also reports undeclared dependencies. Nine language packs are built in. The report is for AI coding agents and for CI. The project site is [scorecardcli.com](https://scorecardcli.com).
 
-`sc` is a local code-quality gate. It picks one language pack, runs that pack's tools, and prints a scorecard an agent can act on.
+## Install
+
+Release [v0.1.0](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.0).
+
+macOS, Apple silicon and Intel in one disk image: [sc-v0.1.0-universal-apple-darwin.dmg](https://github.com/moonbase2090/Scorecard/releases/download/v0.1.0/sc-v0.1.0-universal-apple-darwin.dmg).
+
+Each `.tar.gz` contains `sc`, `sc-mcp`, `LICENSE`, and `README.md` at the top of the archive.
+
+Apple silicon:
+
+```bash
+curl -fsSLO https://github.com/moonbase2090/Scorecard/releases/download/v0.1.0/sc-v0.1.0-aarch64-apple-darwin.tar.gz
+tar -xzf sc-v0.1.0-aarch64-apple-darwin.tar.gz
+./sc --version
+```
+
+Intel Mac: `sc-v0.1.0-x86_64-apple-darwin.tar.gz`. Linux: `sc-v0.1.0-aarch64-unknown-linux-gnu.tar.gz` and `sc-v0.1.0-x86_64-unknown-linux-gnu.tar.gz`. Same `curl` and `tar` steps.
+
+Check the published sums. `SHA256SUMS` lists every asset, so tell the checker to skip the ones you didn't download. Run this in the same directory, keeping the original file name. On macOS:
+
+```bash
+curl -fsSL -O https://github.com/moonbase2090/Scorecard/releases/download/v0.1.0/SHA256SUMS
+shasum -a 256 -c --ignore-missing SHA256SUMS
+```
+
+On Linux, `sha256sum -c --ignore-missing SHA256SUMS`. Each file you downloaded should print `OK`.
+
+### From source
+
+Rust 1.85 or newer.
+
+```bash
+cargo build --release -p sc-cli -p sc-mcp
+```
+
+The binaries are `target/release/sc` and `target/release/sc-mcp`. `cargo install --path crates/sc-cli` and `cargo install --path crates/sc-mcp` put them on `PATH`.
+
+Rust coverage also needs `rustup component add llvm-tools` and `cargo install cargo-llvm-cov`. On older toolchains the component is named `llvm-tools-preview`. If either tool is missing, `sc` still runs. Function coverage is treated as 0, a `coverage.missing` warning is recorded, and CRAP is still computed. The process exits 2 only when a required gate (`types` or `tests`) cannot run.
 
 ## Quickstart
 
 ```bash
-cargo install --path crates/sc-cli
-cargo install --path crates/sc-mcp
 sc analyze .
 ```
 
@@ -20,60 +55,10 @@ Exit 0 means the configured gates passed. Exit 1 means a gate failed. Exit 2 mea
 
 ## Sample
 
-This is the output of `sc analyze testdata/good_crate --format md` on commit `0afc676`:
-
-```markdown
-# scorecard
-
-**Verdict:** pass
-
-**Repo:** testdata/good_crate
-
-**Git:** 0afc676039d07842e5bfeb3c57a09df26e5c9a23 (clean)
-
-**Scope:** tree of `src`. `loc_changed`, `files_changed`, and `coverage_changed` describe that tree.
-
-**Engines run:** compile, tests, coverage, complexity, crap, sca, secrets, perf, lint
-
-**Engines skipped:** spec, mutation, llm
-
-## Gates
-
-| Gate | Result | Reason |
-|---|---|---|
-| types | pass |  |
-| tests | pass |  |
-| crap | pass |  |
-| sca | pass |  |
-| secrets | pass |  |
-| lint | pass |  |
-
-## Scores
-
-- correctness: 1.00
-- efficiency: 1.00
-- maintainability: 1.00
-- security: 1.00
-
-## Worst CRAP
-
-Threshold 30.
-
-| CRAP | CC | Coverage | Symbol | File |
-|---|---|---|---|---|
-| 1 | 1 | 100% | add | src/lib.rs |
-
-## Findings
-
-None.
-```
-
-The Git line is the Scorecard checkout that contained the fixture, because `testdata/good_crate` is not its own repository.
-
-On a terminal, `sc analyze` prints the same scorecard as plain text. `--format pretty` forces that layout. A pipe stays JSON. This is `sc analyze testdata/good_crate --format pretty` on commit `2f0d4d9`, with color off:
+`sc analyze testdata/good_crate --format pretty` on a terminal. Color is off in this copy. The same run and `testdata/failing_test` are in [examples/terminal](examples/terminal/).
 
 ```text
-sc 0.1.0  testdata/good_crate  rust  2f0d4d9 clean  scope tree
+sc 0.1.0  testdata/good_crate  rust  5ac851c clean  scope tree
 
 PASS
 
@@ -100,55 +85,66 @@ findings
 
 engines run: compile, tests, coverage, complexity, crap, sca, secrets, perf, lint
 engines skipped: spec, mutation, llm
-duration: 0.8s
+duration: 0.7s
 exit 0: gates passed
 ```
 
-Colored captures of that command and of `testdata/failing_test` are in `examples/terminal/`.
+## Languages
 
-## Install
+| Pack | Marker |
+|---|---|
+| Rust | `Cargo.toml` |
+| Node | `package.json` |
+| Python | a Python manifest |
+| Bash | a top-level, `scripts/`, or `bin/` shell file, and no other marker |
+| Go | `go.mod` |
+| Java | `pom.xml` or Gradle |
+| C# | a root `.csproj` or `.sln` |
+| PHP | `composer.json` |
+| C++ | `CMakeLists.txt` |
 
-Rust 1.85 or newer.
+One pack per tree. Two markers and no override is an error. Details are in [packs](docs/packs.md).
+
+## MCP
+
+`sc-mcp` speaks MCP over stdio. It serves `analyze_paths`, `analyze_diff`, `explain`, and `list_findings`. `explain` and `list_findings` read `.sc/last-scorecard.json`.
+
+Claude Code, stdio, verified with `claude mcp add --help`:
 
 ```bash
-cargo build --release -p sc-cli -p sc-mcp
+claude mcp add sc -- sc-mcp
 ```
 
-The binaries are `target/release/sc` and `target/release/sc-mcp`. `cargo install --path crates/sc-cli` and `cargo install --path crates/sc-mcp` put them on `PATH`.
+Cursor reads `~/.cursor/mcp.json`. `sc setup` writes this shape, with the absolute path of the binary:
 
-Rust coverage also needs:
-
-```bash
-rustup component add llvm-tools
-cargo install cargo-llvm-cov
+```json
+{
+  "mcpServers": {
+    "sc": {"command": "sc-mcp", "args": []}
+  }
+}
 ```
 
-On older toolchains the component is named `llvm-tools-preview`. If either tool is missing, `sc` still runs. Function coverage is treated as 0, a `coverage.missing` warning is recorded, and CRAP is still computed. The process exits 2 only when a required gate (`types` or `tests`) cannot run.
+More is in [MCP](docs/mcp.md).
 
 ## GitHub Action
 
-Run the gate in CI with the composite action (plain `bash` steps, no
-runner-specific features):
-
 ```yaml
-- uses: moonbase2090/Scorecard/action@develop
+- uses: moonbase2090/Scorecard/action@v0.1.0
   with:
     fail-on: types,tests,crap,secrets,lint
     format: sarif
 ```
 
-| Input      | Default                         | Notes                                    |
-| ---------- | ------------------------------- | ---------------------------------------- |
-| `spec`     | `""`                            | Path to a spec or task file              |
-| `fail-on`  | `types,tests,crap,secrets,lint` | Comma-separated gates                    |
-| `mutation` | `off`                           | `off`, `diff`, or `full`                 |
-| `format`   | `sarif`                         | `json`, `md`, `sarif`, `html`, or `all`  |
-| `diff`     | `""`                            | Git base ref; empty skips `--diff`       |
+`moonbase2090/Scorecard/action@v0.1.0` is the `action/action.yml` on the `v0.1.0` tag. `sca` is advisory and is not in the default `fail-on` list. With `format: sarif` or `all`, the SARIF report is uploaded.
 
-With `format: sarif` (or `all`) the SARIF report is uploaded via the
-pinned `upload-sarif` step, so findings show up under code scanning.
-Until the first tagged release, pin the action to `@develop` or a full
-commit SHA.
+| Input | Default | Notes |
+|---|---|---|
+| `spec` | `""` | Path to a spec or task file |
+| `fail-on` | `types,tests,crap,secrets,lint` | Comma-separated gates that fail the process |
+| `mutation` | `off` | `off`, `diff`, or `full` |
+| `format` | `sarif` | `json`, `md`, `sarif`, `html`, or `all` |
+| `diff` | `""` | Git base ref; empty skips `--diff` |
 
 ## More
 
@@ -157,7 +153,6 @@ commit SHA.
 - [Config](docs/config.md)
 - [MCP](docs/mcp.md)
 - [CRAP](docs/crap.md)
-- [v0.1.0 readiness](docs/v0.1.0-readiness.md)
 
 ## License
 

@@ -16,7 +16,7 @@
 
 Two markers and no override is an error. Set `pack` in `analyzer.toml`, or pass `--pack`, to name the pack. `command` is only an override: it runs secrets plus a lint command you set yourself.
 
-A gate with `enforced: false` is reported and does not fail the process. Rust enforces types, tests, CRAP, secrets, dependency checks, and lint. Python enforces `python3 -m compileall`, pytest when a test suite is present, Ruff, imports declared in `pyproject.toml`, secrets, and CRAP. Pytest writes line coverage when pytest-cov is available. The other packs use the same CRAP formula.
+A gate with `enforced: false` is reported and does not fail the process. Rust enforces types, tests, CRAP, secrets, and lint. An undeclared dependency is advisory (`sca`) and does not change the exit code. Python enforces `python3 -m compileall`, pytest when a test suite is present, Ruff, secrets, and CRAP. An import that is not in `pyproject.toml` is the same advisory. Pytest writes line coverage when pytest-cov is available. The other packs use the same CRAP formula.
 
 | Pack | Coverage report |
 |---|---|

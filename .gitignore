@@ -12,3 +12,5 @@ testdata/go_pack/go_pack
 .codex/
 .cursor/
 feature-map/
+dist/
+stage/

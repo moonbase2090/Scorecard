@@ -58,7 +58,9 @@ border:1px solid var(--ok)}
 border:1px solid var(--bad)}
 .meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
 gap:8px 20px;margin-top:14px;font-size:12.5px;color:var(--dim)}
+.meta>div{min-width:0}
 .meta b{color:var(--ink);font-weight:600}
+.meta code{overflow-wrap:anywhere;word-break:break-all}
 .meta code,.card code{background:#16223f;padding:1px 6px;border-radius:6px;
 font-size:11.5px;color:var(--ink)}
 .flow{display:flex;align-items:stretch;gap:0;margin-top:12px;flex-wrap:wrap}
