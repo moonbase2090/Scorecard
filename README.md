@@ -53,6 +53,8 @@ sc analyze .
 
 Exit 0 means the configured gates passed. Exit 1 means a gate failed. Exit 2 means the analyzer itself could not run.
 
+To configure it, copy `analyzer.toml.example` to `analyzer.toml` at the repo root. `sc` reads `analyzer.toml` from the root of the directory it analyzes (the path given to `sc analyze`, usually the repo root), then from `~/.config/sc/analyzer.toml`. It does not look in parent or sub-directories. `--config PATH` overrides both. See [Config](docs/config.md).
+
 ## Sample
 
 `sc analyze testdata/good_crate --format pretty` on a terminal. Color is off in this copy. The same run and `testdata/failing_test` are in [examples/terminal](examples/terminal/).

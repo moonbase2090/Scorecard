@@ -1,7 +1,9 @@
 # Scorecard configuration.
 # pack = "rust"   # rust, node, python, bash, go, java, csharp, php, cpp, web, or command
 # Set this when the repo contains more than one manifest. Same as --pack.
-# Copy to analyzer.toml in the project you analyze, or to ~/.config/sc/analyzer.toml.
+# Copy to analyzer.toml at the root of the project you analyze (the path given to
+# `sc analyze`, usually the repo root), or to ~/.config/sc/analyzer.toml. Parent and
+# sub-directories are not searched. --config PATH overrides both.
 # CLI flags override the matching settings.
 
 [gates]
