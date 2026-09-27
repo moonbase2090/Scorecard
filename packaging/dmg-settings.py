@@ -21,7 +21,7 @@ filesystem = "HFS+"
 size = None
 
 files = [os.path.join(stage, name) for name in (
-    "Install Scorecard.command",
+    "Install Scorecard.pkg",
     "INSTALL.txt",
     "sc",
     "sc-mcp",
@@ -45,7 +45,7 @@ show_pathbar = False
 show_sidebar = False
 
 icon_locations = {
-    "Install Scorecard.command": (330, 210),
+    "Install Scorecard.pkg": (330, 210),
     "INSTALL.txt": (470, 210),
     "sc": (130, 368),
     "sc-mcp": (310, 368),
