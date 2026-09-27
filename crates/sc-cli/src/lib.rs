@@ -48,7 +48,7 @@ struct AnalyzeArgs {
     /// Comma-separated gates that fail the run. Default: types,tests,crap,secrets,lint.
     #[arg(long, value_name = "LIST")]
     fail_on: Option<String>,
-    /// Pack override when several manifests match: rust, node, python, bash, go, java, csharp, php, cpp, or command.
+    /// Pack override when several manifests match: rust, node, python, bash, go, java, csharp, php, cpp, web, or command.
     #[arg(long, value_name = "PACK")]
     pack: Option<String>,
     /// Score only the git diff against BASE. Omit BASE to use HEAD~1, else main.

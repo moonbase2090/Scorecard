@@ -7,6 +7,8 @@ mod compile;
 mod coverage;
 mod crap;
 mod facts;
+mod html_doc;
+mod links;
 mod manifest;
 mod mutation;
 mod pack;

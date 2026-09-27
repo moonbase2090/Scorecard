@@ -4,6 +4,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- A `web` pack for static HTML. It auto-detects a root `.html` file when no manifest is present, parses pages with `html5ever`, checks internal links, and keeps CRAP and secrets. The `html` gate is enforced. The `links` gate is advisory unless configured.
+
 ## [0.1.2] - 2026-09-27
 
 ### Added
