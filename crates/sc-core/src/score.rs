@@ -64,6 +64,20 @@ pub fn verdict_fails(gates: &[Gate], fail_on: &[String]) -> bool {
         .any(|gate| gate.enforced && !gate.pass && fail_on.iter().any(|id| id == &gate.id))
 }
 
+/// Reconcile each gate's `enforced` flag with the run's `--fail-on` set.
+///
+/// A gate only fails the run when it is both statically enforced and named
+/// in `fail_on`. Folding the set into the flag keeps every renderer (HTML,
+/// terminal, markdown, JSON) honest: a failing gate outside `--fail-on`
+/// reports as "reported only" instead of claiming "enforced: yes" on a
+/// passing verdict. Verdict behavior is unchanged; `verdict_fails` already
+/// requires both conditions.
+pub fn apply_fail_on(gates: &mut [Gate], fail_on: &[String]) {
+    for gate in gates {
+        gate.enforced = gate.enforced && fail_on.iter().any(|id| id == &gate.id);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,6 +102,34 @@ mod tests {
             reason: Some("not provided by this pack".into()),
         }];
         assert!(!verdict_fails(&gates, &["crap".into()]));
+    }
+
+    fn failing_gate(id: &str) -> Gate {
+        Gate {
+            id: id.into(),
+            pass: false,
+            enforced: true,
+            reason: Some("over threshold".into()),
+        }
+    }
+
+    #[test]
+    fn apply_fail_on_clears_enforced_outside_the_set() {
+        // Dogfood case: --fail-on "" with a failing crap gate. The verdict
+        // passes, so the gate must report as reported-only, not enforced.
+        let mut gates = vec![failing_gate("crap"), failing_gate("tests")];
+        apply_fail_on(&mut gates, &[]);
+        assert!(gates.iter().all(|gate| !gate.enforced));
+        assert!(!verdict_fails(&gates, &[]));
+    }
+
+    #[test]
+    fn apply_fail_on_keeps_enforced_inside_the_set() {
+        let mut gates = vec![failing_gate("crap"), failing_gate("tests")];
+        apply_fail_on(&mut gates, &["crap".into()]);
+        assert!(gates[0].enforced);
+        assert!(!gates[1].enforced);
+        assert!(verdict_fails(&gates, &["crap".into()]));
     }
 
     #[test]

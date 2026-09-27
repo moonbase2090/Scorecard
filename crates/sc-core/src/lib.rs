@@ -7,7 +7,7 @@ mod score;
 
 pub use config::{load_config_file, normalize_gates, resolve_config_path, Config, KNOWN_GATES};
 pub use model::*;
-pub use score::{compute_scores, crap_score, exceeds_threshold, verdict_fails};
+pub use score::{apply_fail_on, compute_scores, crap_score, exceeds_threshold, verdict_fails};
 
 pub const SCORECARD_VERSION: &str = "0.1";
 
