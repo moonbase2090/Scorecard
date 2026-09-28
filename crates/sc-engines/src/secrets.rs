@@ -276,12 +276,7 @@ fn stripe_at(line: &str) -> Option<usize> {
     credential_signal(body).then_some(at)
 }
 
-fn token_body<'a>(
-    line: &'a str,
-    at: usize,
-    prefix_len: usize,
-    tail: impl Fn(char) -> bool,
-) -> &'a str {
+fn token_body(line: &str, at: usize, prefix_len: usize, tail: impl Fn(char) -> bool) -> &str {
     let after = &line[at + prefix_len..];
     let count = after.chars().take_while(|c| tail(*c)).count();
     &after[..count]
