@@ -438,7 +438,9 @@ fn check_imports_with(
     index: &dyn PackageIndex,
 ) -> ScaCounts {
     let manifest = std::fs::read_to_string(root.join("pyproject.toml")).unwrap_or_default();
+    let place = declaration_place(root);
     let mut allowed = dependency_modules(&manifest);
+    allowed.extend(declared_elsewhere(root));
     if let Some(name) = project_name(&manifest) {
         allowed.insert(normalize_mod(&name));
     }
@@ -461,6 +463,8 @@ fn check_imports_with(
         for (module, line) in import_roots(&text) {
             let name = normalize_mod(&module);
             if name.is_empty()
+                || name == "_typeshed"
+                || (rel == "setup.py" && name == "setuptools")
                 || stdlib.contains(&name)
                 || allowed.contains(&name)
                 || is_local(root, &path, &name)
@@ -469,7 +473,7 @@ fn check_imports_with(
             }
             let class = classify(&name, &installed, index);
             record(&mut counts, &class);
-            findings.push(import_finding(&rel, &name, line, &class));
+            findings.push(import_finding(&rel, &name, line, &class, &place));
         }
     }
     counts
@@ -618,14 +622,24 @@ fn record(counts: &mut ScaCounts, class: &Class) {
     }
 }
 
-fn import_finding(rel: &str, name: &str, line: u32, class: &Class) -> Finding {
+fn import_finding(rel: &str, name: &str, line: u32, class: &Class, place: &str) -> Finding {
+    let add = |distribution: &str| -> String {
+        if place == "pyproject.toml" {
+            format!("Add `{distribution}` to [project.dependencies] in pyproject.toml.")
+        } else if place == "setup.py" || place == "setup.cfg" {
+            format!("Add `{distribution}` to install_requires in {place}.")
+        } else {
+            format!("Add `{distribution}` to {place}.")
+        }
+    };
     let (rule, message, action, resolution, distribution) = match class {
         Class::UndeclaredInstalled => (
             "sca.undeclared_dependency",
             format!(
-                "Advisory: module `{name}` is imported and is not declared in pyproject.toml. It is installed in the project environment. Add `{name}` to [project.dependencies] in pyproject.toml."
+                "Advisory: module `{name}` is imported and is not declared in {place}. It is installed in the project environment. {}",
+                add(name)
             ),
-            format!("Add `{name}` to [project.dependencies] in pyproject.toml."),
+            add(name),
             "installed",
             None,
         ),
@@ -635,14 +649,17 @@ fn import_finding(rel: &str, name: &str, line: u32, class: &Class) -> Finding {
             } else {
                 format!("It is published as `{distribution}` and is not installed.")
             };
+            let action = if place == "pyproject.toml" {
+                format!("Add `{distribution}` to [project.dependencies] in pyproject.toml and install it.")
+            } else {
+                format!("{} Install it.", add(distribution))
+            };
             (
                 "sca.undeclared_dependency",
                 format!(
-                    "Advisory: module `{name}` is imported and is not declared in pyproject.toml. {why} Add `{distribution}` to [project.dependencies] in pyproject.toml and install it."
+                    "Advisory: module `{name}` is imported and is not declared in {place}. {why} {action}"
                 ),
-                format!(
-                    "Add `{distribution}` to [project.dependencies] in pyproject.toml and install it."
-                ),
+                action,
                 "on_index",
                 Some(distribution.clone()),
             )
@@ -659,9 +676,10 @@ fn import_finding(rel: &str, name: &str, line: u32, class: &Class) -> Finding {
         Class::Unchecked(reason) => (
             "sca.import_unresolved",
             format!(
-                "Advisory: module `{name}` is imported and is not declared in pyproject.toml. It is not a local module and is not installed. The package index was not checked ({reason}), so this import is not classified as hallucinated. Add the distribution to pyproject.toml or remove the import."
+                "Advisory: module `{name}` is imported and is not declared in {place}. It is not a local module and is not installed. The package index was not checked ({reason}), so this import is not classified as hallucinated. {} Or remove the import.",
+                add(name)
             ),
-            format!("Add the distribution that provides `{name}` to pyproject.toml, or remove the import."),
+            format!("{}, or remove the import.", add(name).trim_end_matches('.')),
             "index_unchecked",
             None,
         ),
@@ -1028,8 +1046,14 @@ fn collect_py(dir: &Path, depth: u32, out: &mut Vec<PathBuf>) {
 }
 
 pub fn import_roots(text: &str) -> Vec<(String, u32)> {
+    let masked = code_only(text);
+    let optional = optional_import_lines(&masked);
     let mut out = Vec::new();
-    for (index, line) in text.lines().enumerate() {
+    for (index, line) in masked.lines().enumerate() {
+        let line_no = index as u32 + 1;
+        if optional.contains(&line_no) {
+            continue;
+        }
         let trimmed = line.trim();
         if trimmed.starts_with('#')
             || trimmed.starts_with("from .")
@@ -1046,8 +1070,8 @@ pub fn import_roots(text: &str) -> Vec<(String, u32)> {
                     .split('.')
                     .next()
                     .unwrap_or("");
-                if !module.is_empty() && module != "*" {
-                    out.push((module.to_string(), index as u32 + 1));
+                if module_name(module) {
+                    out.push((module.to_string(), line_no));
                 }
             }
         } else if let Some(rest) = trimmed.strip_prefix("from ") {
@@ -1058,12 +1082,265 @@ pub fn import_roots(text: &str) -> Vec<(String, u32)> {
                 .split('.')
                 .next()
                 .unwrap_or("");
-            if !module.is_empty() && module != "__future__" {
-                out.push((module.to_string(), index as u32 + 1));
+            if module_name(module) && module != "__future__" {
+                out.push((module.to_string(), line_no));
             }
         }
     }
     out
+}
+
+fn module_name(name: &str) -> bool {
+    !name.is_empty() && name != "*" && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// Replace comments and string contents with spaces, keeping newlines, so a
+/// docstring cannot look like an import.
+fn code_only(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if let Some((quote, triple, raw, skip)) = string_at(&chars[i..]) {
+            for _ in 0..skip {
+                out.push(if chars[i] == '\n' { '\n' } else { ' ' });
+                i += 1;
+            }
+            if triple {
+                let closer = [quote, quote, quote];
+                while i < chars.len() {
+                    if chars[i..].starts_with(&closer) {
+                        out.push_str("   ");
+                        i += 3;
+                        break;
+                    }
+                    let c = chars[i];
+                    out.push(if c == '\n' { '\n' } else { ' ' });
+                    i += 1;
+                }
+            } else {
+                while i < chars.len() {
+                    let c = chars[i];
+                    if !raw && c == '\\' {
+                        out.push(' ');
+                        i += 1;
+                        if i < chars.len() {
+                            out.push(if chars[i] == '\n' { '\n' } else { ' ' });
+                            i += 1;
+                        }
+                        continue;
+                    }
+                    out.push(if c == '\n' { '\n' } else { ' ' });
+                    i += 1;
+                    if c == quote || c == '\n' {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        if chars[i] == '#' {
+            while i < chars.len() && chars[i] != '\n' {
+                out.push(' ');
+                i += 1;
+            }
+            continue;
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
+fn string_at(rest: &[char]) -> Option<(char, bool, bool, usize)> {
+    let mut i = 0;
+    let mut raw = false;
+    while i < rest.len()
+        && i < 3
+        && matches!(rest[i], 'r' | 'R' | 'b' | 'B' | 'f' | 'F' | 'u' | 'U')
+    {
+        if matches!(rest[i], 'r' | 'R') {
+            raw = true;
+        }
+        i += 1;
+    }
+    let quote = *rest.get(i)?;
+    if quote != '\'' && quote != '"' {
+        return None;
+    }
+    let triple = rest.get(i + 1) == Some(&quote) && rest.get(i + 2) == Some(&quote);
+    Some((quote, triple, raw, i + if triple { 3 } else { 1 }))
+}
+
+fn optional_import_lines(text: &str) -> BTreeSet<u32> {
+    let mut skip = BTreeSet::new();
+    let mut stack: Vec<(usize, bool, Vec<u32>)> = Vec::new();
+    for (index, line) in text.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let indent = line.len() - line.trim_start().len();
+        let line_no = index as u32 + 1;
+        while let Some((try_indent, caught, lines)) = stack.last() {
+            let clause = trimmed.starts_with("except")
+                || trimmed.starts_with("else:")
+                || trimmed.starts_with("finally:");
+            if indent < *try_indent || (indent == *try_indent && !clause) {
+                let (_, caught, lines) = stack.pop().unwrap();
+                if caught {
+                    skip.extend(lines);
+                }
+            } else {
+                let _ = (caught, lines);
+                break;
+            }
+        }
+        if trimmed == "try:" || trimmed.starts_with("try:") {
+            stack.push((indent, false, Vec::new()));
+            continue;
+        }
+        if let Some((try_indent, caught, lines)) = stack.last_mut() {
+            if indent == *try_indent
+                && trimmed.starts_with("except")
+                && (trimmed.contains("ImportError") || trimmed.contains("ModuleNotFoundError"))
+            {
+                *caught = true;
+            }
+            if indent > *try_indent
+                && (trimmed.starts_with("import ") || trimmed.starts_with("from "))
+            {
+                lines.push(line_no);
+            }
+        }
+    }
+    for (_, caught, lines) in stack {
+        if caught {
+            skip.extend(lines);
+        }
+    }
+    skip
+}
+
+fn declaration_place(root: &Path) -> String {
+    if root.join("pyproject.toml").is_file() {
+        "pyproject.toml".into()
+    } else if root.join("requirements.txt").is_file() {
+        "requirements.txt".into()
+    } else if root.join("setup.cfg").is_file() {
+        "setup.cfg".into()
+    } else if root.join("setup.py").is_file() {
+        "setup.py".into()
+    } else {
+        "pyproject.toml".into()
+    }
+}
+
+fn declared_elsewhere(root: &Path) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    if let Ok(text) = std::fs::read_to_string(root.join("requirements.txt")) {
+        names.extend(requirements_modules(&text));
+    }
+    if let Ok(text) = std::fs::read_to_string(root.join("setup.cfg")) {
+        names.extend(setup_cfg_requires(&text));
+    }
+    if let Ok(text) = std::fs::read_to_string(root.join("setup.py")) {
+        names.extend(setup_py_requires(&text));
+    }
+    names
+}
+
+fn requirements_modules(text: &str) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    for line in text.lines() {
+        if let Some(name) = requirement_name(line) {
+            names.insert(name);
+        }
+    }
+    names
+}
+
+fn requirement_name(line: &str) -> Option<String> {
+    let line = strip_comment(line).trim();
+    if line.is_empty() || line.starts_with('-') {
+        return None;
+    }
+    let name = line
+        .split(['>', '<', '=', '!', '~', '[', ';', ' ', '\\'])
+        .next()
+        .unwrap_or("");
+    if name.is_empty() {
+        None
+    } else {
+        Some(normalize_mod(name))
+    }
+}
+
+fn setup_cfg_requires(text: &str) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    let mut in_options = false;
+    let mut in_requires = false;
+    for line in text.lines() {
+        let trimmed = strip_comment(line).trim();
+        if trimmed.starts_with('[') {
+            in_options = trimmed == "[options]";
+            in_requires = false;
+            continue;
+        }
+        if !in_options {
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("install_requires") {
+            let rest = rest.trim().trim_start_matches('=').trim();
+            if let Some(name) = requirement_name(rest) {
+                names.insert(name);
+            }
+            in_requires = true;
+            continue;
+        }
+        if in_requires {
+            if !line.starts_with(char::is_whitespace) && !trimmed.is_empty() {
+                in_requires = false;
+                continue;
+            }
+            if let Some(name) = requirement_name(trimmed) {
+                names.insert(name);
+            }
+        }
+    }
+    names
+}
+
+fn setup_py_requires(text: &str) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    let mut rest = text;
+    while let Some(index) = rest.find("install_requires") {
+        let line_start = rest[..index].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let commented = rest[line_start..index].trim_start().starts_with('#');
+        rest = &rest[index + "install_requires".len()..];
+        if commented {
+            continue;
+        }
+        let after = rest.trim_start().trim_start_matches('=').trim_start();
+        if after.starts_with('[') || after.starts_with('(') {
+            let mut depth = 0;
+            let mut chunk = String::new();
+            for c in after.chars() {
+                chunk.push(c);
+                if c == '[' || c == '(' {
+                    depth += 1;
+                }
+                if c == ']' || c == ')' {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+            }
+            collect_quoted(&chunk, &mut names);
+        }
+    }
+    names
 }
 
 fn project_name(text: &str) -> Option<String> {
@@ -1580,6 +1857,68 @@ dev = ["pytest>=8"]
         assert!(deps.contains("sqlite_vec"));
         assert!(deps.contains("pytest"));
         assert_eq!(project_name(manifest).as_deref(), Some("cairn"));
+    }
+
+    #[test]
+    fn prose_typeshed_optional_and_requirements_are_not_findings() {
+        let prose = "def jar():\n    \"\"\"Take a cookie from the jar.\"\"\"\n    return 1\n";
+        assert!(import_roots(prose).is_empty(), "{:?}", import_roots(prose));
+        let typeshed = scratch("typeshed");
+        std::fs::write(
+            typeshed.join("app.py"),
+            "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from _typeshed import Incomplete\n",
+        )
+        .unwrap();
+        let (findings, _) = classify_tree(&typeshed, IndexHit::Absent);
+        assert!(
+            !findings
+                .iter()
+                .any(|finding| finding.symbol.as_deref() == Some("_typeshed")),
+            "{findings:?}"
+        );
+        let optional =
+            "try:\n    import simplejson as json\nexcept ImportError:\n    import json\n";
+        let roots: Vec<_> = import_roots(optional)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        assert!(!roots.iter().any(|name| name == "simplejson"), "{roots:?}");
+
+        let dir = scratch("reqs");
+        std::fs::write(dir.join("requirements.txt"), "urllib3>=2\n").unwrap();
+        std::fs::write(dir.join("app.py"), "import urllib3\n").unwrap();
+        let (findings, _) = classify_tree(&dir, IndexHit::Absent);
+        assert!(findings.is_empty(), "{findings:?}");
+
+        let setup = scratch("setup");
+        std::fs::write(
+            setup.join("setup.py"),
+            "import setuptools\nsetuptools.setup(install_requires=[\"urllib3\"])\n",
+        )
+        .unwrap();
+        std::fs::write(setup.join("app.py"), "import urllib3\n").unwrap();
+        let (findings, _) = classify_tree(&setup, IndexHit::Absent);
+        assert!(
+            !findings
+                .iter()
+                .any(|finding| finding.symbol.as_deref() == Some("setuptools")
+                    || finding.symbol.as_deref() == Some("urllib3")),
+            "{findings:?}"
+        );
+
+        let cfg = scratch("cfg");
+        std::fs::write(
+            cfg.join("setup.cfg"),
+            "[options]\ninstall_requires =\n    urllib3\n",
+        )
+        .unwrap();
+        std::fs::write(cfg.join("app.py"), "import urllib3\n").unwrap();
+        let (findings, _) = classify_tree(&cfg, IndexHit::Absent);
+        assert!(findings.is_empty(), "{findings:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&setup);
+        let _ = std::fs::remove_dir_all(&cfg);
+        let _ = std::fs::remove_dir_all(&typeshed);
     }
 
     #[test]

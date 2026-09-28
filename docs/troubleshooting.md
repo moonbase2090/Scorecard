@@ -61,7 +61,7 @@ With the default Ollama backend, start `ollama serve` first. On the Python pack,
 
 ## `sca.hallucinated_import` for a package I use
 
-The import is not declared in the manifest. This includes packages installed only as a dependency of another package, such as `botocore` through `boto3`. Declare it, or leave the warning: `sca` does not fail the run unless `fail_on` names it.
+The import is not declared in `pyproject.toml`, `requirements.txt`, `setup.cfg`, or `setup.py` `install_requires`. This includes packages installed only as a dependency of another package, such as `botocore` through `boto3`. Declare it, or leave the warning: `sca` does not fail the run unless `fail_on` names it. A sentence in a docstring, `_typeshed`, and an import inside `try` / `except ImportError` are not this warning.
 
 ## Exit 2
 
