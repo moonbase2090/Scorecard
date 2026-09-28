@@ -388,6 +388,83 @@ mod tests {
     }
 
     #[test]
+    fn markdown_renders_dirty_git_intent_and_a_located_finding() {
+        let mut card = Scorecard::skeleton("demo", 30);
+        card.git.head = Some("abc123".into());
+        card.git.dirty = true;
+        card.intent = Some("  keep the header contrast  ".into());
+        card.scope.paths = vec!["src/lib.rs".into()];
+        card.engines_skipped.clear();
+        card.engines_run.push("coverage".into());
+        card.llm = Some(LlmSection {
+            status: "skipped".into(),
+            backend: None,
+            model: None,
+            rounds: None,
+            verdict: None,
+            notes: Vec::new(),
+            reason: None,
+        });
+        card.gates.push(Gate {
+            id: "crap|gate".into(),
+            pass: false,
+            enforced: true,
+            reason: Some("line one\nstill failing".into()),
+        });
+        card.crap.worst.push(CrapFunction {
+            symbol: "render".into(),
+            file: "src/lib.rs".into(),
+            cc: 4,
+            coverage: 0.5,
+            crap: 6.5,
+        });
+        card.findings.push(Finding {
+            id: "crap:src/lib.rs:render".into(),
+            rule: "crap.over_threshold".into(),
+            engine: "crap".into(),
+            severity: "error".into(),
+            file: "src/lib.rs".into(),
+            span: Some(sc_core::Span {
+                start_line: 12,
+                start_col: 3,
+                end_line: 20,
+                end_col: 1,
+            }),
+            symbol: Some("render".into()),
+            message: "over the line".into(),
+            evidence: serde_json::json!({}),
+            suggested_action: Some("Add a test".into()),
+            disposition: "fix".into(),
+        });
+        let md = to_markdown(&card);
+        assert!(md.contains("**Git:** abc123 (dirty)"));
+        assert!(md.contains("**Intent:** keep the header contrast"));
+        assert!(md.contains(", 1 path"));
+        assert!(!md.contains("**Engines skipped:**"));
+        assert!(md.contains("Skipped: llm did not run."));
+        assert!(md.contains("| crap\\|gate | fail | yes | line one still failing |"));
+        assert!(md.contains("| 6.5 | 4 | 50% | render | src/lib.rs |"));
+        assert!(md.contains("- location: src/lib.rs:12:3"));
+        assert!(md.contains("- disposition: fix"));
+
+        card.llm = Some(LlmSection {
+            status: "ran".into(),
+            backend: None,
+            model: None,
+            rounds: None,
+            verdict: None,
+            notes: (0..12).map(|index| format!("note {index}")).collect(),
+            reason: None,
+        });
+        card.scope.paths = (0..3).map(|index| format!("f{index}.rs")).collect();
+        let md = to_markdown(&card);
+        assert!(md.contains(", 3 paths"));
+        assert!(md.contains("- note 9"));
+        assert!(!md.contains("- note 10"));
+        assert!(!md.contains("- backend:"));
+    }
+
+    #[test]
     fn markdown_notes_advisory_misses_on_a_pass() {
         let mut card = Scorecard::skeleton(".", 30);
         card.verdict = "pass".into();

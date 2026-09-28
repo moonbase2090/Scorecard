@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Tests cover the LLM review outcome, the PyPI name lookup, the Cursor review, and the markdown renderer. Those functions no longer exceed the CRAP threshold.
 - Node and Python score a file the tests never load at 0% coverage. c8 runs with `--all`, and pytest-cov gets each directory that holds a scored function as a `--cov` source, including a `src/` layout and namespace packages. Before, such a file had no coverage record, so its functions were not scored and a complex one could not fail the `crap` gate.
 - One function with no coverage record no longer makes the whole CRAP gate advisory. A measured function over the CRAP threshold, or at or above `gates.new_fn_untested_cc` with 0% coverage, still fails the gate. The function with no record is not scored and does not clear that failure. When no measured function fails, the gate stays advisory.
 - CRAP no longer scores test code in the non-Rust packs. Files under `test/`, `tests/`, `__tests__/`, `spec/`, `testdata/`, or a `.Tests` project, and files named like tests (`test_*.py`, `*_test.go`, `*.test.js`, `*.spec.ts`, `*Test.java`, `conftest.py`), are skipped. A CC 6 test helper at 0% coverage no longer fails the gate. Test files that the coverage tool leaves out no longer make the CRAP gate advisory. Rust already skipped `#[test]` and `#[cfg(test)]` code.
