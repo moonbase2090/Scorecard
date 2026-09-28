@@ -701,9 +701,21 @@ mod tests {
     use super::*;
     use std::fs;
 
+    /// Not the AWS documentation id. That id ends in `EXAMPLE` and is ignored.
+    fn planted_access_key() -> String {
+        format!("AKIA{}{}", "0Z3VS5J4", "AB3KQM9Z")
+    }
+
+    fn planted_pem(kind: &str) -> String {
+        let begin = "-----BEGIN ";
+        let end = "PRIVATE KEY-----";
+        let body = format!("{}{}", "MIIEowIBAAKCAQEA0Z3V", "S5J4Ab3kQm9ZnR4pLx7w");
+        format!("{begin}{kind} {end} {body}\n")
+    }
+
     #[test]
     fn secrets_walk_reaches_deep_files_dotenv_and_honors_exclude() {
-        let key = format!("AKIA{}", "IOSFODNN7EXAMPLE");
+        let key = planted_access_key();
         let root = temp("secrets-walk");
         let deep = root.join("n/n/n/n/n");
         fs::create_dir_all(&deep).unwrap();
@@ -711,9 +723,7 @@ mod tests {
         fs::write(root.join(".env"), format!("AWS_ACCESS_KEY_ID={key}\n")).unwrap();
         fs::write(root.join("README.md"), format!("key {key}\n")).unwrap();
         fs::write(root.join("secrets.yaml"), format!("key: \"{key}\"\n")).unwrap();
-        let begin = "-----BEGIN ";
-        let end = "PRIVATE KEY-----";
-        fs::write(root.join("key.pem"), format!("{begin}RSA {end}\nMIIB\n")).unwrap();
+        fs::write(root.join("key.pem"), planted_pem("RSA")).unwrap();
         fs::create_dir_all(root.join("tests")).unwrap();
         fs::write(
             root.join("tests/leak.rs"),
@@ -818,7 +828,7 @@ mod tests {
 
     #[test]
     fn a_non_utf8_byte_does_not_hide_a_secret() {
-        let key = format!("AKIA{}", "IOSFODNN7EXAMPLE");
+        let key = planted_access_key();
         let root = temp("secrets-utf8");
         let mut bytes = key.into_bytes();
         bytes.push(0xff);
@@ -836,11 +846,9 @@ mod tests {
 
     #[test]
     fn common_secret_locations_are_read_and_a_large_file_is_partial() {
-        let key = format!("AKIA{}", "IOSFODNN7EXAMPLE");
+        let key = planted_access_key();
         let root = temp("secrets-places");
-        let begin = "-----BEGIN ";
-        let end = "PRIVATE KEY-----";
-        fs::write(root.join("id_rsa"), format!("{begin}OPENSSH {end}\n")).unwrap();
+        fs::write(root.join("id_rsa"), planted_pem("OPENSSH")).unwrap();
         fs::create_dir_all(root.join(".circleci")).unwrap();
         fs::write(root.join(".circleci/config.yml"), format!("aws: {key}\n")).unwrap();
         fs::create_dir_all(root.join("src/target")).unwrap();
@@ -928,7 +936,7 @@ mod tests {
 
     #[test]
     fn one_nul_in_a_large_file_does_not_hide_a_key() {
-        let key = format!("AKIA{}", "IOSFODNN7EXAMPLE");
+        let key = planted_access_key();
         let root = temp("secrets-one-nul");
         let mut bytes = vec![0u8];
         bytes.extend(format!("const AWS_KEY = \"{key}\";\n").into_bytes());
@@ -976,7 +984,7 @@ mod tests {
 
     #[test]
     fn symlinks_are_not_followed_and_testdata_exclude_hides_fixtures() {
-        let key = format!("AKIA{}", "IOSFODNN7EXAMPLE");
+        let key = planted_access_key();
         let root = temp("secrets-cycle");
         fs::create_dir_all(root.join("real")).unwrap();
         fs::write(root.join("real/leak.py"), format!("KEY = \"{key}\"\n")).unwrap();
