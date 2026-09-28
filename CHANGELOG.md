@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Python dependency checks read `requirements.txt`, `setup.cfg`, and `setup.py` `install_requires`. A docstring is not an import. `_typeshed`, `import setuptools` in `setup.py`, and an import inside `try` / `except ImportError` are not findings.
 - When tests run through `uv` and `uv` is not installed, the tests finding says `uv is not installed` instead of `pytest is not installed`.
 - A nested loop, and a `.clone()` that the loop collects, are not findings. Efficiency is not reduced for that ordinary Rust.
 - The Rust dependency check no longer reports crates that are already provided or declared. `proc_macro` is a builtin, like `std`, `core`, and `alloc`. A bare `use Name;` or `use Name as Alias;` of a name the file already imports by path, or defines, is a re-export and not a crate. A bare `use serde;` is still a crate. A header such as `[target.'cfg(windows)'.dependencies.windows-sys]` or `[dependencies.bytes]` declares that crate. A `use` of a module declared in the same crate counts as local, including a `mod` declared inside a macro call. The parse cache version changed, so the first run after upgrading re-parses every file.
