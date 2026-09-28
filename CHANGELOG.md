@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- CRAP no longer scores test code in the non-Rust packs. Files under `test/`, `tests/`, `__tests__/`, `spec/`, `testdata/`, or a `.Tests` project, and files named like tests (`test_*.py`, `*_test.go`, `*.test.js`, `*.spec.ts`, `*Test.java`, `conftest.py`), are skipped. A CC 6 test helper at 0% coverage no longer fails the gate. Test files that the coverage tool leaves out no longer make the CRAP gate advisory. Rust already skipped `#[test]` and `#[cfg(test)]` code.
 - Node lint auto-detection treats `eslint.config.cjs` as an ESLint config file.
 - Java pack Gradle projects now run `gradle test` even when the build file does not mention Jacoco. When Jacoco is configured, Scorecard still runs `jacocoTestReport` after tests.
 - The Node types gate typechecks every `.ts` and `.tsx` file, including files tsconfig `include` skips, and runs `node --check` on `.js`, `.mjs`, and `.cjs` files. When `tsconfig.json` is present, `tsc --noEmit` uses a config that extends it and lists those files, because current `tsc` will not load `tsconfig.json` if files are passed on the command line.
