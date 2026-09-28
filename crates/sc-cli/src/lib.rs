@@ -7,6 +7,7 @@ mod format;
 mod pretty;
 mod report;
 mod setup;
+mod user_config;
 
 use std::fs;
 use std::io::{self, Write};
@@ -80,11 +81,28 @@ struct AnalyzeArgs {
     config: Option<PathBuf>,
 }
 
+#[derive(Subcommand)]
+enum ConfigCmd {
+    /// Print ~/.config/sc/analyzer.toml.
+    Path,
+    /// Write a starter analyzer.toml to ~/.config/sc. Does not replace an existing file.
+    Init {
+        /// Replace an existing file.
+        #[arg(long)]
+        force: bool,
+    },
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum Commands {
     /// Analyze a project tree and print a scorecard.
     Analyze(AnalyzeArgs),
+    /// Print or create ~/.config/sc/analyzer.toml.
+    Config {
+        #[command(subcommand)]
+        command: ConfigCmd,
+    },
     /// Install the agent skill and register the sc-mcp server for this user.
     Setup,
 }
@@ -100,6 +118,10 @@ pub fn run() -> i32 {
     let cli = Cli::parse();
     match cli.command {
         Commands::Setup => setup::run(),
+        Commands::Config { command } => match command {
+            ConfigCmd::Path => user_config::run_path(),
+            ConfigCmd::Init { force } => user_config::run_init(force),
+        },
         Commands::Analyze(args) => analyze_cmd(args),
     }
 }
