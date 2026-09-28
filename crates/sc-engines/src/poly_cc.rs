@@ -253,17 +253,53 @@ fn collect(root: &Path, dir: &Path, depth: u32, exts: &[&str], out: &mut Vec<Str
             continue;
         }
         if path.is_dir() {
-            collect(root, &path, depth + 1, exts, out);
-        } else if path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| exts.contains(&ext))
+            if !test_dir(name) {
+                collect(root, &path, depth + 1, exts, out);
+            }
+        } else if !test_file(name)
+            && path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| exts.contains(&ext))
         {
             if let Ok(rel) = path.strip_prefix(root) {
                 out.push(rel.to_string_lossy().replace('\\', "/"));
             }
         }
     }
+}
+
+/// Test code is not scored for CRAP. A test helper is not product code that
+/// failed a coverage gate.
+fn test_dir(name: &str) -> bool {
+    matches!(name, "test" | "tests" | "__tests__" | "spec" | "testdata")
+        || name.ends_with(".Tests")
+        || name.ends_with(".Test")
+}
+
+fn test_file(name: &str) -> bool {
+    if name == "conftest.py" {
+        return true;
+    }
+    let stem = Path::new(name)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("");
+    stem.starts_with("test_")
+        || [
+            "_test",
+            "_tests",
+            "_spec",
+            "_unittest",
+            "-test",
+            "-spec",
+            ".test",
+            ".spec",
+            "Test",
+            "Tests",
+        ]
+        .iter()
+        .any(|suffix| stem.ends_with(suffix))
 }
 
 fn scan_text(rel: &str, text: &str, lang: &Lang) -> Vec<FunctionInfo> {
@@ -526,6 +562,81 @@ print(json.dumps(rows))
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_helpers_are_not_scored_for_crap() {
+        let dir = std::env::temp_dir().join(format!("sc-cc-tests-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let six = "function pick(v) {\n  if (v === 1) return 1;\n  if (v === 2) return 2;\n  if (v === 3) return 3;\n  if (v === 4) return 4;\n  if (v === 5) return 5;\n  return 0;\n}\n";
+        for rel in [
+            "src/pick.js",
+            "src/latest.js",
+            "tests/helpers.js",
+            "test/unit/helpers.js",
+            "src/__tests__/pick.js",
+            "spec/pick.js",
+            "src/pick.test.js",
+            "src/pick.spec.ts",
+        ] {
+            let path = dir.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, six).unwrap();
+        }
+        let functions = functions_for_pack(&dir, "node");
+        let mut files: Vec<&str> = functions.iter().map(|item| item.file.as_str()).collect();
+        files.sort();
+        assert_eq!(files, ["src/latest.js", "src/pick.js"]);
+        assert!(functions.iter().all(|item| item.cc >= 6), "{functions:?}");
+
+        let coverage = crate::coverage::CoverageData {
+            functions: ["src/pick.js", "tests/helpers.js"]
+                .iter()
+                .map(|file| crate::coverage::CovFunction {
+                    file: (*file).into(),
+                    demangled: "pick".into(),
+                    coverage: 0.0,
+                })
+                .collect(),
+            line_rate: 0.0,
+        };
+        let outcome = crate::crap::evaluate(&functions, Some(&coverage), 30, 15, |_| true);
+        let flagged: Vec<&str> = outcome
+            .findings
+            .iter()
+            .filter(|finding| finding.rule == "crap.over_threshold")
+            .map(|finding| finding.file.as_str())
+            .collect();
+        assert_eq!(flagged, ["src/pick.js"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_file_names_by_pack() {
+        for name in [
+            "test_app.py",
+            "app_test.py",
+            "conftest.py",
+            "app_test.go",
+            "AppTest.java",
+            "AppTests.cs",
+            "AppTest.php",
+            "parser_unittest.cc",
+            "app.test.tsx",
+        ] {
+            assert!(test_file(name), "{name}");
+        }
+        for name in [
+            "app.py",
+            "contest.py",
+            "Latest.java",
+            "attest.go",
+            "manifest.js",
+        ] {
+            assert!(!test_file(name), "{name}");
+        }
+        assert!(test_dir("App.Tests"));
+        assert!(!test_dir("src"));
+    }
 
     #[test]
     fn python_ast_counts_a_branch() {
