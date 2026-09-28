@@ -462,6 +462,58 @@ fn pack_contract_passes_clean_trees_and_fails_secrets() {
 }
 
 #[test]
+fn coverage_missing_does_not_blame_tests_that_never_ran() {
+    for path in [
+        "testdata/node_pack_fail",
+        "testdata/python_pack_fail",
+        "testdata/go_pack_fail",
+    ] {
+        let (_code, card, _, stderr) = analyze(&[path]);
+        let skipped = card["engines_skipped"].as_array().unwrap();
+        let tests_skipped = skipped.iter().any(|engine| engine == "tests");
+        if !tests_skipped {
+            // Host has the toolchain (e.g. go); this fixture cannot probe the skip path.
+            continue;
+        }
+        let messages: Vec<String> = card["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|finding| finding["rule"] == "coverage.missing")
+            .filter_map(|finding| finding["message"].as_str().map(str::to_string))
+            .collect();
+        assert!(
+            !messages.is_empty(),
+            "{path} expected coverage.missing when tests never ran, stderr={stderr}, card={card}"
+        );
+        for message in &messages {
+            assert!(
+                !message.contains("tests gate failed"),
+                "{path} blamed tests that never ran: {message}"
+            );
+            assert!(
+                !message.contains("tests did not pass"),
+                "{path} claimed tests ran: {message}"
+            );
+        }
+        for finding in card["findings"].as_array().unwrap() {
+            if finding["rule"] != "coverage.missing" {
+                continue;
+            }
+            let action = finding["suggested_action"].as_str().unwrap_or("");
+            assert!(
+                !action.is_empty(),
+                "{path} coverage.missing needs a suggested_action"
+            );
+            assert!(
+                !action.contains("tests gate failed"),
+                "{path} suggested_action must stay an action, got {action}"
+            );
+        }
+    }
+}
+
+#[test]
 fn web_pack_reports_markup_and_missing_files_with_locations() {
     let (code, card, _, stderr) = analyze(&["testdata/web_site"]);
     assert_eq!(code, 0, "stderr={stderr}\ncard={card}");
