@@ -618,25 +618,91 @@ fn missing_compiler_message(cc_missing: bool, gxx_missing: bool) -> &'static str
     }
 }
 
-fn syntax_group(bin: &str, prefix: &str, files: &[String]) -> Option<String> {
-    if files.is_empty() {
-        Some(String::new())
+/// Check every file. A missing header must not hide a later compile error.
+fn syntax_loop(prefix: &str, files: &[String], flags: &[String]) -> String {
+    let mut files = files.to_vec();
+    files.sort();
+    let list = files
+        .iter()
+        .map(|file| shell_quote(file))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let flag_args = flags
+        .iter()
+        .map(|flag| shell_quote(flag))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let flags = if flag_args.is_empty() {
+        String::new()
     } else {
-        via(bin, check_chain(prefix, files))
+        format!(" {flag_args}")
+    };
+    format!("for f in {list}; do {prefix}{flags} \"$f\" || status=1; done")
+}
+
+fn makefile_text(root: &Path) -> String {
+    for name in ["Makefile", "makefile", "GNUmakefile"] {
+        if let Ok(text) = std::fs::read_to_string(root.join(name)) {
+            return text;
+        }
     }
+    String::new()
+}
+
+/// `-D` and `-I` from the named Makefile variables. Other flags are not the
+/// compiler's include path or its macros.
+fn make_compile_flags(text: &str, variables: &[&str]) -> Vec<String> {
+    let text = text.replace("\\\r\n", " ").replace("\\\n", " ");
+    let mut flags = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let line = line.strip_prefix("override ").unwrap_or(line);
+        let Some((name, rest)) = line.split_once('=') else {
+            continue;
+        };
+        let name = name.trim().trim_end_matches('+').trim();
+        if !variables.contains(&name) {
+            continue;
+        }
+        for token in rest.split_whitespace() {
+            if token.starts_with("-D") || token.starts_with("-I") {
+                flags.push(token.replace("\\\"", "\""));
+            }
+        }
+    }
+    flags
 }
 
 fn cpp_compile(root: &Path, c_files: &[String], cxx_files: &[String]) -> Option<String> {
     if !c_files.is_empty() || !cxx_files.is_empty() {
-        let c = syntax_group("cc", "cc -fsyntax-only -x c", c_files);
-        let cxx = syntax_group("g++", "g++ -fsyntax-only", cxx_files);
-        if let (Some(c), Some(cxx)) = (c, cxx) {
-            return Some(match (c.is_empty(), cxx.is_empty()) {
-                (false, true) => c,
-                (true, false) => cxx,
-                (false, false) => format!("{c} && {cxx}"),
-                (true, true) => String::new(),
-            });
+        let makefile = makefile_text(root);
+        let c_flags = make_compile_flags(&makefile, &["CFLAGS", "CPPFLAGS"]);
+        let cxx_flags = make_compile_flags(&makefile, &["CXXFLAGS", "CPPFLAGS"]);
+        let c = if c_files.is_empty() {
+            None
+        } else {
+            Some(syntax_loop("cc -fsyntax-only -x c", c_files, &c_flags))
+        };
+        let cxx = if cxx_files.is_empty() {
+            None
+        } else {
+            Some(syntax_loop("g++ -fsyntax-only", cxx_files, &cxx_flags))
+        };
+        let script = match (c, cxx) {
+            (Some(c), Some(cxx)) => format!("status=0; {c}; {cxx}; exit $status"),
+            (Some(c), None) => format!("status=0; {c}; exit $status"),
+            (None, Some(cxx)) => format!("status=0; {cxx}; exit $status"),
+            (None, None) => String::new(),
+        };
+        let ready = |bin: &str, files: &[String]| files.is_empty() || which(bin) || image_present();
+        if !script.is_empty() && ready("cc", c_files) && ready("g++", cxx_files) {
+            let bin = if !c_files.is_empty() { "cc" } else { "g++" };
+            if let Some(command) = via(bin, script) {
+                return Some(command);
+            }
         }
     }
     if root.join("CMakeLists.txt").is_file() {
@@ -1172,6 +1238,87 @@ mod tests {
         let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
         assert!(!gate.pass, "{gate:?}");
         assert!(gate.enforced, "{gate:?} {:?}", report.findings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_missing_header_does_not_hide_a_later_compile_error() {
+        if !which("cc") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-both-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("Makefile"), "all:\n").unwrap();
+        std::fs::write(root.join("a_gen.c"), "#include \"config.h\"\n").unwrap();
+        std::fs::write(root.join("b_bad.c"), "int main(void) { return x; }\n").unwrap();
+        let steps = cpp_plan(&root);
+        let command = steps
+            .iter()
+            .find(|step| step.gate == "types")
+            .unwrap()
+            .command
+            .clone()
+            .unwrap_or_default();
+        assert!(command.contains("status=0"), "{command}");
+        assert!(command.contains("a_gen.c"), "{command}");
+        assert!(command.contains("b_bad.c"), "{command}");
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(!gate.pass, "{gate:?}");
+        assert!(gate.enforced, "{gate:?} {:?}", report.findings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn makefile_defines_are_passed_to_the_syntax_check() {
+        let flags = make_compile_flags(
+            "CFLAGS = -Wall -DVERSION=\\\"1.0\\\"\nCPPFLAGS += -Iinclude\n",
+            &["CFLAGS", "CPPFLAGS"],
+        );
+        assert_eq!(
+            flags,
+            vec!["-DVERSION=\"1.0\"".to_string(), "-Iinclude".into()]
+        );
+        if !which("cc") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-define-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("include")).unwrap();
+        std::fs::write(root.join("include/config.h"), "#define MARK 1\n").unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "CFLAGS = -DVERSION=\\\"1.0\\\"\nCPPFLAGS = -Iinclude\nall:\n\tcc -o main main.c\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("main.c"),
+            "#include \"config.h\"\n#include <stdio.h>\nint main(void) { puts(VERSION); return MARK; }\n",
+        )
+        .unwrap();
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(gate.pass, "{gate:?} {:?}", report.findings);
+        std::fs::write(root.join("main.c"), "int main(void) { retrun 0; }\n").unwrap();
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(!gate.pass && gate.enforced, "{gate:?}");
         let _ = std::fs::remove_dir_all(&root);
     }
 
