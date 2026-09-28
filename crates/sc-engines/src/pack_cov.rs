@@ -34,6 +34,7 @@ pub fn clear(root: &Path) {
         "csharp.cobertura.xml",
         "clover.xml",
         "cpp.info",
+        "pytest.json",
     ] {
         let _ = std::fs::remove_file(dir.join(name));
     }
@@ -66,11 +67,18 @@ pub fn load(
     }
 }
 
+/// A report counts only when this run wrote it: modified after the run started
+/// and not in the future. Two seconds of slack cover a file system whose clock
+/// runs slightly ahead of this machine's.
+pub(crate) fn written_during_run(path: &Path, since: SystemTime) -> bool {
+    let Ok(written) = std::fs::metadata(path).and_then(|meta| meta.modified()) else {
+        return false;
+    };
+    written >= since && written <= SystemTime::now() + std::time::Duration::from_secs(2)
+}
+
 fn read(path: &Path, since: SystemTime) -> Option<String> {
-    let written = std::fs::metadata(path)
-        .and_then(|meta| meta.modified())
-        .ok()?;
-    if written < since {
+    if !written_during_run(path, since) {
         return None;
     }
     std::fs::read_to_string(path).ok()
@@ -441,6 +449,27 @@ mod tests {
         assert!(load("node", &root, &[sample()], earlier).is_some());
         clear(&root);
         assert!(load("node", &root, &[sample()], earlier).is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_report_dated_in_the_future_is_not_read() {
+        let root = std::env::temp_dir().join(format!("sc-future-cov-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("target/site/jacoco")).unwrap();
+        let path = root.join("target/site/jacoco/jacoco.xml");
+        std::fs::write(&path, "<report/>").unwrap();
+        let since = run_start() - std::time::Duration::from_secs(60);
+        assert!(written_during_run(&path, since));
+        let future = SystemTime::now() + std::time::Duration::from_secs(3600 * 24 * 365);
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(future)
+            .unwrap();
+        assert!(!written_during_run(&path, since));
+        assert!(load("java", &root, &[sample_java()], since).is_none());
         let _ = std::fs::remove_dir_all(&root);
     }
 

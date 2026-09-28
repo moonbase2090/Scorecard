@@ -613,11 +613,14 @@ fn analyze_unsupported(
 
 fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
     let deadline = Instant::now() + request.budget;
+    let started = crate::pack_cov::run_start();
+    crate::pack_cov::clear(&request.root);
     let outcome = crate::python::run(
         &request.root,
         deadline,
         request.config.gates.crap_threshold,
         request.config.gates.new_fn_untested_cc,
+        started,
     );
     let gates = vec![
         if outcome.types_pass {
