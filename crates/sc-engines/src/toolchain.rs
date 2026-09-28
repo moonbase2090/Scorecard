@@ -857,10 +857,19 @@ fn strip_makefile_comment(line: &str) -> &str {
 }
 
 fn compile_flag_tokens(value: &str) -> Vec<String> {
+    let chars: Vec<char> = value.chars().collect();
     let mut out = Vec::new();
     let mut current = String::new();
     let mut quote = None;
-    for ch in value.chars() {
+    let mut index = 0;
+    while index < chars.len() {
+        let ch = chars[index];
+        // `\"` in a Makefile is the quote `make` passes to the compiler.
+        if ch == '\\' && matches!(chars.get(index + 1), Some('"' | '\'')) {
+            current.push(chars[index + 1]);
+            index += 2;
+            continue;
+        }
         match ch {
             '"' | '\'' if quote.is_none() => quote = Some(ch),
             ch if Some(ch) == quote => quote = None,
@@ -871,12 +880,12 @@ fn compile_flag_tokens(value: &str) -> Vec<String> {
             }
             _ => current.push(ch),
         }
+        index += 1;
     }
     if !current.is_empty() {
         out.push(current);
     }
     out.into_iter()
-        .map(|token| token.replace("\\\"", "\"").replace("\\'", "'"))
         .filter(|token| {
             token.starts_with("-I")
                 || token.starts_with("-D")
@@ -1388,6 +1397,45 @@ mod tests {
             .unwrap_or_default();
         assert!(command.contains("-DVERSION=1"), "{command}");
         assert!(command.contains("-Iinclude"), "{command}");
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(gate.pass, "{gate:?} {:?}", report.findings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn quoted_makefile_define_reaches_the_compiler() {
+        if !which("cc") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-quoted-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "CFLAGS = -DVERSION=\\\"1.0\\\"\nall:\n\tcc $(CFLAGS) -o demo main.c\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("main.c"),
+            "#include <stdio.h>\nint main(void) { puts(VERSION); return 0; }\n",
+        )
+        .unwrap();
+        let steps = cpp_plan(&root);
+        let command = steps
+            .iter()
+            .find(|step| step.gate == "types")
+            .unwrap()
+            .command
+            .clone()
+            .unwrap_or_default();
+        assert!(command.contains("-DVERSION=\"1.0\""), "{command}");
+        assert!(!command.contains("\\1.0"), "{command}");
         let report = run(
             PackId::Cpp,
             &root,
