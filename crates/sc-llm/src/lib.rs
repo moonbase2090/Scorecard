@@ -9,6 +9,7 @@
 use std::path::Path;
 use std::time::Duration;
 
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 pub const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:11434/v1";
@@ -399,15 +400,7 @@ pub fn redact_secret(text: &str, secret: Option<&str>) -> String {
 
 pub fn parse_gaps(text: &str) -> Option<Vec<LlmGap>> {
     let stripped = strip_fence(text);
-    let start = stripped.find('{')?;
-    let end = stripped.rfind('}')?;
-    if end < start {
-        return None;
-    }
-    let slice = &stripped[start..=end];
-    let value = serde_json::from_str::<Value>(slice)
-        .ok()
-        .or_else(|| serde_json::from_str::<Value>(&repair_json(slice)).ok())?;
+    let value = json_value(&stripped)?;
     let gaps = value.get("gaps")?.as_array()?;
     Some(
         gaps.iter()
@@ -426,6 +419,28 @@ pub fn parse_gaps(text: &str) -> Option<Vec<LlmGap>> {
             })
             .collect(),
     )
+}
+
+/// The first complete JSON value, starting at the first `{`.
+/// A stray `}` after that value is ignored. A trailing comma falls back to repair.
+fn json_value(text: &str) -> Option<Value> {
+    let start = text.find('{')?;
+    let tail = &text[start..];
+    let streamed = {
+        let mut parser = serde_json::Deserializer::from_str(tail);
+        Value::deserialize(&mut parser).ok()
+    };
+    if let Some(value) = streamed {
+        return Some(value);
+    }
+    let end = text.rfind('}')?;
+    if end < start {
+        return None;
+    }
+    let slice = &text[start..=end];
+    serde_json::from_str(slice)
+        .ok()
+        .or_else(|| serde_json::from_str(&repair_json(slice)).ok())
 }
 
 fn strip_fence(text: &str) -> String {
@@ -669,6 +684,20 @@ mod tests {
     fn a_closing_brace_before_an_opening_brace_is_not_json() {
         assert!(parse_gaps("} not json {").is_none());
         assert!(parse_gaps("}").is_none());
+    }
+
+    #[test]
+    fn a_stray_brace_after_json_still_parses() {
+        let gaps = parse_gaps("{\"gaps\":[{\"item\":\"kept\",\"detail\":\"d\"}]} }").unwrap();
+        assert_eq!(gaps.len(), 1);
+        assert_eq!(gaps[0].item, "kept");
+        assert!(parse_gaps("{\"gaps\":[]} }").unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_trailing_comma_still_parses() {
+        let gaps = parse_gaps("{\"gaps\":[{\"item\":\"kept\",\"detail\":\"d\"}],}").unwrap();
+        assert_eq!(gaps[0].item, "kept");
     }
 
     #[test]

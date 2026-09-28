@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- A spec-gap reply that is valid JSON followed by a stray `}` still parses. The reader takes the first complete JSON value.
 - A spec-gap reply with a `}` before its first `{` no longer aborts the run. An empty `tool_calls` array is treated as no tool call, and a JSON retry does not resend tool calls without their results.
 - The readme, `docs/config.md`, and `analyzer.toml.example` say where `analyzer.toml` goes: the root of the analyzed directory (usually the repo root), then `~/.config/sc/analyzer.toml`, with no parent or sub-directory search.
 - The HTML report summary grid keeps the git SHA inside its own cell. A long value wraps or clips instead of painting over the tests column.
