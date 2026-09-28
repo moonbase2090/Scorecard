@@ -56,9 +56,15 @@ pub struct LlmConfig {
     pub enabled: bool,
     pub endpoint: String,
     pub model: String,
-    /// `ollama` (default) or `cursor`. `cursor` sends the spec and the files
-    /// the agent reads to Cursor. It is opt-in.
+    /// `ollama` (default), `cursor`, or `openai-compatible`.
+    /// `cursor` sends the spec and the files the agent reads to Cursor.
+    /// `openai-compatible` sends the spec and tool-read file text to `base_url`.
     pub backend: String,
+    /// Used when `backend` is `openai-compatible`.
+    pub base_url: String,
+    /// Name of the environment variable that holds the API key. The key
+    /// itself is never stored here.
+    pub api_key_env: String,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -116,6 +122,8 @@ impl Default for LlmConfig {
             endpoint: "http://127.0.0.1:11434/v1".into(),
             model: "qwen2.5-coder".into(),
             backend: "ollama".into(),
+            base_url: "https://openrouter.ai/api/v1".into(),
+            api_key_env: "OPENROUTER_API_KEY".into(),
         }
     }
 }

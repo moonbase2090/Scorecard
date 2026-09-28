@@ -1924,6 +1924,20 @@ fn llm_engine(
     let outcome = match request.config.llm.backend.trim() {
         "" | "ollama" => sc_llm::review(llm_request),
         "cursor" => sc_llm::review_cursor(llm_request),
+        "openai-compatible" => match sc_llm::env_api_key(&request.config.llm.api_key_env) {
+            Ok(key) => sc_llm::review(sc_llm::LlmRequest {
+                endpoint: &request.config.llm.base_url,
+                model: &request.config.llm.model,
+                api_key: Some(&key),
+                spec: &spec_text,
+                root: &request.root,
+                intent: request.intent.as_deref(),
+            }),
+            Err(message) => sc_llm::LlmOutcome {
+                gaps: Vec::new(),
+                skipped: Some(message),
+            },
+        },
         other => sc_llm::LlmOutcome {
             gaps: Vec::new(),
             skipped: Some(format!("unknown llm backend {other}")),
