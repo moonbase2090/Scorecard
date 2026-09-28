@@ -531,6 +531,7 @@ fn npm_test(root: &Path) -> Option<String> {
 fn eslint_config(root: &Path) -> bool {
     [
         "eslint.config.js",
+        "eslint.config.cjs",
         "eslint.config.mjs",
         ".eslintrc",
         ".eslintrc.js",
@@ -939,6 +940,16 @@ mod tests {
             .skipped
             .iter()
             .any(|engine| engine == "lint" || engine == "compile"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn eslint_config_accepts_cjs_config_file() {
+        let root = std::env::temp_dir().join(format!("sc-eslint-cjs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("eslint.config.cjs"), "module.exports = [];\n").unwrap();
+        assert!(eslint_config(&root));
         let _ = std::fs::remove_dir_all(&root);
     }
 }
