@@ -217,7 +217,7 @@ def check_invocations(options: dict[str, set[str]]) -> list[str]:
 
 def config_keys() -> set[str]:
     text = (ROOT / "crates/sc-core/src/config.rs").read_text()
-    keys = {"pack"}
+    keys = {"pack", "toolchain"}
     for name, section in SECTIONS.items():
         body = re.search(rf"pub struct {name} \{{(.*?)^\}}", text, re.S | re.M)
         if not body:

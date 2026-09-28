@@ -30,6 +30,8 @@ Until coverage runs, CRAP scores are an upper bound and CRAP failures do not fai
 
 ## `types: compiler errors` with a rustup message
 
+When `rust-toolchain.toml` or `analyzer.toml` names a channel, `sc` sets that channel for Cargo check, test, coverage, and lint. Install the channel with `rustup toolchain install`, or set `toolchain` in `analyzer.toml`.
+
 `rustup could not choose a version of cargo to run` means no default Rust toolchain:
 
 ```bash

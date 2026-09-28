@@ -130,7 +130,7 @@ fn cargo_metadata(root: &Path) -> Option<CargoMetadata> {
     if !root.join("Cargo.toml").is_file() {
         return None;
     }
-    let mut cmd = crate::command::cargo_command(root);
+    let mut cmd = crate::command::cargo_command(root, "");
     cmd.args([
         "metadata",
         "--no-deps",

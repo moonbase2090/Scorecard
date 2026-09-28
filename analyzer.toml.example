@@ -57,6 +57,11 @@ enforce = false
 enforce = false
 disable = []
 
+# Rustup channel for check, test, coverage, and lint. Empty uses
+# rust-toolchain.toml / rust-toolchain in the project root. A parent
+# RUSTUP_TOOLCHAIN no longer overrides that pin.
+# toolchain = "1.85.0"
+
 [commands]
 # Empty skips lint. Non-zero exit is `lint.failed`.
 # At a workspace root this runs `cargo clippy --workspace`; a member analysis

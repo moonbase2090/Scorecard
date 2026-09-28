@@ -26,6 +26,9 @@ pub struct Config {
     pub a11y: A11yConfig,
     /// Empty detects a pack from the tree: `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, `web`, or `command`.
     pub pack: String,
+    /// Rustup channel for check, test, coverage, and lint. Empty uses
+    /// `rust-toolchain.toml` / `rust-toolchain` in the project root.
+    pub toolchain: String,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -240,6 +243,14 @@ pub fn load_config_file(path: Option<&Path>) -> Result<Config, String> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn toolchain_from_analyzer_toml() {
+        let config: Config = toml::from_str("toolchain = \"1.85.0\"\n").unwrap();
+        assert_eq!(config.toolchain, "1.85.0");
+        let empty: Config = toml::from_str("").unwrap();
+        assert_eq!(empty.toolchain, "");
+    }
     use super::*;
 
     #[test]

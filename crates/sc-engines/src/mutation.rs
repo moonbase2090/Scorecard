@@ -167,6 +167,8 @@ fn cargo(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .env("CARGO_TERM_COLOR", "never");
+    let pin = crate::rust_toolchain::resolve(root, "");
+    crate::rust_toolchain::apply(&mut cmd, pin.as_deref());
     run_cmd(&mut cmd, timeout)
 }
 

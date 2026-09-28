@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- When `rust-toolchain.toml` or `analyzer.toml` names a Rust channel, check, test, coverage, and lint use it. An inherited `RUSTUP_TOOLCHAIN` no longer overrides the project pin.
 - On a `--diff` run (pull-request reports), the scorecard names the changed paths and adds a one-line count of the other source paths still in the tree. Terminal, markdown, and HTML show the same count.
 - When the test command ran and failed, `coverage.missing` says coverage was skipped and names the exit code. A missing tool or absent test script does not claim tests failed.
 - Python dependency checks read `requirements.txt`, `setup.cfg`, and `setup.py` `install_requires`. A docstring is not an import. `_typeshed`, `import setuptools` in `setup.py`, and an import inside `try` / `except ImportError` are not findings.
