@@ -1188,11 +1188,13 @@ fn marked_make_value(stdout: &str, name: &str) -> Option<String> {
 }
 
 fn combine_flag_text(cpp: &str, c: &str, cxx: &str) -> (Vec<String>, Vec<String>) {
+    // `make`'s `COMPILE.c` is `$(CC) $(CFLAGS) $(CPPFLAGS)`, and `COMPILE.cc`
+    // is `$(CXX) $(CXXFLAGS) $(CPPFLAGS)`. The last flag wins.
     let cpp_tokens = compile_flag_tokens(cpp);
-    let mut c_flags = cpp_tokens.clone();
-    c_flags.extend(compile_flag_tokens(c));
-    let mut cxx_flags = cpp_tokens;
-    cxx_flags.extend(compile_flag_tokens(cxx));
+    let mut c_flags = compile_flag_tokens(c);
+    c_flags.extend(cpp_tokens.iter().cloned());
+    let mut cxx_flags = compile_flag_tokens(cxx);
+    cxx_flags.extend(cpp_tokens);
     (c_flags, cxx_flags)
 }
 
@@ -1985,6 +1987,9 @@ mod tests {
         );
         let (c, _) = flags("CFLAGS = -DMSG=\\\"hello\\ world\\\"\n");
         assert_eq!(c, vec!["-DMSG=\"hello world\"".to_string()]);
+        let (c, cxx) = flags("CPPFLAGS = -UHIDE\nCFLAGS = -DHIDE\nCXXFLAGS = -DKEEP\n");
+        assert_eq!(c, vec!["-DHIDE".to_string(), "-UHIDE".to_string()]);
+        assert_eq!(cxx, vec!["-DKEEP".to_string(), "-UHIDE".to_string()]);
     }
 
     #[test]
@@ -2277,6 +2282,85 @@ mod tests {
         let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
         assert!(!gate.pass, "{gate:?} {:?}", report.findings);
         assert!(gate.enforced, "{gate:?} {:?}", report.findings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn hide_unless_defined() -> &'static str {
+        "int main(void) {\n#ifdef HIDE\n    return 0;\n#else\n    return undefined_thing;\n#endif\n}\n"
+    }
+
+    #[test]
+    fn cppflags_undef_after_cflags_define_fails_the_gate() {
+        if !which("cc") || !which("make") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-cpp-undef-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "CPPFLAGS = -UHIDE\nCFLAGS = -DHIDE\nall:\n\t$(CC) $(CFLAGS) $(CPPFLAGS) -o demo main.c\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("main.c"), hide_unless_defined()).unwrap();
+        let built = std::process::Command::new("make")
+            .current_dir(&root)
+            .status()
+            .unwrap();
+        assert!(!built.success());
+        let steps = cpp_plan(&root);
+        let types = steps.iter().find(|step| step.gate == "types").unwrap();
+        let command = types.command.clone().unwrap_or_default();
+        let define = command.find("-DHIDE").expect(&command);
+        let undef = command.find("-UHIDE").expect(&command);
+        assert!(define < undef, "{command}");
+        assert!(!types.advisory_failure);
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(!gate.pass, "{gate:?} {:?}", report.findings);
+        assert!(gate.enforced, "{gate:?} {:?}", report.findings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn cflags_undef_before_cppflags_define_passes() {
+        if !which("cc") || !which("make") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-cpp-def-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "CPPFLAGS = -DHIDE\nCFLAGS = -UHIDE\nall:\n\t$(CC) $(CFLAGS) $(CPPFLAGS) -o demo main.c\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("main.c"), hide_unless_defined()).unwrap();
+        let built = std::process::Command::new("make")
+            .current_dir(&root)
+            .status()
+            .unwrap();
+        assert!(built.success());
+        let steps = cpp_plan(&root);
+        let types = steps.iter().find(|step| step.gate == "types").unwrap();
+        let command = types.command.clone().unwrap_or_default();
+        let undef = command.find("-UHIDE").expect(&command);
+        let define = command.find("-DHIDE").expect(&command);
+        assert!(undef < define, "{command}");
+        assert!(!types.advisory_failure);
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(gate.pass, "{gate:?} {:?}", report.findings);
         let _ = std::fs::remove_dir_all(&root);
     }
 
