@@ -21,46 +21,73 @@ pub fn package_name(text: &str) -> Option<String> {
 /// Dependency and package names from every `Cargo.toml` under `root`.
 /// Member crates and `[workspace.dependencies]` count. `target` and dot
 /// directories are skipped.
-pub fn manifest_crate_names(root: &std::path::Path) -> BTreeSet<String> {
+/// Names this source file may import: its own package, that package's
+/// dependencies, and `[workspace.dependencies]`. Another crate's dependencies
+/// do not count.
+pub fn declared_for_file(root: &std::path::Path, file_rel: &str) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
-    collect_manifest_names(root, 0, &mut names);
+    if let Some(path) = owning_manifest(root, file_rel) {
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            names.extend(dependency_names(&text));
+            if let Some(name) = package_name(&text) {
+                names.insert(name);
+            }
+        }
+    }
+    if let Ok(text) = std::fs::read_to_string(root.join("Cargo.toml")) {
+        names.extend(workspace_dependency_names(&text));
+    }
     names
 }
 
-fn collect_manifest_names(dir: &std::path::Path, depth: u32, names: &mut BTreeSet<String>) {
-    if depth > 6 {
-        return;
+fn owning_manifest(root: &std::path::Path, file_rel: &str) -> Option<std::path::PathBuf> {
+    let mut dir = root.join(file_rel);
+    if dir.extension().is_some() {
+        dir = dir.parent()?.to_path_buf();
     }
-    add_manifest_file(&dir.join("Cargo.toml"), names);
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        walk_child(&entry.path(), depth, names);
+    loop {
+        let manifest = dir.join("Cargo.toml");
+        if manifest.is_file() {
+            if let Ok(text) = std::fs::read_to_string(&manifest) {
+                if package_name(&text).is_some() {
+                    return Some(manifest);
+                }
+            }
+        }
+        if dir == root {
+            break;
+        }
+        dir = dir.parent()?.to_path_buf();
     }
+    let root_manifest = root.join("Cargo.toml");
+    root_manifest.is_file().then_some(root_manifest)
 }
 
-fn walk_child(path: &std::path::Path, depth: u32, names: &mut BTreeSet<String>) {
-    if path.is_dir() && !skip_manifest_dir(path) {
-        collect_manifest_names(path, depth + 1, names);
+pub fn workspace_dependency_names(text: &str) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    let mut in_table = false;
+    for line in text.lines() {
+        let trimmed = strip_comment(line).trim();
+        if trimmed.starts_with('[') {
+            let header = trimmed.trim_matches(|c| c == '[' || c == ']');
+            in_table = header == "workspace.dependencies";
+            if header.starts_with("workspace.dependencies.") {
+                if let Some(name) = dep_table_name(trimmed) {
+                    names.insert(normalize(&name));
+                }
+            }
+            continue;
+        }
+        if !in_table || trimmed.is_empty() {
+            continue;
+        }
+        let key = trimmed.split(['=', '.']).next().unwrap_or("").trim();
+        if key.is_empty() || key.contains(' ') || key.contains('"') {
+            continue;
+        }
+        names.insert(normalize(key));
     }
-}
-
-fn add_manifest_file(path: &std::path::Path, names: &mut BTreeSet<String>) {
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return;
-    };
-    names.extend(dependency_names(&text));
-    if let Some(name) = package_name(&text) {
-        names.insert(name);
-    }
-}
-
-fn skip_manifest_dir(path: &std::path::Path) -> bool {
-    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-        return true;
-    };
-    name.starts_with('.') || name == "target" || name == "node_modules"
+    names
 }
 
 pub fn dependency_names(text: &str) -> BTreeSet<String> {
@@ -200,10 +227,43 @@ version = "1"
             "[package]\nname = \"sc-core\"\nversion = \"0.1.0\"\n\n[dependencies]\nprismattyc-mux = { path = \"../mux\" }\nhtml5ever = \"0.1\"\n",
         )
         .unwrap();
-        let names = manifest_crate_names(&dir);
+        let names = declared_for_file(&dir, "host/src/lib.rs");
         assert!(names.contains("sc_core"), "{names:?}");
         assert!(names.contains("prismattyc_mux"), "{names:?}");
         assert!(names.contains("html5ever"), "{names:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_sibling_crate_dependency_is_not_declared_for_this_file() {
+        let dir = std::env::temp_dir().join(format!("sc-per-crate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("a/src")).unwrap();
+        std::fs::create_dir_all(dir.join("b/src")).unwrap();
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"a\", \"b\"]\n\n[workspace.dependencies]\nserde = \"1\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("a/Cargo.toml"),
+            "[package]\nname = \"crate-a\"\nversion = \"0.1.0\"\n\n[dependencies]\ntokio = \"1\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("b/Cargo.toml"),
+            "[package]\nname = \"crate-b\"\nversion = \"0.1.0\"\n\n[dependencies]\nbytes = \"1\"\n",
+        )
+        .unwrap();
+        let a = declared_for_file(&dir, "a/src/lib.rs");
+        assert!(a.contains("tokio"), "{a:?}");
+        assert!(a.contains("crate_a"), "{a:?}");
+        assert!(a.contains("serde"), "{a:?}");
+        assert!(!a.contains("bytes"), "{a:?}");
+        let b = declared_for_file(&dir, "b/src/lib.rs");
+        assert!(b.contains("bytes"), "{b:?}");
+        assert!(!b.contains("tokio"), "{b:?}");
+        assert!(b.contains("serde"), "{b:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
