@@ -241,7 +241,9 @@ fn review_with(
     } else {
         request.max_tool_rounds
     };
+    let mut rounds_used = 0;
     for round in 1..=limit {
+        rounds_used = round;
         let body = json!({
             "model": model,
             "messages": messages,
@@ -258,26 +260,25 @@ fn review_with(
             return skipped("llm response has no message", round);
         };
         if let Some(calls) = choice.get("tool_calls").and_then(Value::as_array) {
-            if calls.is_empty() {
-                break;
+            if !calls.is_empty() {
+                messages.push(choice.clone());
+                for call in calls {
+                    let id = call.get("id").and_then(Value::as_str).unwrap_or("");
+                    let function = call.get("function").cloned().unwrap_or(json!({}));
+                    let name = function.get("name").and_then(Value::as_str).unwrap_or("");
+                    let arguments = function
+                        .get("arguments")
+                        .and_then(Value::as_str)
+                        .unwrap_or("{}");
+                    let content = run_tool(request.root, &spec, name, arguments);
+                    messages.push(json!({
+                        "role": "tool",
+                        "tool_call_id": id,
+                        "content": content,
+                    }));
+                }
+                continue;
             }
-            messages.push(choice.clone());
-            for call in calls {
-                let id = call.get("id").and_then(Value::as_str).unwrap_or("");
-                let function = call.get("function").cloned().unwrap_or(json!({}));
-                let name = function.get("name").and_then(Value::as_str).unwrap_or("");
-                let arguments = function
-                    .get("arguments")
-                    .and_then(Value::as_str)
-                    .unwrap_or("{}");
-                let content = run_tool(request.root, &spec, name, arguments);
-                messages.push(json!({
-                    "role": "tool",
-                    "tool_call_id": id,
-                    "content": content,
-                }));
-            }
-            continue;
         }
         let content = choice.get("content").and_then(Value::as_str).unwrap_or("");
         if let Some(gaps) = parse_gaps(content) {
@@ -298,7 +299,7 @@ fn review_with(
         &model,
         key.as_deref(),
         &mut messages,
-        limit,
+        rounds_used,
         &post,
     )
 }
@@ -312,7 +313,11 @@ fn retry_json(
     round: u32,
     post: &impl Fn(&str, Option<&str>, &Value) -> Result<Value, String>,
 ) -> LlmOutcome {
-    messages.push(choice.clone());
+    let prior = choice.get("content").and_then(Value::as_str).unwrap_or("");
+    messages.push(json!({
+        "role": "assistant",
+        "content": prior,
+    }));
     messages.push(json!({
         "role": "user",
         "content": "That was not JSON. Return only {\"gaps\":[{\"item\":\"...\",\"detail\":\"...\"}]} or {\"gaps\":[]}."
@@ -396,6 +401,9 @@ pub fn parse_gaps(text: &str) -> Option<Vec<LlmGap>> {
     let stripped = strip_fence(text);
     let start = stripped.find('{')?;
     let end = stripped.rfind('}')?;
+    if end < start {
+        return None;
+    }
     let slice = &stripped[start..=end];
     let value = serde_json::from_str::<Value>(slice)
         .ok()
@@ -655,6 +663,61 @@ mod tests {
         let gaps = parse_gaps(text).unwrap();
         assert_eq!(gaps[0].item, "fn missing");
         assert!(parse_gaps("CRAP is 10").is_none());
+    }
+
+    #[test]
+    fn a_closing_brace_before_an_opening_brace_is_not_json() {
+        assert!(parse_gaps("} not json {").is_none());
+        assert!(parse_gaps("}").is_none());
+    }
+
+    #[test]
+    fn empty_tool_calls_keep_the_content_verdict() {
+        let dir = test_tree();
+        let outcome = review_with(request(&dir, "spec", "http://127.0.0.1:1/v1"), |_, _, _| {
+            Ok(json!({"choices":[{"message":{
+                "content": "{\"gaps\":[{\"item\":\"first\",\"detail\":\"kept\"}]}",
+                "tool_calls": []
+            }}]}))
+        });
+        assert_eq!(outcome.skipped, None);
+        assert_eq!(outcome.rounds, 1);
+        assert_eq!(outcome.gaps[0].item, "first");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_json_retry_does_not_resend_unanswered_tool_calls() {
+        let dir = test_tree();
+        let calls = std::cell::Cell::new(0);
+        let extra_tool_calls = std::cell::Cell::new(false);
+        let _outcome = review_with(
+            LlmRequest {
+                max_tool_rounds: 1,
+                ..request(&dir, "spec", "http://127.0.0.1:1/v1")
+            },
+            |_, _, body| {
+                calls.set(calls.get() + 1);
+                if calls.get() >= 3 {
+                    let count = body
+                        .get("messages")
+                        .and_then(Value::as_array)
+                        .map(|messages| {
+                            messages
+                                .iter()
+                                .filter(|message| message.get("tool_calls").is_some())
+                                .count()
+                        })
+                        .unwrap_or(0);
+                    extra_tool_calls.set(count > 1);
+                }
+                Ok(tool_response(
+                    json!([{"id": "c1", "function": {"name": "get_file", "arguments": "{\"path\":\"src/a.rs\"}"}}]),
+                ))
+            },
+        );
+        assert!(!extra_tool_calls.get());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
