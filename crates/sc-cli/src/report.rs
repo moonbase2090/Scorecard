@@ -422,21 +422,24 @@ fn scores_metrics(out: &mut String, card: &Scorecard) {
     out.push_str("</table></div>\n<div class=\"tiles\">");
     tile(out, card.metrics.loc_changed.to_string(), "loc changed");
     tile(out, card.metrics.files_changed.to_string(), "files changed");
-    if coverage_measured(card) {
+    let measured = coverage_measured(card);
+    if measured {
         tile(
             out,
             format!("{:.0}%", card.metrics.coverage_changed * 100.0),
             "coverage",
         );
+        tile(out, fmt_num(card.metrics.crap_max), "crap max");
+        tile(
+            out,
+            card.metrics.crap_over_threshold.to_string(),
+            "over threshold",
+        );
     } else {
         tile(out, "—".into(), "coverage not measured");
+        tile(out, "—".into(), "crap not scored");
+        tile(out, "—".into(), "over threshold (unscored)");
     }
-    tile(out, fmt_num(card.metrics.crap_max), "crap max");
-    tile(
-        out,
-        card.metrics.crap_over_threshold.to_string(),
-        "over threshold",
-    );
     tile(
         out,
         card.metrics.undeclared_dependencies.to_string(),
@@ -1213,9 +1216,12 @@ mod tests {
         );
         let html = to_html(&c);
         assert!(html.contains("<b>—</b><span>coverage not measured</span>"));
+        assert!(html.contains("<b>—</b><span>crap not scored</span>"));
+        assert!(html.contains("<b>—</b><span>over threshold (unscored)</span>"));
         assert!(html.contains("<span class=\"cov\">not measured</span>"));
         assert!(html.contains("CRAP is not scored"));
         assert!(!html.contains("<span>coverage</span>"));
+        assert!(!html.contains("<b>0</b><span>over threshold</span>"));
     }
 
     #[test]
