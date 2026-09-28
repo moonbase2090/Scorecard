@@ -952,7 +952,7 @@ mod tests {
         fs::create_dir_all(hidden.join("nested")).unwrap();
         fs::write(hidden.join("nested/leak.py"), "x = 1\n").unwrap();
         let mut blocked = fs::metadata(&hidden).unwrap().permissions();
-        blocked.set_mode(0);
+        blocked.set_mode(0o0);
         fs::set_permissions(&hidden, blocked).unwrap();
         let findings = text_secrets(&root, &[]);
         assert!(
