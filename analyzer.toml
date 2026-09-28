@@ -16,6 +16,3 @@ exclude = ["target/**", "generated/**", "testdata/**"]
 
 [gates]
 fail_on = ["types", "tests", "crap", "secrets", "lint"]
-
-[scope]
-exclude = ["target/**", "generated/**", "testdata/**"]
