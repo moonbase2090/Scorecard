@@ -435,9 +435,16 @@ fn scores_metrics(out: &mut String, card: &Scorecard) {
     );
     tile(
         out,
-        card.metrics.hallucinated_imports.to_string(),
+        card.metrics.undeclared_dependencies.to_string(),
         "undeclared deps",
     );
+    if card.metrics.hallucinated_imports > 0 {
+        tile(
+            out,
+            card.metrics.hallucinated_imports.to_string(),
+            "hallucinated imports",
+        );
+    }
     out.push_str("</div>\n");
 }
 
@@ -1214,9 +1221,16 @@ mod tests {
 
     #[test]
     fn html_tile_calls_sca_misses_undeclared_deps() {
-        let html = to_html(&card());
-        assert!(html.contains("<span>undeclared deps</span>"));
+        let mut measured = card();
+        measured.metrics.undeclared_dependencies = 7;
+        measured.metrics.hallucinated_imports = 0;
+        let html = to_html(&measured);
+        assert!(html.contains("<b>7</b><span>undeclared deps</span>"));
         assert!(!html.contains("hallucinated imports"));
+        measured.metrics.hallucinated_imports = 1;
+        let html = to_html(&measured);
+        assert!(html.contains("<b>7</b><span>undeclared deps</span>"));
+        assert!(html.contains("<b>1</b><span>hallucinated imports</span>"));
     }
 
     #[test]

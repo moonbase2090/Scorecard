@@ -322,6 +322,7 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
             crap_max: crap.crap_max,
             crap_over_threshold: crap.over,
             hallucinated_imports: 0,
+            undeclared_dependencies: 0,
         },
         threshold: request.config.gates.crap_threshold,
         worst: crap.worst,
@@ -586,6 +587,7 @@ fn analyze_unsupported(
             crap_max: crap.crap_max,
             crap_over_threshold: crap.over,
             hallucinated_imports: 0,
+            undeclared_dependencies: 0,
         },
         threshold: request.config.gates.crap_threshold,
         worst: crap.worst,
@@ -623,7 +625,15 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
             outcome.crap_untested,
             request.config.gates.new_fn_untested_cc,
         ),
-        advisory_gate("sca", outcome.sca_errors, "undeclared dependencies"),
+        advisory_detail(
+            "sca",
+            outcome.sca.total(),
+            &sca_detail(
+                outcome.sca.undeclared,
+                outcome.sca.hallucinated,
+                outcome.sca.unresolved,
+            ),
+        ),
         gate("lint", outcome.lint_pass, &outcome.lint_reason),
         gate(
             "secrets",
@@ -655,7 +665,8 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
             coverage_changed: 0.0,
             crap_max: outcome.crap_max,
             crap_over_threshold: outcome.crap_over,
-            hallucinated_imports: outcome.sca_errors,
+            hallucinated_imports: outcome.sca.hallucinated,
+            undeclared_dependencies: outcome.sca.undeclared,
         },
         threshold: request.config.gates.crap_threshold,
         worst: outcome.crap_worst,
@@ -996,15 +1007,11 @@ fn push_optional_gates(
     state: &RustState,
     spec: &SpecRun,
     mutation: &MutationRun,
-    hallucinated: u64,
+    undeclared: u64,
     report_lint: bool,
 ) {
     if request.config.engines.sca {
-        gates.push(advisory_gate(
-            "sca",
-            hallucinated,
-            "undeclared dependencies",
-        ));
+        gates.push(advisory_gate("sca", undeclared, "undeclared dependencies"));
     }
     let secret_errors = state
         .findings
@@ -1087,7 +1094,7 @@ fn assemble_rust_report(
     );
     state.findings.extend(crap.findings);
 
-    let hallucinated = import_findings(
+    let undeclared = import_findings(
         root,
         selection,
         request.config.engines.sca,
@@ -1129,7 +1136,8 @@ fn assemble_rust_report(
         coverage_changed,
         crap_max: crap.crap_max,
         crap_over_threshold: crap.over,
-        hallucinated_imports: hallucinated,
+        hallucinated_imports: 0,
+        undeclared_dependencies: undeclared,
     };
 
     let mut gates = vec![
@@ -1143,7 +1151,7 @@ fn assemble_rust_report(
         &state,
         &spec,
         &mutation,
-        hallucinated,
+        undeclared,
         report_lint,
     );
 
@@ -1687,34 +1695,48 @@ fn import_findings(
     ran.push("sca".into());
     let mut count = 0u64;
     for file in &selection.files {
-        for import in &file.imports {
-            let name = crate::manifest::normalize(&import.crate_name);
-            if allowed.contains(&name) || local.contains(&name) {
-                continue;
-            }
-            count += 1;
-            findings.push(Finding {
-                id: format!("sca:{}:{}", import.file, import.crate_name),
-                rule: "sca.hallucinated_import".into(),
-                engine: "sca".into(),
-                severity: "warning".into(),
-                file: import.file.clone(),
-                span: Some(sc_core::Span {
-                    start_line: import.line,
-                    start_col: 1,
-                    end_line: import.line,
-                    end_col: 1,
-                }),
-                symbol: Some(import.crate_name.clone()),
-                message: format!(
-                    "Strongly advised: crate `{}` is used in source and is not in Cargo.toml",
-                    import.crate_name
-                ),
-                evidence: serde_json::json!({"crate": import.crate_name}),
-                suggested_action: Some("Add the crate to Cargo.toml or remove the import".into()),
-                disposition: String::new(),
-            });
+        count += undeclared_imports(file, &allowed, &local, findings);
+    }
+    count
+}
+
+fn undeclared_imports(
+    file: &crate::facts::AnalyzedFile,
+    allowed: &std::collections::BTreeSet<String>,
+    local: &std::collections::BTreeSet<String>,
+    findings: &mut Vec<Finding>,
+) -> u64 {
+    let mut count = 0u64;
+    for import in &file.imports {
+        let name = crate::manifest::normalize(&import.crate_name);
+        if allowed.contains(&name) || local.contains(&name) {
+            continue;
         }
+        count += 1;
+        let file_name = import.file.as_str();
+        let crate_name = import.crate_name.as_str();
+        findings.push(Finding {
+            id: format!("sca:{file_name}:{crate_name}"),
+            rule: "sca.undeclared_dependency".into(),
+            engine: "sca".into(),
+            severity: "warning".into(),
+            file: file_name.to_string(),
+            span: Some(sc_core::Span {
+                start_line: import.line,
+                start_col: 1,
+                end_line: import.line,
+                end_col: 1,
+            }),
+            symbol: Some(crate_name.to_string()),
+            message: format!(
+                "Advisory: crate `{crate_name}` is used in source and is not in Cargo.toml"
+            ),
+            evidence: serde_json::json!({"crate": crate_name}),
+            suggested_action: Some(format!(
+                "Add `{crate_name}` to Cargo.toml or remove the import"
+            )),
+            disposition: String::new(),
+        });
     }
     count
 }
@@ -2142,6 +2164,10 @@ fn gate(id: &str, pass: bool, reason: &str) -> Gate {
 }
 
 fn advisory_gate(id: &str, count: u64, noun: &str) -> Gate {
+    advisory_detail(id, count, &format!("{count} {noun}"))
+}
+
+fn advisory_detail(id: &str, count: u64, detail: &str) -> Gate {
     if count == 0 {
         return Gate {
             id: id.to_string(),
@@ -2154,10 +2180,35 @@ fn advisory_gate(id: &str, count: u64, noun: &str) -> Gate {
         id: id.to_string(),
         pass: false,
         enforced: false,
-        reason: Some(format!(
-            "{count} {noun} (advisory; does not fail the process)"
-        )),
+        reason: Some(format!("{detail} (advisory; does not fail the process)")),
     }
+}
+
+fn sca_detail(undeclared: u64, hallucinated: u64, unresolved: u64) -> String {
+    let mut parts = Vec::new();
+    if undeclared > 0 {
+        let noun = if undeclared == 1 {
+            "dependency"
+        } else {
+            "dependencies"
+        };
+        parts.push(format!("{undeclared} undeclared {noun}"));
+    }
+    if hallucinated > 0 {
+        let noun = if hallucinated == 1 {
+            "import"
+        } else {
+            "imports"
+        };
+        parts.push(format!("{hallucinated} hallucinated {noun}"));
+    }
+    if unresolved > 0 {
+        let noun = if unresolved == 1 { "import" } else { "imports" };
+        parts.push(format!(
+            "{unresolved} {noun} not classified because the package index was not checked"
+        ));
+    }
+    parts.join(", ")
 }
 
 fn gate_reported(id: &str) -> Gate {
@@ -2428,6 +2479,9 @@ mod tests {
         assert_eq!(count, 1);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].symbol.as_deref(), Some("missing"));
+        assert_eq!(findings[0].rule, "sca.undeclared_dependency");
+        assert!(findings[0].message.starts_with("Advisory:"));
+        assert!(!findings[0].message.contains("Strongly"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -2493,6 +2547,27 @@ mod tests {
         assert_eq!(
             crap_gate_reason(0, 2, 15),
             "2 functions at or above CC 15 with no coverage"
+        );
+    }
+
+    #[test]
+    fn sca_detail_names_each_measured_class() {
+        assert_eq!(sca_detail(1, 0, 0), "1 undeclared dependency");
+        assert_eq!(sca_detail(2, 0, 0), "2 undeclared dependencies");
+        assert_eq!(
+            sca_detail(2, 1, 0),
+            "2 undeclared dependencies, 1 hallucinated import"
+        );
+        assert_eq!(
+            sca_detail(0, 0, 1),
+            "1 import not classified because the package index was not checked"
+        );
+        let gate = advisory_detail("sca", 1, &sca_detail(1, 0, 0));
+        assert!(!gate.pass);
+        assert!(!gate.enforced);
+        assert_eq!(
+            gate.reason.as_deref(),
+            Some("1 undeclared dependency (advisory; does not fail the process)")
         );
     }
 }

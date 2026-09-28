@@ -179,6 +179,7 @@ fn good_crate_passes_and_has_the_scorecard_shape() {
     assert!(card["mutation"]["score"].is_null());
     assert!(card["spec"]["gaps"].as_array().unwrap().is_empty());
     assert_eq!(card["metrics"]["hallucinated_imports"], 0);
+    assert_eq!(card["metrics"]["undeclared_dependencies"], 0);
     let skipped = card["engines_skipped"].as_array().unwrap();
     assert!(skipped.iter().any(|engine| engine == "llm"));
     assert!(skipped.iter().any(|engine| engine == "mutation"));
@@ -239,30 +240,73 @@ fn fake_dep_warns_on_hallucinated_import() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|finding| finding["rule"] == "sca.hallucinated_import")
+        .find(|finding| finding["rule"] == "sca.undeclared_dependency")
         .expect("advisory dependency finding");
     assert_eq!(finding["severity"], "warning");
     assert_eq!(finding["disposition"], "ask");
-    assert!(card["gates"]
+    let message = finding["message"].as_str().unwrap();
+    assert!(message.starts_with("Advisory:"), "{message}");
+    assert!(!message.contains("Strongly"), "{message}");
+    let reason = card["gates"]
         .as_array()
         .unwrap()
         .iter()
-        .any(|gate| { gate["id"] == "sca" && gate["enforced"] == false && gate["pass"] == false }));
-    assert!(card["metrics"]["hallucinated_imports"].as_u64().unwrap() >= 1);
+        .find(|gate| gate["id"] == "sca")
+        .unwrap();
+    assert_eq!(reason["enforced"], false);
+    assert_eq!(reason["pass"], false);
+    let reason = reason["reason"].as_str().unwrap();
+    assert!(reason.contains("undeclared"), "{reason}");
+    assert!(reason.contains("advisory"), "{reason}");
+    assert!(card["metrics"]["undeclared_dependencies"].as_u64().unwrap() >= 1);
+    assert_eq!(card["metrics"]["hallucinated_imports"], 0);
 }
 
 #[test]
 fn local_mod_pub_use_is_not_hallucinated() {
     let (code, card, _, stderr) = analyze(&["testdata/local_mod"]);
     assert_eq!(code, 0, "stderr={stderr}\ncard={card}");
-    let hallucinated: Vec<_> = card["findings"]
+    let dependency: Vec<_> = card["findings"]
         .as_array()
         .unwrap()
         .iter()
-        .filter(|finding| finding["rule"] == "sca.hallucinated_import")
+        .filter(|finding| {
+            finding["rule"] == "sca.hallucinated_import"
+                || finding["rule"] == "sca.undeclared_dependency"
+        })
         .collect();
-    assert!(hallucinated.is_empty(), "{hallucinated:?}");
+    assert!(dependency.is_empty(), "{dependency:?}");
     assert_eq!(card["metrics"]["hallucinated_imports"].as_u64().unwrap(), 0);
+    assert_eq!(
+        card["metrics"]["undeclared_dependencies"].as_u64().unwrap(),
+        0
+    );
+}
+
+#[test]
+fn python_local_imports_are_not_dependency_findings() {
+    let (code, card, _, stderr) = analyze(&["testdata/py_local_import"]);
+    let dependency: Vec<_> = rules(&card)
+        .into_iter()
+        .filter(|rule| rule.starts_with("sca."))
+        .collect();
+    assert!(
+        dependency.is_empty(),
+        "{dependency:?}\nstderr={stderr}\n{card}"
+    );
+    assert_eq!(card["metrics"]["hallucinated_imports"], 0);
+    assert_eq!(card["metrics"]["undeclared_dependencies"], 0);
+    assert!(card["gates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|gate| { gate["id"] == "sca" && gate["pass"] == true && gate["enforced"] == false }));
+    // The scorecard job does not install Ruff. A missing linter fails `lint`
+    // and must not look like a dependency miss. When lint ran, the tree passes.
+    let lint_missing = rules(&card).contains(&"engine.unavailable");
+    if !lint_missing {
+        assert_eq!(code, 0, "stderr={stderr}\n{card}");
+    }
 }
 
 #[test]

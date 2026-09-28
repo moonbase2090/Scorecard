@@ -118,7 +118,11 @@ pub struct Metrics {
     pub coverage_changed: f64,
     pub crap_max: f64,
     pub crap_over_threshold: u64,
+    /// Names that are not local, not installed, and not on the package index.
     pub hallucinated_imports: u64,
+    /// Installed or published packages that are imported and not declared.
+    #[serde(default)]
+    pub undeclared_dependencies: u64,
 }
 
 impl Metrics {
@@ -130,6 +134,7 @@ impl Metrics {
             crap_max: 0.0,
             crap_over_threshold: 0,
             hallucinated_imports: 0,
+            undeclared_dependencies: 0,
         }
     }
 }
@@ -421,6 +426,7 @@ mod tests {
                 crap_max: 156.0,
                 crap_over_threshold: 4,
                 hallucinated_imports: 1,
+                undeclared_dependencies: 2,
             },
             crap: CrapSection {
                 threshold: 30,
