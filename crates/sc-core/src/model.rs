@@ -34,7 +34,7 @@ pub struct Finding {
 /// How an agent should treat a finding.
 ///
 /// Errors from deterministic engines are `fix`. Missing tools and coverage
-/// gaps are `ask`. Perf notes are `ignore`.
+/// gaps are `ask`.
 pub fn disposition_for(rule: &str, severity: &str) -> &'static str {
     match rule {
         "engine.unavailable"
@@ -42,7 +42,6 @@ pub fn disposition_for(rule: &str, severity: &str) -> &'static str {
         | "coverage.unmatched"
         | "spec.llm_gap"
         | "sca.hallucinated_import" => "ask",
-        "perf.nested_loop" | "perf.clone_in_loop" => "ignore",
         _ if severity == "warning" => "ask",
         _ => "fix",
     }
@@ -518,7 +517,6 @@ mod tests {
         }
         assert_eq!(disposition_for("crap.over_threshold", "error"), "fix");
         assert_eq!(disposition_for("engine.unavailable", "warning"), "ask");
-        assert_eq!(disposition_for("perf.nested_loop", "warning"), "ignore");
         assert_eq!(disposition_for("sca.hallucinated_import", "warning"), "ask");
         assert_eq!(finding["span"]["start_line"], 42);
         assert_eq!(finding["evidence"]["cc"], 12);

@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- A nested loop, and a `.clone()` that the loop collects, are not findings. Efficiency is not reduced for that ordinary Rust.
 - The Rust dependency check no longer reports crates that are already provided or declared. `proc_macro` is a builtin, like `std`, `core`, and `alloc`. A bare `use Name;` or `use Name as Alias;` of a name the file already imports by path, or defines, is a re-export and not a crate. A bare `use serde;` is still a crate. A header such as `[target.'cfg(windows)'.dependencies.windows-sys]` or `[dependencies.bytes]` declares that crate. A `use` of a module declared in the same crate counts as local, including a `mod` declared inside a macro call. The parse cache version changed, so the first run after upgrading re-parses every file.
 - Tests cover the LLM review outcome, the PyPI name lookup, the Cursor review, and the markdown renderer. Those functions no longer exceed the CRAP threshold.
 - Node and Python score a file the tests never load at 0% coverage. c8 runs with `--all`, and pytest-cov gets each directory that holds a scored function as a `--cov` source, including a `src/` layout and namespace packages. Before, such a file had no coverage record, so its functions were not scored and a complex one could not fail the `crap` gate.
