@@ -38,7 +38,7 @@ rustup default stable
 
 ## `several language packs match (rust, node)`
 
-Exit 2. The tree has two markers, such as `Cargo.toml` and `package.json`. Pass `--pack rust`, or add `pack = "rust"` to `analyzer.toml`. The terminal may cut this message short; `.sc/last-scorecard.json` has the full text.
+Exit 2 when more than one language marker matches and more than one of those languages has source files, or none of them do. A larger file count does not choose a pack. Pass `--pack rust`, or add `pack = "rust"` to `analyzer.toml`. Headers do not count as source and do not turn a Python project into an ambiguous tree. The terminal may cut this message short; `.sc/last-scorecard.json` has the full text. An empty tree says to set `pack` in `analyzer.toml` or pass `--pack`.
 
 ## The header says `dirty`
 

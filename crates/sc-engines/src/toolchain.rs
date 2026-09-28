@@ -26,6 +26,8 @@ struct Step {
     engine: &'static str,
     command: Option<String>,
     absent: String,
+    /// A failing command with `enforce: false` is reported and does not fail the run.
+    enforce: bool,
 }
 
 pub fn run(pack: PackId, root: &Path, deadline: Instant, user_lint: Option<&str>) -> ToolReport {
@@ -37,6 +39,7 @@ pub fn run(pack: PackId, root: &Path, deadline: Instant, user_lint: Option<&str>
             engine: "lint",
             command: Some(lint.to_string()),
             absent: "lint command is empty".into(),
+            enforce: true,
         });
     }
     let mut report = ToolReport {
@@ -100,12 +103,14 @@ fn node_plan(root: &Path) -> Vec<Step> {
             engine: "compile",
             command: compile,
             absent: "node is not installed".into(),
+            enforce: true,
         },
         Step {
             gate: "tests",
             engine: "tests",
             command: test,
             absent: "package.json has no test script".into(),
+            enforce: true,
         },
         Step {
             gate: "lint",
@@ -117,6 +122,7 @@ fn node_plan(root: &Path) -> Vec<Step> {
                 None
             },
             absent: "eslint is not configured".into(),
+            enforce: true,
         },
     ]
 }
@@ -133,12 +139,14 @@ fn bash_plan(root: &Path) -> Vec<Step> {
                 via("bash", check_chain("bash -n", &files))
             },
             absent: "bash is not installed".into(),
+            enforce: true,
         },
         Step {
             gate: "tests",
             engine: "tests",
             command: bash_tests(root),
             absent: "bats is not installed or no .bats suite exists".into(),
+            enforce: true,
         },
         Step {
             gate: "lint",
@@ -149,6 +157,7 @@ fn bash_plan(root: &Path) -> Vec<Step> {
                 None
             },
             absent: "shellcheck is not installed".into(),
+            enforce: true,
         },
     ]
 }
@@ -165,6 +174,7 @@ fn go_plan(root: &Path) -> Vec<Step> {
             engine: "compile",
             command: via("go", "go build ./...".into()),
             absent: "go is not installed".into(),
+            enforce: true,
         },
         Step {
             gate: "tests",
@@ -174,12 +184,14 @@ fn go_plan(root: &Path) -> Vec<Step> {
                 "mkdir -p .sc/coverage && go test -coverprofile=.sc/coverage/go.out ./...".into(),
             ),
             absent: "go is not installed".into(),
+            enforce: true,
         },
         Step {
             gate: "lint",
             engine: "lint",
             command: via("go", "go vet ./...".into()),
             absent: "go is not installed".into(),
+            enforce: true,
         },
     ]
 }
@@ -232,18 +244,21 @@ fn java_plan(root: &Path) -> Vec<Step> {
             engine: "compile",
             command: compile,
             absent: "javac, mvn, or gradle is not installed".into(),
+            enforce: true,
         },
         Step {
             gate: "tests",
             engine: "tests",
             command: test,
             absent: test_absent.into(),
+            enforce: true,
         },
         Step {
             gate: "lint",
             engine: "lint",
             command: None,
             absent: "no Java linter is configured".into(),
+            enforce: true,
         },
     ]
 }
@@ -256,18 +271,21 @@ fn csharp_plan() -> Vec<Step> {
             engine: "compile",
             command: via("dotnet", format!("{prefix} dotnet build --nologo -v q")),
             absent: "dotnet is not installed".into(),
+            enforce: true,
         },
         Step {
             gate: "tests",
             engine: "tests",
             command: via("dotnet", format!("{prefix} {CSHARP_TEST}")),
             absent: "dotnet is not installed".into(),
+            enforce: true,
         },
         Step {
             gate: "lint",
             engine: "lint",
             command: None,
             absent: "C# analyzers run as part of dotnet build".into(),
+            enforce: true,
         },
     ]
 }
@@ -284,6 +302,7 @@ fn php_plan(root: &Path) -> Vec<Step> {
                 None
             },
             absent: "php is not installed".into(),
+            enforce: true,
         },
         Step {
             gate: "tests",
@@ -296,6 +315,7 @@ fn php_plan(root: &Path) -> Vec<Step> {
                 None
             },
             absent: "phpunit is not installed".into(),
+            enforce: true,
         },
         Step {
             gate: "lint",
@@ -316,18 +336,21 @@ fn php_plan(root: &Path) -> Vec<Step> {
                 None
             },
             absent: "phpstan is not installed".into(),
+            enforce: true,
         },
     ]
 }
 
 fn cpp_plan(root: &Path) -> Vec<Step> {
     let files = list_files(root, &["c", "cc", "cpp", "cxx"]);
+    let (c_files, cxx_files) = split_c_family(&files);
     vec![
         Step {
             gate: "types",
             engine: "compile",
-            command: cpp_compile(root, &files),
-            absent: "g++ or cmake is not installed".into(),
+            command: cpp_compile(root, &c_files, &cxx_files),
+            absent: cpp_absent(&c_files, &cxx_files),
+            enforce: types_enforced(root),
         },
         Step {
             gate: "tests",
@@ -338,6 +361,7 @@ fn cpp_plan(root: &Path) -> Vec<Step> {
                 None
             },
             absent: "CTest suite is not present".into(),
+            enforce: true,
         },
         Step {
             gate: "lint",
@@ -348,6 +372,7 @@ fn cpp_plan(root: &Path) -> Vec<Step> {
                 None
             },
             absent: "clang-tidy is not installed".into(),
+            enforce: true,
         },
     ]
 }
@@ -379,33 +404,62 @@ fn apply(root: &Path, deadline: Instant, step: Step, report: &mut ToolReport) {
             } else {
                 report.ran.push(step.engine.into());
                 let detail = brief(&format!("{}\n{}", captured.stdout, captured.stderr));
-                let rule = match step.engine {
-                    "tests" => "test.failed",
-                    "lint" => "lint.failed",
-                    _ => "compile.failed",
+                let failed = if detail.is_empty() {
+                    format!("{} failed", step.engine)
+                } else {
+                    format!("{} failed: {detail}", step.engine)
                 };
-                report.findings.push(Finding {
-                    id: format!("{}:failed", step.engine),
-                    rule: rule.into(),
-                    engine: step.engine.into(),
-                    severity: "error".into(),
-                    file: ".".into(),
-                    span: None,
-                    symbol: None,
-                    message: if detail.is_empty() {
-                        format!("{} failed", step.engine)
-                    } else {
-                        format!("{} failed: {detail}", step.engine)
-                    },
-                    evidence: serde_json::json!({"command": command}),
-                    suggested_action: Some("Fix the failure and re-run".into()),
-                    disposition: String::new(),
-                });
-                report.gates.push(enforced(
-                    step.gate,
-                    false,
-                    &format!("{} failed", step.engine),
-                ));
+                if step.enforce {
+                    let rule = match step.engine {
+                        "tests" => "test.failed",
+                        "lint" => "lint.failed",
+                        _ => "compile.failed",
+                    };
+                    report.findings.push(Finding {
+                        id: format!("{}:failed", step.engine),
+                        rule: rule.into(),
+                        engine: step.engine.into(),
+                        severity: "error".into(),
+                        file: ".".into(),
+                        span: None,
+                        symbol: None,
+                        message: failed,
+                        evidence: serde_json::json!({"command": command}),
+                        suggested_action: Some("Fix the failure and re-run".into()),
+                        disposition: String::new(),
+                    });
+                    report.gates.push(enforced(
+                        step.gate,
+                        false,
+                        &format!("{} failed", step.engine),
+                    ));
+                } else {
+                    let reason = format!(
+                        "{failed}. Include paths and generated headers are not known without CMakeLists.txt or compile_commands.json, so this types check is not enforced."
+                    );
+                    report.findings.push(Finding {
+                        id: format!("{}:failed", step.engine),
+                        rule: "compile.failed".into(),
+                        engine: step.engine.into(),
+                        severity: "warning".into(),
+                        file: ".".into(),
+                        span: None,
+                        symbol: None,
+                        message: reason.clone(),
+                        evidence: serde_json::json!({"command": command}),
+                        suggested_action: Some(
+                            "Fix the compiler error, or pass --pack if this tree is not C or C++."
+                                .into(),
+                        ),
+                        disposition: String::new(),
+                    });
+                    report.gates.push(Gate {
+                        id: step.gate.into(),
+                        pass: false,
+                        enforced: false,
+                        reason: Some(reason),
+                    });
+                }
             }
         }
         Err(err) => {
@@ -486,10 +540,78 @@ fn php_test(bin: &str) -> String {
     )
 }
 
-fn cpp_compile(root: &Path, files: &[String]) -> Option<String> {
-    if !files.is_empty() {
-        if let Some(command) = via("g++", check_chain("g++ -fsyntax-only", files)) {
-            return Some(command);
+fn cpp_types_absent(compiler_present: bool, sources_empty: bool) -> &'static str {
+    if compiler_present && sources_empty {
+        "no .c, .cc, .cpp, or .cxx file to compile"
+    } else {
+        "g++ or cmake is not installed"
+    }
+}
+
+/// A syntax check cannot see include paths or generated headers unless the
+/// project has `CMakeLists.txt` or `compile_commands.json`.
+fn types_enforced(root: &Path) -> bool {
+    root.join("CMakeLists.txt").is_file() || root.join("compile_commands.json").is_file()
+}
+
+fn split_c_family(files: &[String]) -> (Vec<String>, Vec<String>) {
+    let mut c_files = Vec::new();
+    let mut cxx_files = Vec::new();
+    for file in files {
+        if std::path::Path::new(file)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            == Some("c")
+        {
+            c_files.push(file.clone());
+        } else {
+            cxx_files.push(file.clone());
+        }
+    }
+    (c_files, cxx_files)
+}
+
+fn cpp_absent(c_files: &[String], cxx_files: &[String]) -> String {
+    if c_files.is_empty() && cxx_files.is_empty() {
+        return cpp_types_absent(
+            which("cc") || which("g++") || which("cmake") || image_present(),
+            true,
+        )
+        .into();
+    }
+    let cc_missing = !c_files.is_empty() && !which("cc") && !image_present();
+    let gxx_missing = !cxx_files.is_empty() && !which("g++") && !image_present();
+    missing_compiler_message(cc_missing, gxx_missing).into()
+}
+
+fn missing_compiler_message(cc_missing: bool, gxx_missing: bool) -> &'static str {
+    match (cc_missing, gxx_missing) {
+        (true, true) => "cc or g++ is not installed",
+        (true, false) => "cc is not installed",
+        (false, true) => "g++ is not installed",
+        (false, false) => "cmake is not installed",
+    }
+}
+
+fn syntax_group(bin: &str, prefix: &str, files: &[String]) -> Option<String> {
+    if files.is_empty() {
+        Some(String::new())
+    } else {
+        via(bin, check_chain(prefix, files))
+    }
+}
+
+fn cpp_compile(root: &Path, c_files: &[String], cxx_files: &[String]) -> Option<String> {
+    if !c_files.is_empty() || !cxx_files.is_empty() {
+        let c = syntax_group("cc", "cc -fsyntax-only -x c", c_files);
+        let cxx = syntax_group("g++", "g++ -fsyntax-only", cxx_files);
+        if let (Some(c), Some(cxx)) = (c, cxx) {
+            return Some(match (c.is_empty(), cxx.is_empty()) {
+                (false, true) => c,
+                (true, false) => cxx,
+                (false, false) => format!("{c} && {cxx}"),
+                (true, true) => String::new(),
+            });
         }
     }
     if root.join("CMakeLists.txt").is_file() {
@@ -893,6 +1015,135 @@ mod tests {
     }
 
     #[test]
+    fn gxx_present_with_no_translation_unit_is_not_a_missing_compiler() {
+        assert_eq!(
+            cpp_types_absent(true, true),
+            "no .c, .cc, .cpp, or .cxx file to compile"
+        );
+        assert_eq!(
+            cpp_types_absent(false, true),
+            "g++ or cmake is not installed"
+        );
+        assert_eq!(
+            cpp_types_absent(true, false),
+            "g++ or cmake is not installed"
+        );
+        assert_eq!(missing_compiler_message(true, false), "cc is not installed");
+        assert_eq!(
+            missing_compiler_message(false, true),
+            "g++ is not installed"
+        );
+        assert_eq!(
+            missing_compiler_message(true, true),
+            "cc or g++ is not installed"
+        );
+    }
+
+    #[test]
+    fn valid_c_with_a_makefile_uses_cc_and_does_not_fail_types() {
+        let root = std::env::temp_dir().join(format!("sc-valid-c-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("Makefile"), "all:\n").unwrap();
+        std::fs::write(
+            root.join("demo.c"),
+            "#include <stdlib.h>\nint main(void) {\n    int *p = malloc(sizeof *p);\n    int new = 0;\n    free(p);\n    return new;\n}\n",
+        )
+        .unwrap();
+        let steps = cpp_plan(&root);
+        let types = steps.iter().find(|step| step.gate == "types").unwrap();
+        let command = types.command.clone().unwrap_or_default();
+        assert!(command.contains("cc -fsyntax-only -x c"), "{command}");
+        assert!(!command.contains("g++"), "{command}");
+        assert!(!types.enforce);
+        if which("cc") {
+            let report = run(
+                PackId::Cpp,
+                &root,
+                Instant::now() + std::time::Duration::from_secs(30),
+                None,
+            );
+            let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+            assert!(gate.pass, "{gate:?} {:?}", report.findings);
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn cmake_and_makefile_keeps_a_compile_error_enforced() {
+        if !which("cc") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cmake-make-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("CMakeLists.txt"),
+            "cmake_minimum_required(VERSION 3.16)\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("Makefile"), "all:\n").unwrap();
+        std::fs::write(root.join("demo.c"), "int main(void) { return }\n").unwrap();
+        let steps = cpp_plan(&root);
+        let types = steps.iter().find(|step| step.gate == "types").unwrap();
+        assert!(types.enforce);
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(!gate.pass, "{gate:?} {:?}", report.findings);
+        assert!(gate.enforced, "{gate:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn missing_header_on_a_makefile_is_not_enforced() {
+        if !which("cc") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-miss-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("Makefile"), "all:\n").unwrap();
+        std::fs::write(
+            root.join("demo.c"),
+            "#include \"missing.h\"\nint main(void) { return 0; }\n",
+        )
+        .unwrap();
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(!gate.pass, "{gate:?}");
+        assert!(!gate.enforced, "{gate:?}");
+        let reason = gate.reason.clone().unwrap_or_default();
+        assert!(reason.contains("not enforced"), "{reason}");
+        assert!(reason.contains("Include paths"), "{reason}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn cxx_file_uses_gxx() {
+        let root = std::env::temp_dir().join(format!("sc-cxx-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("demo.cpp"), "int main() { return 0; }\n").unwrap();
+        let steps = cpp_plan(&root);
+        let types = steps.iter().find(|step| step.gate == "types").unwrap();
+        let command = types.command.clone().unwrap_or_default();
+        assert!(command.contains("g++ -fsyntax-only"), "{command}");
+        assert!(!command.contains("cc -fsyntax-only"), "{command}");
+        assert!(!types.enforce);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn c_header_not_found_is_not_a_missing_tool() {
         // A compiler error about a missing header is a real failure,
         // not evidence that the compiler is missing.
@@ -960,6 +1211,7 @@ mod tests {
                 engine: "compile",
                 command: Some("true".into()),
                 absent: "missing".into(),
+                enforce: true,
             },
             &mut report,
         );
@@ -971,6 +1223,7 @@ mod tests {
                 engine: "tests",
                 command: Some("false".into()),
                 absent: "missing".into(),
+                enforce: true,
             },
             &mut report,
         );
@@ -982,6 +1235,7 @@ mod tests {
                 engine: "lint",
                 command: Some("sc-not-a-tool-zz".into()),
                 absent: "lint is not installed".into(),
+                enforce: true,
             },
             &mut report,
         );
@@ -993,6 +1247,7 @@ mod tests {
                 engine: "compile",
                 command: None,
                 absent: "nothing to compile".into(),
+                enforce: true,
             },
             &mut report,
         );

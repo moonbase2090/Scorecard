@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Language pack detection.
 //!
-//! One marker selects a pack. Several markers and no `pack` override is
-//! ambiguous. An unknown tree does not pretend to pass.
+//! One marker selects a pack. Several markers stay ambiguous unless only one
+//! of them has source files. An unknown tree does not pretend to pass.
 
 use std::path::Path;
 
@@ -245,12 +245,14 @@ pub fn detect(root: &Path, override_pack: &str) -> Result<Detected, String> {
     if root.join("Cargo.toml").is_file() {
         found.push(PackId::Rust);
     }
-    if root.join("package.json").is_file() {
+    // package.json next to only shell scripts is a shell program, not Node.
+    if root.join("package.json").is_file() && (has_node_source(root) || !has_shell(root)) {
         found.push(PackId::Node);
     }
     if root.join("pyproject.toml").is_file()
         || root.join("requirements.txt").is_file()
         || root.join("setup.py").is_file()
+        || root.join("Pipfile").is_file()
     {
         found.push(PackId::Python);
     }
@@ -263,22 +265,173 @@ pub fn detect(root: &Path, override_pack: &str) -> Result<Detected, String> {
     {
         found.push(PackId::Java);
     }
-    if has_extension(root, &["csproj", "sln"]) {
+    if has_project_file(root, &["csproj", "sln"]) {
         found.push(PackId::CSharp);
     }
     if root.join("composer.json").is_file() {
         found.push(PackId::Php);
     }
-    if root.join("CMakeLists.txt").is_file() {
+    if is_c_family(root) {
         found.push(PackId::Cpp);
     }
+    Ok(resolve_markers(root, found))
+}
+
+fn resolve_markers(root: &Path, found: Vec<PackId>) -> Detected {
     match found.len() {
-        0 if has_root_html(root) => Ok(Detected::Pack(PackId::Web)),
-        0 if has_shell(root) => Ok(Detected::Pack(PackId::Bash)),
-        0 => Ok(Detected::Unknown),
-        1 => Ok(Detected::Pack(found[0])),
-        _ => Ok(Detected::Ambiguous(found)),
+        0 if has_root_html(root) => Detected::Pack(PackId::Web),
+        0 if has_shell(root) => Detected::Pack(PackId::Bash),
+        0 => Detected::Unknown,
+        1 => Detected::Pack(found[0]),
+        _ => {
+            // A file count must not choose a pack. One language owns the tree
+            // only when every other marker has no source files.
+            let counts = source_counts(root);
+            let owners: Vec<PackId> = found
+                .iter()
+                .copied()
+                .filter(|id| counts[pack_index(*id)] > 0)
+                .collect();
+            match owners.as_slice() {
+                [only] => Detected::Pack(*only),
+                _ => Detected::Ambiguous(found),
+            }
+        }
     }
+}
+
+fn is_c_family(root: &Path) -> bool {
+    if root.join("CMakeLists.txt").is_file() {
+        return true;
+    }
+    let build = [
+        "Makefile",
+        "makefile",
+        "GNUmakefile",
+        "configure",
+        "configure.ac",
+    ]
+    .iter()
+    .any(|name| root.join(name).is_file());
+    build && has_project_file(root, &["c", "cc", "cpp", "cxx"])
+}
+
+fn has_node_source(root: &Path) -> bool {
+    has_project_file(root, &["js", "jsx", "mjs", "cjs", "ts", "tsx"])
+}
+
+fn has_project_file(root: &Path, exts: &[&str]) -> bool {
+    let mut found = false;
+    visit(root, 0, &mut 0, &mut |path| {
+        if ext_is(path, exts) {
+            found = true;
+            return false;
+        }
+        true
+    });
+    found
+}
+
+fn pack_index(id: PackId) -> usize {
+    match id {
+        PackId::Rust => 0,
+        PackId::Node => 1,
+        PackId::Python => 2,
+        PackId::Bash => 3,
+        PackId::Go => 4,
+        PackId::Java => 5,
+        PackId::CSharp => 6,
+        PackId::Php => 7,
+        PackId::Cpp => 8,
+        PackId::Command => 9,
+        PackId::Web => 10,
+    }
+}
+
+fn source_counts(root: &Path) -> [usize; 11] {
+    let mut counts = [0; 11];
+    visit(root, 0, &mut 0, &mut |path| {
+        if let Some(id) = pack_for_ext(path) {
+            counts[pack_index(id)] += 1;
+        }
+        true
+    });
+    counts
+}
+
+fn pack_for_ext(path: &Path) -> Option<PackId> {
+    let ext = path.extension().and_then(|ext| ext.to_str())?;
+    Some(match ext {
+        "rs" => PackId::Rust,
+        "js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" => PackId::Node,
+        "py" => PackId::Python,
+        "go" => PackId::Go,
+        "java" => PackId::Java,
+        "cs" => PackId::CSharp,
+        "php" => PackId::Php,
+        "c" | "cc" | "cpp" | "cxx" => PackId::Cpp,
+        "sh" | "bash" => PackId::Bash,
+        _ => return None,
+    })
+}
+
+fn ext_is(path: &Path, exts: &[&str]) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| exts.iter().any(|wanted| wanted.eq_ignore_ascii_case(ext)))
+}
+
+fn visit(dir: &Path, depth: u32, seen: &mut usize, on_file: &mut dyn FnMut(&Path) -> bool) {
+    if depth > 8 || *seen > 4000 {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if *seen > 4000 {
+            return;
+        }
+        let path = entry.path();
+        let name = path
+            .file_name()
+            .and_then(|item| item.to_str())
+            .unwrap_or("");
+        if skip_dir(name) {
+            continue;
+        }
+        if path.is_dir() {
+            if path
+                .symlink_metadata()
+                .map(|meta| meta.file_type().is_symlink())
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            visit(&path, depth + 1, seen, on_file);
+        } else {
+            *seen += 1;
+            if !on_file(&path) {
+                return;
+            }
+        }
+    }
+}
+
+fn skip_dir(name: &str) -> bool {
+    matches!(
+        name,
+        ".git"
+            | ".hg"
+            | ".svn"
+            | "target"
+            | "node_modules"
+            | "dist"
+            | "vendor"
+            | ".venv"
+            | "venv"
+            | ".sc"
+    ) || name.starts_with('.')
 }
 
 fn has_extension(root: &Path, exts: &[&str]) -> bool {
@@ -320,6 +473,150 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn headers_do_not_select_cpp_or_outvote_python() {
+        let many = temp("headers-many");
+        fs::write(many.join("Makefile"), "all:\n").unwrap();
+        fs::write(many.join("pyproject.toml"), "[project]\nname = \"d\"\n").unwrap();
+        fs::write(many.join("app.py"), "def value():\n    return 1\n").unwrap();
+        fs::create_dir_all(many.join("include")).unwrap();
+        for name in ["h1.h", "h2.h", "h3.h"] {
+            fs::write(many.join("include").join(name), "int marker;\n").unwrap();
+        }
+        assert_eq!(detect(&many, "").unwrap(), Detected::Pack(PackId::Python));
+
+        // The reported tree: two Python files, three headers, a Makefile.
+        let reported = temp("headers-reported");
+        fs::write(reported.join("Makefile"), "all:\n").unwrap();
+        fs::write(reported.join("pyproject.toml"), "[project]\nname = \"d\"\n").unwrap();
+        fs::write(reported.join("app.py"), "def value():\n    return 1\n").unwrap();
+        fs::create_dir_all(reported.join("tests")).unwrap();
+        fs::write(
+            reported.join("tests/test_app.py"),
+            "def test_value():\n    assert True\n",
+        )
+        .unwrap();
+        fs::create_dir_all(reported.join("include")).unwrap();
+        for name in ["h1.h", "h2.h", "h3.h"] {
+            fs::write(reported.join("include").join(name), "int marker;\n").unwrap();
+        }
+        assert_eq!(
+            detect(&reported, "").unwrap(),
+            Detected::Pack(PackId::Python)
+        );
+
+        let tie = temp("headers-tie");
+        fs::write(tie.join("pyproject.toml"), "[project]\nname = \"d\"\n").unwrap();
+        fs::write(tie.join("app.py"), "def value():\n    return 1\n").unwrap();
+        fs::write(tie.join("ext.h"), "int marker;\n").unwrap();
+        assert_eq!(detect(&tie, "").unwrap(), Detected::Pack(PackId::Python));
+        fs::write(tie.join("Makefile"), "all:\n").unwrap();
+        assert_eq!(detect(&tie, "").unwrap(), Detected::Pack(PackId::Python));
+        let _ = fs::remove_dir_all(&many);
+        let _ = fs::remove_dir_all(&reported);
+        let _ = fs::remove_dir_all(&tie);
+    }
+
+    #[test]
+    fn makefile_and_c_sources_are_cpp_even_with_a_shell_script() {
+        let dir = temp("make-c");
+        fs::write(dir.join("Makefile"), "all:\n").unwrap();
+        fs::write(dir.join("demo.c"), "int main(void){return 0;}\n").unwrap();
+        fs::write(dir.join("build.sh"), "#!/bin/sh\n").unwrap();
+        assert_eq!(detect(&dir, "").unwrap(), Detected::Pack(PackId::Cpp));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn configure_ac_with_nested_c_is_cpp() {
+        let dir = temp("configure");
+        fs::write(dir.join("configure.ac"), "AC_INIT\n").unwrap();
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::write(dir.join("src/main.c"), "int main(void){return 0;}\n").unwrap();
+        fs::write(dir.join("compile-ios.sh"), "#!/bin/sh\n").unwrap();
+        assert_eq!(detect(&dir, "").unwrap(), Detected::Pack(PackId::Cpp));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pipfile_is_python_and_a_nested_csproj_is_csharp() {
+        let py = temp("pip");
+        fs::write(py.join("Pipfile"), "[packages]\n").unwrap();
+        fs::write(py.join("app.py"), "x = 1\n").unwrap();
+        assert_eq!(detect(&py, "").unwrap(), Detected::Pack(PackId::Python));
+
+        let cs = temp("csproj");
+        fs::create_dir_all(cs.join("src/App")).unwrap();
+        fs::write(cs.join("src/App/App.csproj"), "<Project></Project>\n").unwrap();
+        assert_eq!(detect(&cs, "").unwrap(), Detected::Pack(PackId::CSharp));
+
+        let mixed = temp("rust-cs");
+        fs::write(mixed.join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
+        fs::write(mixed.join("src_lib.rs"), "fn value() {}\n").unwrap();
+        fs::create_dir_all(mixed.join("fixture")).unwrap();
+        fs::write(mixed.join("fixture/App.csproj"), "<Project></Project>\n").unwrap();
+        fs::write(mixed.join("fixture/App.cs"), "class App {}\n").unwrap();
+        match detect(&mixed, "").unwrap() {
+            Detected::Ambiguous(packs) => {
+                assert!(packs.contains(&PackId::Rust), "{packs:?}");
+                assert!(packs.contains(&PackId::CSharp), "{packs:?}");
+            }
+            other => panic!("expected ambiguous, got {other:?}"),
+        }
+        assert_eq!(
+            detect(&mixed, "rust").unwrap(),
+            Detected::Pack(PackId::Rust)
+        );
+        let _ = fs::remove_dir_all(&py);
+        let _ = fs::remove_dir_all(&cs);
+        let _ = fs::remove_dir_all(&mixed);
+    }
+
+    #[test]
+    fn package_json_beside_only_shell_scripts_is_bash() {
+        let dir = temp("nvm");
+        fs::write(dir.join("package.json"), "{}\n").unwrap();
+        fs::write(dir.join("nvm.sh"), "#!/bin/sh\n").unwrap();
+        assert_eq!(detect(&dir, "").unwrap(), Detected::Pack(PackId::Bash));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn several_manifests_stay_ambiguous_when_each_has_source() {
+        let dir = temp("both-source");
+        fs::write(
+            dir.join("package.json"),
+            "{\"scripts\":{\"test\":\"node __tests__/add.test.js\"}}\n",
+        )
+        .unwrap();
+        fs::write(dir.join("pyproject.toml"), "[project]\nname = \"d\"\n").unwrap();
+        fs::create_dir_all(dir.join("__tests__")).unwrap();
+        fs::write(
+            dir.join("__tests__/add.test.js"),
+            "throw new Error('fail')\n",
+        )
+        .unwrap();
+        fs::create_dir_all(dir.join("tools")).unwrap();
+        fs::write(dir.join("tools/a.py"), "x = 1\n").unwrap();
+        fs::write(dir.join("tools/b.py"), "y = 1\n").unwrap();
+        fs::write(dir.join("tools/c.py"), "z = 1\n").unwrap();
+        match detect(&dir, "").unwrap() {
+            Detected::Ambiguous(packs) => {
+                assert!(packs.contains(&PackId::Node), "{packs:?}");
+                assert!(packs.contains(&PackId::Python), "{packs:?}");
+            }
+            other => panic!("expected ambiguous, got {other:?}"),
+        }
+
+        let clear = temp("py-owns");
+        fs::write(clear.join("package.json"), "{}\n").unwrap();
+        fs::write(clear.join("pyproject.toml"), "[project]\nname = \"d\"\n").unwrap();
+        fs::write(clear.join("a.py"), "x = 1\n").unwrap();
+        assert_eq!(detect(&clear, "").unwrap(), Detected::Pack(PackId::Python));
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&clear);
     }
 
     #[test]

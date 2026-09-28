@@ -1,5 +1,9 @@
 # Dogfood config for this repository. `sc analyze .` loads it, including the
 # develop CI job, which does not pass `--config`.
+# Fixture trees under testdata/ are real projects in other languages, so an
+# unset pack is ambiguous. This repository is Rust.
+pack = "rust"
+
 # CRAP uses the defaults: threshold 30, untested CC 15.
 
 [gates]

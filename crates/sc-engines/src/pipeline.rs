@@ -74,9 +74,12 @@ pub fn analyze(request: AnalyzeRequest) -> AnalyzeOutput {
         }
         Ok(crate::pack::Detected::Pack(crate::pack::PackId::Web)) => analyze_web(request, git),
         Ok(crate::pack::Detected::Pack(pack)) => analyze_unsupported(request, pack, git),
-        Ok(crate::pack::Detected::Unknown) => {
-            analyze_blocked(request, "unknown", "no language pack detected", git)
-        }
+        Ok(crate::pack::Detected::Unknown) => analyze_blocked(
+            request,
+            "unknown",
+            "no language pack detected; set pack in analyzer.toml or pass --pack",
+            git,
+        ),
         Ok(crate::pack::Detected::Ambiguous(packs)) => {
             let names: Vec<_> = packs.iter().map(|pack| pack.as_str()).collect();
             analyze_blocked(
@@ -2375,11 +2378,31 @@ mod tests {
         });
         assert_eq!(output.status, RunStatus::AnalyzerError);
         assert_eq!(output.scorecard.verdict, "fail");
-        assert!(output
-            .scorecard
-            .findings
-            .iter()
-            .any(|finding| finding.rule == "engine.unavailable"));
+        assert!(output.scorecard.findings.iter().any(|finding| {
+            finding.rule == "engine.unavailable"
+                && finding.message.contains("--pack")
+                && finding.message.contains("analyzer.toml")
+        }));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn one_python_file_and_one_header_stays_python() {
+        let dir = std::env::temp_dir().join(format!("sc-header-tie-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("pyproject.toml"), "[project]\nname = \"d\"\n").unwrap();
+        std::fs::write(dir.join("app.py"), "def value():\n    return 1\n").unwrap();
+        std::fs::write(dir.join("ext.h"), "int marker;\n").unwrap();
+        assert_eq!(
+            crate::pack::detect(&dir, "").unwrap(),
+            crate::pack::Detected::Pack(crate::pack::PackId::Python)
+        );
+        std::fs::write(dir.join("Makefile"), "all:\n").unwrap();
+        assert_eq!(
+            crate::pack::detect(&dir, "").unwrap(),
+            crate::pack::Detected::Pack(crate::pack::PackId::Python)
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
