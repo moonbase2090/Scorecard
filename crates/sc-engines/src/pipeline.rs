@@ -1961,7 +1961,7 @@ fn llm_start(
                 .into(),
         );
     }
-    let mut text: String = intent.chars().take(24_000).collect();
+    let mut text = intent.to_string();
     if !paths.is_empty() {
         text.push_str("\n\nPaths in scope:\n");
         let shown = paths.len().min(200);
