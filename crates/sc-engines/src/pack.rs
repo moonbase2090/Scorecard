@@ -169,13 +169,15 @@ pub enum Detected {
 const MAX_SECRET_BYTES: u64 = 1024 * 1024;
 /// A text file larger than this is not read, and the gate says the scan was partial.
 const MAX_TEXT_BYTES: u64 = 64 * 1024 * 1024;
-/// A NUL in this prefix means the file is binary and is not a text secret.
+/// More than one NUL in this prefix means a large file is binary. One NUL can
+/// sit in text and must not hide a secret.
 const BINARY_PROBE: usize = 8192;
 
 pub fn text_secrets(root: &Path, exclude: &[String]) -> Vec<sc_core::Finding> {
     let mut files = Vec::new();
     let mut seen_dirs = std::collections::HashSet::new();
     let mut seen_files = std::collections::HashSet::new();
+    let mut findings = Vec::new();
     collect_text(
         root,
         root,
@@ -183,8 +185,8 @@ pub fn text_secrets(root: &Path, exclude: &[String]) -> Vec<sc_core::Finding> {
         &mut files,
         &mut seen_dirs,
         &mut seen_files,
+        &mut findings,
     );
-    let mut findings = Vec::new();
     let mut big_text = Vec::new();
     for path in files {
         let rel = path
@@ -274,7 +276,8 @@ fn binary_prefix(path: &std::path::Path) -> std::io::Result<bool> {
     let mut file = std::fs::File::open(path)?;
     let mut buf = [0u8; BINARY_PROBE];
     let n = std::io::Read::read(&mut file, &mut buf)?;
-    Ok(buf[..n].contains(&0))
+    let nuls = buf[..n].iter().filter(|byte| **byte == 0).count();
+    Ok(nuls > 1)
 }
 
 fn partial_scan(paths: &[String]) -> sc_core::Finding {
@@ -298,7 +301,7 @@ fn partial_scan(paths: &[String]) -> sc_core::Finding {
         span: None,
         symbol: None,
         message,
-        evidence: serde_json::json!({ "files": paths, "limit_bytes": MAX_SECRET_BYTES }),
+        evidence: serde_json::json!({ "files": paths, "limit_bytes": MAX_TEXT_BYTES }),
         suggested_action: Some(
             "Exclude the large file under [scope] in analyzer.toml, or move the secret out of it"
                 .into(),
@@ -314,20 +317,35 @@ fn collect_text(
     out: &mut Vec<std::path::PathBuf>,
     seen_dirs: &mut std::collections::HashSet<std::path::PathBuf>,
     seen_files: &mut std::collections::HashSet<std::path::PathBuf>,
+    findings: &mut Vec<sc_core::Finding>,
 ) {
     let dir_key = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
     if !seen_dirs.insert(dir_key) {
         return;
     }
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(err) => {
+            findings.push(unreadable(&rel_path(root, dir), &err));
+            return;
+        }
     };
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(err) => {
+                findings.push(unreadable(&rel_path(root, dir), &err));
+                continue;
+            }
+        };
         let path = entry.path();
         let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
         let meta = match path.symlink_metadata() {
             Ok(meta) => meta,
-            Err(_) => continue,
+            Err(err) => {
+                findings.push(unreadable(&rel_path(root, &path), &err));
+                continue;
+            }
         };
         // A directory symlink can loop, or walk the same tree twice, once the
         // depth cap is gone.
@@ -349,7 +367,7 @@ fn collect_text(
             if secrets_excluded(&rel, exclude) {
                 continue;
             }
-            collect_text(root, &path, exclude, out, seen_dirs, seen_files);
+            collect_text(root, &path, exclude, out, seen_dirs, seen_files, findings);
         } else {
             let rel = path
                 .strip_prefix(root)
@@ -365,6 +383,19 @@ fn collect_text(
             }
             out.push(path);
         }
+    }
+}
+
+fn rel_path(root: &Path, path: &Path) -> String {
+    let rel = path
+        .strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/");
+    if rel.is_empty() {
+        ".".to_string()
+    } else {
+        rel
     }
 }
 
@@ -893,6 +924,54 @@ mod tests {
             "{findings:?}"
         );
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn one_nul_in_a_large_file_does_not_hide_a_key() {
+        let key = format!("AKIA{}", "IOSFODNN7EXAMPLE");
+        let root = temp("secrets-one-nul");
+        let mut bytes = vec![0u8];
+        bytes.extend(format!("const AWS_KEY = \"{key}\";\n").into_bytes());
+        bytes.resize(MAX_SECRET_BYTES as usize + 8, b' ');
+        fs::write(root.join("config.js"), &bytes).unwrap();
+        let findings = text_secrets(&root, &[]);
+        assert!(
+            findings.iter().any(|finding| {
+                finding.file == "config.js" && finding.rule == "secrets.aws_access_key"
+            }),
+            "{findings:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_unreadable_directory_fails_the_secrets_gate() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = temp("secrets-unreadable");
+        let hidden = root.join("private");
+        fs::create_dir_all(hidden.join("nested")).unwrap();
+        fs::write(hidden.join("nested/leak.py"), "x = 1\n").unwrap();
+        let mut blocked = fs::metadata(&hidden).unwrap().permissions();
+        blocked.set_mode(0);
+        fs::set_permissions(&hidden, blocked).unwrap();
+        let findings = text_secrets(&root, &[]);
+        assert!(
+            findings.iter().any(|finding| {
+                finding.rule == "secrets.unreadable" && finding.file == "private"
+            }),
+            "{findings:?}"
+        );
+        let mut open = fs::metadata(&hidden).unwrap().permissions();
+        open.set_mode(0o755);
+        fs::set_permissions(&hidden, open).unwrap();
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn partial_scan_records_the_text_limit() {
+        let finding = partial_scan(&["big.bin".into()]);
+        assert_eq!(finding.evidence["limit_bytes"], MAX_TEXT_BYTES);
+        assert!(finding.message.contains("64 MiB"), "{}", finding.message);
     }
 
     #[test]
