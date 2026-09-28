@@ -86,7 +86,7 @@ impl PackId {
 
     pub fn lint_default(self) -> &'static str {
         match self {
-            Self::Rust => "cargo clippy",
+            Self::Rust => "cargo clippy --workspace",
             _ => "",
         }
     }
@@ -672,7 +672,7 @@ mod tests {
     fn empty_tree_is_unknown() {
         let dir = temp("empty");
         assert_eq!(detect(&dir, "").unwrap(), Detected::Unknown);
-        assert_eq!(PackId::Rust.lint_default(), "cargo clippy");
+        assert_eq!(PackId::Rust.lint_default(), "cargo clippy --workspace");
         assert!(!PackId::Rust.lint_default().contains("-D warnings"));
         assert!(PackId::Node.lint_default().is_empty());
         assert_eq!(PackId::Node.test_selection(), "full-suite");

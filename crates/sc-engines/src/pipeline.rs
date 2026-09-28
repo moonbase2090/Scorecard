@@ -454,13 +454,16 @@ fn analyze_unsupported(
     let user_lint = if lint_is_rust_default {
         None
     } else {
-        Some(request.config.commands.lint.trim())
+        Some(clippy_workspace(
+            request.config.commands.lint.trim(),
+            crate::facts::is_workspace_root(&request.root),
+        ))
     };
     let tools = crate::toolchain::run(
         pack,
         &request.root,
         Instant::now() + request.budget,
-        user_lint,
+        user_lint.as_deref(),
     );
     let mut findings = tools.findings;
     findings.push(unavailable(
@@ -700,7 +703,12 @@ fn analyze_rust(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         Err(err) => (empty_selection(), Some(err)),
     };
 
-    let mut state = RustState::new();
+    let workspace_root = if select_error.is_some() {
+        crate::facts::is_workspace_root(root)
+    } else {
+        selection.workspace_root
+    };
+    let mut state = RustState::new(workspace_root);
     if let Some(err) = &select_error {
         state.findings.push(unavailable("scope", err));
     }
@@ -738,10 +746,11 @@ struct RustState {
     tests_reason: String,
     coverage_data: Option<crate::coverage::CoverageData>,
     line_rate: f64,
+    workspace_root: bool,
 }
 
 impl RustState {
-    fn new() -> Self {
+    fn new(workspace_root: bool) -> Self {
         Self {
             findings: Vec::new(),
             runs: Vec::new(),
@@ -754,6 +763,7 @@ impl RustState {
             tests_reason: String::new(),
             coverage_data: None,
             line_rate: 0.0,
+            workspace_root,
         }
     }
 }
@@ -778,12 +788,12 @@ fn missing_manifest(state: &mut RustState) {
 }
 
 fn compile_phase(root: &Path, manifest: &Path, deadline: Instant, state: &mut RustState) {
-    match run_check(root, manifest, deadline) {
+    match run_check(root, manifest, deadline, state.workspace_root) {
         Ok(captured) => {
             note_run(
                 &mut state.runs,
                 "compile",
-                "cargo check --message-format=json",
+                &cargo_gate_command("check", state.workspace_root, "--message-format=json"),
                 captured.status.code(),
                 captured.elapsed,
             );
@@ -805,7 +815,7 @@ fn compile_phase(root: &Path, manifest: &Path, deadline: Instant, state: &mut Ru
             note_run(
                 &mut state.runs,
                 "compile",
-                "cargo check --message-format=json",
+                &cargo_gate_command("check", state.workspace_root, "--message-format=json"),
                 None,
                 Duration::ZERO,
             );
@@ -859,7 +869,14 @@ fn test_phase(
     } else {
         Vec::new()
     };
-    match run_test_set(root, manifest, deadline, &targeted, &mut state.runs) {
+    match run_test_set(
+        root,
+        manifest,
+        deadline,
+        state.workspace_root,
+        &targeted,
+        &mut state.runs,
+    ) {
         Ok(captured) => {
             state.ran.push("tests".into());
             let failures =
@@ -935,7 +952,13 @@ fn coverage_phase(
         }
         return;
     }
-    match run_coverage(root, manifest, deadline, &mut state.runs) {
+    match run_coverage(
+        root,
+        manifest,
+        deadline,
+        state.workspace_root,
+        &mut state.runs,
+    ) {
         Ok(data) => {
             state.ran.push("coverage".into());
             let unmatched = unmatched_functions(&selection.crap_functions, &data);
@@ -1058,6 +1081,7 @@ fn assemble_rust_report(
     let report_lint = run_lint_engine(
         root,
         &request.config.commands.lint,
+        state.workspace_root,
         state.types_pass,
         deadline,
         LintSink {
@@ -1304,21 +1328,28 @@ fn run_test_set(
     root: &Path,
     manifest: &Path,
     deadline: Instant,
+    workspace_root: bool,
     names: &[String],
     runs: &mut Vec<RunRecord>,
 ) -> Result<TestCapture, CommandError> {
     if names.is_empty() {
         let started = Instant::now();
-        let result = run_tests(root, manifest, deadline);
+        let result = run_tests(root, manifest, deadline, workspace_root);
         match &result {
             Ok(captured) => note_run(
                 runs,
                 "tests",
-                "cargo test",
+                &cargo_gate_command("test", workspace_root, ""),
                 captured.status.code(),
                 captured.elapsed,
             ),
-            Err(_) => note_run(runs, "tests", "cargo test", None, started.elapsed()),
+            Err(_) => note_run(
+                runs,
+                "tests",
+                &cargo_gate_command("test", workspace_root, ""),
+                None,
+                started.elapsed(),
+            ),
         }
         let captured = result?;
         return Ok(TestCapture {
@@ -1332,8 +1363,8 @@ fn run_test_set(
     let mut success = true;
     for name in names {
         let started = Instant::now();
-        let command = format!("cargo test {name}");
-        let result = run_one_test(root, manifest, deadline, name);
+        let command = format!("{} {name}", cargo_gate_command("test", workspace_root, ""));
+        let result = run_one_test(root, manifest, deadline, workspace_root, name);
         match &result {
             Ok(captured) => note_run(
                 runs,
@@ -1360,21 +1391,14 @@ fn run_one_test(
     root: &Path,
     manifest: &Path,
     deadline: Instant,
+    workspace_root: bool,
     name: &str,
 ) -> Result<crate::command::Captured, CommandError> {
     let manifest = manifest.to_string_lossy().to_string();
-    run_cargo(
-        root,
-        &[
-            "test",
-            name,
-            "--manifest-path",
-            &manifest,
-            "--color",
-            "never",
-        ],
-        deadline,
-    )
+    let mut args = vec!["test"];
+    add_workspace_arg(&mut args, workspace_root);
+    args.extend([name, "--manifest-path", &manifest, "--color", "never"]);
+    run_cargo(root, &args, deadline)
 }
 
 struct LintSink<'a> {
@@ -1384,9 +1408,224 @@ struct LintSink<'a> {
     runs: &'a mut Vec<RunRecord>,
 }
 
+fn add_workspace_arg(args: &mut Vec<&str>, workspace_root: bool) {
+    if workspace_root {
+        args.push("--workspace");
+    }
+}
+
+fn cargo_gate_command(action: &str, workspace_root: bool, suffix: &str) -> String {
+    let workspace = if workspace_root { " --workspace" } else { "" };
+    let suffix = if suffix.is_empty() {
+        String::new()
+    } else {
+        format!(" {suffix}")
+    };
+    format!("cargo {action}{workspace}{suffix}")
+}
+
+/// Include every Rust workspace member only when the analyzed directory is the root.
+fn clippy_workspace(script: &str, workspace_root: bool) -> String {
+    let tokens = shell_tokens(script);
+    let mut edits = Vec::new();
+    let mut command = Vec::new();
+    for token in &tokens {
+        if token.separator {
+            edit_clippy_command(&command, workspace_root, &mut edits);
+            command.clear();
+        } else {
+            command.push(token);
+        }
+    }
+    edit_clippy_command(&command, workspace_root, &mut edits);
+    edits.sort_by_key(|(start, _, _)| std::cmp::Reverse(*start));
+    let mut rewritten = script.to_string();
+    for (start, end, replacement) in edits {
+        rewritten.replace_range(start..end, &replacement);
+    }
+    rewritten
+}
+
+struct ShellToken {
+    value: String,
+    end: usize,
+    separator: bool,
+}
+
+impl ShellToken {
+    fn separator() -> Self {
+        Self {
+            value: String::new(),
+            end: 0,
+            separator: true,
+        }
+    }
+}
+
+fn shell_tokens(script: &str) -> Vec<ShellToken> {
+    let mut tokens = Vec::new();
+    let mut cursor = 0;
+    while cursor < script.len() {
+        let ch = script[cursor..].chars().next().unwrap();
+        if ch.is_whitespace() {
+            if ch == '\n' || ch == '\r' {
+                tokens.push(ShellToken::separator());
+            }
+            cursor += ch.len_utf8();
+            continue;
+        }
+        if ch == '#' {
+            while cursor < script.len() && !script[cursor..].starts_with('\n') {
+                cursor += script[cursor..].chars().next().unwrap().len_utf8();
+            }
+            continue;
+        }
+        if matches!(ch, ';' | '|' | '&' | '(' | ')' | '{' | '}') {
+            let next = script[cursor + ch.len_utf8()..].chars().next();
+            cursor += ch.len_utf8();
+            if matches!((ch, next), ('&', Some('&')) | ('|', Some('|'))) {
+                cursor += 1;
+            }
+            tokens.push(ShellToken::separator());
+            continue;
+        }
+
+        let mut value = String::new();
+        let mut quote = None;
+        while cursor < script.len() {
+            let ch = script[cursor..].chars().next().unwrap();
+            if let Some(active_quote) = quote {
+                if ch == active_quote {
+                    quote = None;
+                    cursor += ch.len_utf8();
+                } else if ch == '\\' && active_quote == '"' {
+                    cursor += ch.len_utf8();
+                    if cursor < script.len() {
+                        let escaped = script[cursor..].chars().next().unwrap();
+                        value.push(escaped);
+                        cursor += escaped.len_utf8();
+                    }
+                } else {
+                    value.push(ch);
+                    cursor += ch.len_utf8();
+                }
+                continue;
+            }
+            if ch.is_whitespace() || matches!(ch, ';' | '|' | '&' | '(' | ')' | '{' | '}') {
+                break;
+            }
+            if ch == '\'' || ch == '"' {
+                quote = Some(ch);
+                cursor += ch.len_utf8();
+            } else if ch == '\\' {
+                cursor += ch.len_utf8();
+                if cursor < script.len() {
+                    let escaped = script[cursor..].chars().next().unwrap();
+                    if escaped != '\n' {
+                        value.push(escaped);
+                    }
+                    cursor += escaped.len_utf8();
+                }
+            } else {
+                value.push(ch);
+                cursor += ch.len_utf8();
+            }
+        }
+        tokens.push(ShellToken {
+            value,
+            end: cursor,
+            separator: false,
+        });
+    }
+    tokens
+}
+
+fn edit_clippy_command(
+    command: &[&ShellToken],
+    workspace_root: bool,
+    edits: &mut Vec<(usize, usize, String)>,
+) {
+    let mut index = 0;
+    while command.get(index).is_some_and(|token| {
+        matches!(
+            token.value.as_str(),
+            "if" | "then" | "elif" | "else" | "while" | "until" | "do" | "!"
+        )
+    }) {
+        index += 1;
+    }
+    while command
+        .get(index)
+        .is_some_and(|token| is_env_assignment(&token.value))
+    {
+        index += 1;
+    }
+    if command.get(index).is_some_and(|token| token.value == "env") {
+        index += 1;
+        while command
+            .get(index)
+            .is_some_and(|token| is_env_assignment(&token.value))
+        {
+            index += 1;
+        }
+    }
+    if !command
+        .get(index)
+        .is_some_and(|token| token.value == "cargo")
+    {
+        return;
+    }
+    index += 1;
+    if command
+        .get(index)
+        .is_some_and(|token| token.value.starts_with('+'))
+    {
+        index += 1;
+    }
+    let Some(clippy) = command.get(index).filter(|token| token.value == "clippy") else {
+        return;
+    };
+    let args = &command[index + 1..];
+    let before_rustc_args = args
+        .iter()
+        .position(|token| token.value == "--")
+        .unwrap_or(args.len());
+    let workspace_args = &args[..before_rustc_args];
+    if workspace_root {
+        if !workspace_args
+            .iter()
+            .any(|token| token.value == "--workspace")
+        {
+            edits.push((clippy.end, clippy.end, " --workspace".into()));
+        }
+    } else {
+        for (offset, token) in workspace_args.iter().enumerate() {
+            if token.value == "--workspace" {
+                let previous_end = if offset == 0 {
+                    clippy.end
+                } else {
+                    workspace_args[offset - 1].end
+                };
+                edits.push((previous_end, token.end, String::new()));
+            }
+        }
+    }
+}
+
+fn is_env_assignment(value: &str) -> bool {
+    value.split_once('=').is_some_and(|(name, _)| {
+        let mut chars = name.chars();
+        chars
+            .next()
+            .is_some_and(|ch| ch == '_' || ch.is_ascii_alphabetic())
+            && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+    })
+}
+
 fn run_lint_engine(
     root: &Path,
     lint: &str,
+    workspace_root: bool,
     types_pass: bool,
     deadline: Instant,
     sink: LintSink<'_>,
@@ -1395,11 +1634,12 @@ fn run_lint_engine(
         sink.skipped.push("lint".into());
         return false;
     }
-    let script = lint.trim();
+    let script = clippy_workspace(lint.trim(), workspace_root);
     if script.is_empty() {
         sink.skipped.push("lint".into());
         return false;
     }
+    let script = script.as_str();
     let started = Instant::now();
     match run_shell(root, script, deadline) {
         Ok(captured) => {
@@ -1488,39 +1728,39 @@ fn run_check(
     root: &Path,
     manifest: &Path,
     deadline: Instant,
+    workspace_root: bool,
 ) -> Result<crate::command::Captured, CommandError> {
     let manifest = manifest.to_string_lossy().to_string();
-    run_cargo(
-        root,
-        &[
-            "check",
-            "--manifest-path",
-            &manifest,
-            "--message-format=json",
-            "--color",
-            "never",
-        ],
-        deadline,
-    )
+    let mut args = vec!["check"];
+    add_workspace_arg(&mut args, workspace_root);
+    args.extend([
+        "--manifest-path",
+        &manifest,
+        "--message-format=json",
+        "--color",
+        "never",
+    ]);
+    run_cargo(root, &args, deadline)
 }
 
 fn run_tests(
     root: &Path,
     manifest: &Path,
     deadline: Instant,
+    workspace_root: bool,
 ) -> Result<crate::command::Captured, CommandError> {
     let manifest = manifest.to_string_lossy().to_string();
-    run_cargo(
-        root,
-        &["test", "--manifest-path", &manifest, "--color", "never"],
-        deadline,
-    )
+    let mut args = vec!["test"];
+    add_workspace_arg(&mut args, workspace_root);
+    args.extend(["--manifest-path", &manifest, "--color", "never"]);
+    run_cargo(root, &args, deadline)
 }
 
 fn run_coverage(
     root: &Path,
     manifest: &Path,
     deadline: Instant,
+    workspace_root: bool,
     runs: &mut Vec<RunRecord>,
 ) -> Result<crate::coverage::CoverageData, String> {
     let out_path = root.join("target").join("sc-coverage.json");
@@ -1531,23 +1771,21 @@ fn run_coverage(
     let out_s = out_path.to_string_lossy().to_string();
     let started = Instant::now();
     let budget = deadline.saturating_duration_since(started);
-    let captured = run_cargo(
-        root,
-        &[
-            "llvm-cov",
-            "--json",
-            "--output-path",
-            &out_s,
-            "--manifest-path",
-            &manifest_s,
-        ],
-        deadline,
-    );
+    let mut args = vec!["llvm-cov"];
+    add_workspace_arg(&mut args, workspace_root);
+    args.extend([
+        "--json",
+        "--output-path",
+        &out_s,
+        "--manifest-path",
+        &manifest_s,
+    ]);
+    let captured = run_cargo(root, &args, deadline);
     match &captured {
         Ok(captured) => note_run_with_budget(
             runs,
             "coverage",
-            "cargo llvm-cov --json",
+            &cargo_gate_command("llvm-cov", workspace_root, "--json"),
             captured.status.code(),
             captured.elapsed,
             budget,
@@ -1555,7 +1793,7 @@ fn run_coverage(
         Err(_) => note_run_with_budget(
             runs,
             "coverage",
-            "cargo llvm-cov --json",
+            &cargo_gate_command("llvm-cov", workspace_root, "--json"),
             None,
             started.elapsed(),
             budget,
@@ -2530,6 +2768,273 @@ mod tests {
     }
 
     #[test]
+    fn clippy_workspace_flag_tracks_shell_commands_and_scope() {
+        assert_eq!(
+            clippy_workspace("cargo clippy", true),
+            "cargo clippy --workspace"
+        );
+        assert_eq!(
+            clippy_workspace("cargo clippy -- -D warnings", true),
+            "cargo clippy --workspace -- -D warnings"
+        );
+        assert_eq!(
+            clippy_workspace("cargo clippy --workspace", true),
+            "cargo clippy --workspace"
+        );
+        assert_eq!(
+            clippy_workspace("cargo fmt --check && cargo clippy -- -D warnings", true),
+            "cargo fmt --check && cargo clippy --workspace -- -D warnings"
+        );
+        assert_eq!(
+            clippy_workspace("cargo +stable clippy -- -D warnings", true),
+            "cargo +stable clippy --workspace -- -D warnings"
+        );
+        assert_eq!(
+            clippy_workspace("ENV=x cargo clippy -- -D warnings", true),
+            "ENV=x cargo clippy --workspace -- -D warnings"
+        );
+        assert_eq!(
+            clippy_workspace("if test -n \"$X\"; then cargo clippy; fi", true),
+            "if test -n \"$X\"; then cargo clippy --workspace; fi"
+        );
+        assert_eq!(
+            clippy_workspace("if cargo clippy --workspace; then echo ok; fi", false),
+            "if cargo clippy; then echo ok; fi"
+        );
+        assert_eq!(
+            clippy_workspace("{ cargo clippy; }", true),
+            "{ cargo clippy --workspace; }"
+        );
+        assert_eq!(
+            clippy_workspace("{ cargo clippy --workspace; }", false),
+            "{ cargo clippy; }"
+        );
+        assert_eq!(
+            clippy_workspace("cargo clippy --workspace -- -D warnings", false),
+            "cargo clippy -- -D warnings"
+        );
+        assert_eq!(
+            clippy_workspace("cargo clippy --workspace", false),
+            "cargo clippy"
+        );
+        assert_eq!(clippy_workspace("cargo clippy", false), "cargo clippy");
+        assert_eq!(clippy_workspace("npm test", true), "npm test");
+    }
+
+    #[test]
+    fn workspace_root_checks_every_member_but_member_analysis_stays_in_scope() {
+        let root = std::env::temp_dir().join(format!("sc-ws-broken-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("crates/app/src")).unwrap();
+        std::fs::create_dir_all(root.join("crates/broken/src")).unwrap();
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"crates/app\", \"crates/broken\"]\nresolver = \"2\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("crates/app/Cargo.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("crates/app/src/lib.rs"),
+            "pub fn ok() -> i32 { 1 }\n#[test]\nfn passes() { assert_eq!(ok(), 1); }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("crates/broken/Cargo.toml"),
+            "[package]\nname = \"broken\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("crates/broken/src/lib.rs"), "pub fn bad( {\n").unwrap();
+        let mut config = Config::default();
+        config.engines.coverage = false;
+        config.commands.lint.clear();
+        let output = analyze(AnalyzeRequest {
+            root: root.clone(),
+            repo: "ws".into(),
+            fail_on: vec!["types".into(), "tests".into()],
+            budget: Duration::from_secs(120),
+            config,
+            diff_base: None,
+            diff_head: None,
+            path_list: Vec::new(),
+            spec_path: None,
+            mutation_override: Some("off".into()),
+            llm_override: Some(false),
+            intent: None,
+        });
+        let types = output
+            .scorecard
+            .gates
+            .iter()
+            .find(|gate| gate.id == "types")
+            .unwrap();
+        assert!(!types.pass, "{:?}", output.scorecard.findings);
+        assert!(types.enforced);
+        assert!(output.scorecard.runs.iter().any(|run| {
+            run.command.contains("cargo check") && run.command.contains("--workspace")
+        }));
+
+        let analyze_command_lint = |root: PathBuf| {
+            let mut config = Config::default();
+            config.commands.lint = "cargo clippy --workspace --all-targets".into();
+            analyze_unsupported(
+                AnalyzeRequest {
+                    root,
+                    repo: "command-pack".into(),
+                    fail_on: vec!["lint".into()],
+                    budget: Duration::from_secs(120),
+                    config,
+                    diff_base: None,
+                    diff_head: None,
+                    path_list: Vec::new(),
+                    spec_path: None,
+                    mutation_override: Some("off".into()),
+                    llm_override: Some(false),
+                    intent: None,
+                },
+                crate::pack::PackId::Command,
+                GitInfo {
+                    head: None,
+                    dirty: true,
+                },
+            )
+        };
+        let command_root = analyze_command_lint(root.clone());
+        assert!(command_root
+            .scorecard
+            .runs
+            .iter()
+            .any(|run| { run.engine == "lint" && run.command.contains("--workspace") }));
+        assert!(
+            !command_root
+                .scorecard
+                .gates
+                .iter()
+                .find(|gate| gate.id == "lint")
+                .unwrap()
+                .pass
+        );
+
+        let _ = std::fs::remove_dir_all(root.join("target"));
+
+        let member = root.join("crates/app");
+        let command_member = analyze_command_lint(member.clone());
+        assert!(command_member
+            .scorecard
+            .runs
+            .iter()
+            .any(|run| { run.engine == "lint" && run.command == "cargo clippy --all-targets" }));
+        assert!(
+            command_member
+                .scorecard
+                .gates
+                .iter()
+                .find(|gate| gate.id == "lint")
+                .unwrap()
+                .pass
+        );
+
+        let mut config = Config::default();
+        config.engines.coverage = false;
+        config.commands.lint.clear();
+        let output = analyze(AnalyzeRequest {
+            root: member.clone(),
+            repo: "member".into(),
+            fail_on: vec!["types".into(), "tests".into()],
+            budget: Duration::from_secs(120),
+            config,
+            diff_base: None,
+            diff_head: None,
+            path_list: Vec::new(),
+            spec_path: None,
+            mutation_override: Some("off".into()),
+            llm_override: Some(false),
+            intent: None,
+        });
+        let types = output
+            .scorecard
+            .gates
+            .iter()
+            .find(|gate| gate.id == "types")
+            .unwrap();
+        assert!(types.pass, "{:?}", output.scorecard.findings);
+        let tests = output
+            .scorecard
+            .gates
+            .iter()
+            .find(|gate| gate.id == "tests")
+            .unwrap();
+        assert!(tests.pass, "{:?}", output.scorecard.findings);
+        assert!(output.scorecard.runs.iter().any(|run| {
+            run.engine == "compile"
+                && run.command == "cargo check --message-format=json"
+                && run.exit_code == Some(0)
+        }));
+        assert!(output.scorecard.runs.iter().any(|run| {
+            run.engine == "tests" && run.command == "cargo test" && run.exit_code == Some(0)
+        }));
+        assert_eq!(output.scorecard.scope.paths, vec!["src/lib.rs"]);
+        assert!(!output
+            .scorecard
+            .runs
+            .iter()
+            .any(|run| { run.command.contains("--workspace") }));
+        let _ = std::fs::remove_dir_all(&root);
+
+        let lone = std::env::temp_dir().join(format!("sc-lone-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&lone);
+        std::fs::create_dir_all(lone.join("src")).unwrap();
+        std::fs::write(
+            lone.join("Cargo.toml"),
+            "[package]\nname = \"lone\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            lone.join("src/lib.rs"),
+            "pub fn ok() -> i32 { 1 }\n#[test]\nfn passes() { assert_eq!(ok(), 1); }\n",
+        )
+        .unwrap();
+        let mut config = Config::default();
+        config.engines.coverage = false;
+        config.commands.lint.clear();
+        let output = analyze(AnalyzeRequest {
+            root: lone.clone(),
+            repo: "lone".into(),
+            fail_on: vec!["types".into(), "tests".into()],
+            budget: Duration::from_secs(120),
+            config,
+            diff_base: None,
+            diff_head: None,
+            path_list: Vec::new(),
+            spec_path: None,
+            mutation_override: Some("off".into()),
+            llm_override: Some(false),
+            intent: None,
+        });
+        let types = output
+            .scorecard
+            .gates
+            .iter()
+            .find(|gate| gate.id == "types")
+            .unwrap();
+        assert!(types.pass, "{:?}", output.scorecard.findings);
+        let tests = output
+            .scorecard
+            .gates
+            .iter()
+            .find(|gate| gate.id == "tests")
+            .unwrap();
+        assert!(tests.pass, "{:?}", output.scorecard.findings);
+        assert!(output.scorecard.runs.iter().any(|run| {
+            run.command.contains("cargo check") && run.command.contains("--workspace")
+        }));
+        let _ = std::fs::remove_dir_all(&lone);
+    }
+
+    #[test]
     fn missing_manifest_is_an_analyzer_error() {
         let dir = std::env::temp_dir().join(format!("sc-empty-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -2706,6 +3211,7 @@ mod tests {
             loc_changed: 0,
             files_changed: 0,
             base: None,
+            workspace_root: true,
         };
         let mut ran = Vec::new();
         let mut skipped = Vec::new();
@@ -2758,6 +3264,7 @@ mod tests {
             loc_changed: 0,
             files_changed: 0,
             base: None,
+            workspace_root: true,
         };
         let mut findings = Vec::new();
         let count = import_findings(

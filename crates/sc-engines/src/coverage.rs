@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-//! Function line coverage from `cargo llvm-cov --json`.
+//! Function line coverage from `cargo llvm-cov --workspace --json`.
 //!
 //! Names are demangled and crate disambiguator hashes are stripped, then matched
 //! to syn symbols. A miss means coverage was not measured for that function.

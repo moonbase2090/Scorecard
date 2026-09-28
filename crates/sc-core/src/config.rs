@@ -168,7 +168,7 @@ impl Default for HtmlConfig {
 impl Default for CommandsConfig {
     fn default() -> Self {
         Self {
-            lint: "cargo clippy".into(),
+            lint: "cargo clippy --workspace".into(),
         }
     }
 }
@@ -256,7 +256,7 @@ mod tests {
         assert_eq!(config.gates.new_fn_untested_cc, 15);
         assert!(!config.llm.enabled);
         assert_eq!(config.mutation.mode, "off");
-        assert_eq!(config.commands.lint, "cargo clippy");
+        assert_eq!(config.commands.lint, "cargo clippy --workspace");
         assert!(!config.commands.lint.contains("-D warnings"));
     }
 
