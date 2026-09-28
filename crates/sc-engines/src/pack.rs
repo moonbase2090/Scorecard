@@ -278,7 +278,12 @@ pub fn detect(root: &Path, override_pack: &str) -> Result<Detected, String> {
         && !found.iter().any(|id| {
             matches!(
                 id,
-                PackId::Rust | PackId::Go | PackId::Java | PackId::CSharp | PackId::Php | PackId::Node
+                PackId::Rust
+                    | PackId::Go
+                    | PackId::Java
+                    | PackId::CSharp
+                    | PackId::Php
+                    | PackId::Node
             )
         })
     {
@@ -521,6 +526,26 @@ mod tests {
         }
         assert_eq!(detect(&many, "").unwrap(), Detected::Pack(PackId::Python));
 
+        // The reported tree: two Python files, three headers, a Makefile.
+        let reported = temp("headers-reported");
+        fs::write(reported.join("Makefile"), "all:\n").unwrap();
+        fs::write(reported.join("pyproject.toml"), "[project]\nname = \"d\"\n").unwrap();
+        fs::write(reported.join("app.py"), "def value():\n    return 1\n").unwrap();
+        fs::create_dir_all(reported.join("tests")).unwrap();
+        fs::write(
+            reported.join("tests/test_app.py"),
+            "def test_value():\n    assert True\n",
+        )
+        .unwrap();
+        fs::create_dir_all(reported.join("include")).unwrap();
+        for name in ["h1.h", "h2.h", "h3.h"] {
+            fs::write(reported.join("include").join(name), "int marker;\n").unwrap();
+        }
+        assert_eq!(
+            detect(&reported, "").unwrap(),
+            Detected::Pack(PackId::Python)
+        );
+
         let tie = temp("headers-tie");
         fs::write(tie.join("Makefile"), "all:\n").unwrap();
         fs::write(tie.join("pyproject.toml"), "[project]\nname = \"d\"\n").unwrap();
@@ -534,6 +559,7 @@ mod tests {
             other => panic!("expected ambiguous, got {other:?}"),
         }
         let _ = fs::remove_dir_all(&many);
+        let _ = fs::remove_dir_all(&reported);
         let _ = fs::remove_dir_all(&tie);
     }
 
