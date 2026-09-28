@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - The Scorecard action builds from source when the latest-release lookup fails, instead of stopping the job.
 - An `a11y` engine with its own gate and score. It checks HTML in the web pack and JSX or TSX in the node pack against WCAG 2.2 criteria. It is advisory unless `--fail-on` names `a11y` or config enforces it. Rules can be disabled by id. See `docs/a11y.md`.
+- `[llm] backend = "cursor"` runs `cursor-agent` in read-only ask mode. It is opt-in. The default remains local Ollama, which does not contact Cursor. The cursor backend sends the spec and the files the agent reads to Cursor.
 
 ### Fixed
 

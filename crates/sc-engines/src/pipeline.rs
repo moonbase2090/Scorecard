@@ -1913,14 +1913,22 @@ fn llm_engine(
         ));
         return;
     };
-    let outcome = sc_llm::review(sc_llm::LlmRequest {
+    let llm_request = sc_llm::LlmRequest {
         endpoint: &request.config.llm.endpoint,
         model: &request.config.llm.model,
         api_key: None,
         spec: &spec_text,
         root: &request.root,
         intent: request.intent.as_deref(),
-    });
+    };
+    let outcome = match request.config.llm.backend.trim() {
+        "" | "ollama" => sc_llm::review(llm_request),
+        "cursor" => sc_llm::review_cursor(llm_request),
+        other => sc_llm::LlmOutcome {
+            gaps: Vec::new(),
+            skipped: Some(format!("unknown llm backend {other}")),
+        },
+    };
     if let Some(reason) = outcome.skipped {
         skipped.push("llm".into());
         findings.push(unavailable("llm", &reason));

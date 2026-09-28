@@ -73,6 +73,126 @@ pub fn review(request: LlmRequest<'_>) -> LlmOutcome {
     review_with(request, post_chat)
 }
 
+/// Opt-in Cursor backend. `cursor-agent` runs in ask mode, which is read-only:
+/// the command does not pass `--force` or `--yolo`. The spec and any file the
+/// agent reads are sent to Cursor.
+pub fn review_cursor(request: LlmRequest<'_>) -> LlmOutcome {
+    review_cursor_with(request, run_cursor_agent)
+}
+
+pub fn cursor_agent_args(root: &Path, model: &str) -> Vec<String> {
+    vec![
+        "--print".into(),
+        "--mode".into(),
+        "ask".into(),
+        "--output-format".into(),
+        "json".into(),
+        "--trust".into(),
+        "--workspace".into(),
+        root.display().to_string(),
+        "--model".into(),
+        model.into(),
+    ]
+}
+
+fn review_cursor_with(
+    request: LlmRequest<'_>,
+    run: impl Fn(&Path, &[String], &str) -> Result<String, String>,
+) -> LlmOutcome {
+    let model = request.model.trim();
+    if model.is_empty() {
+        return LlmOutcome {
+            gaps: Vec::new(),
+            skipped: Some("cursor backend needs [llm] model set to a cursor-agent model".into()),
+        };
+    }
+    let prompt = cursor_prompt(request.spec, request.intent);
+    let args = cursor_agent_args(request.root, model);
+    let output = match run(request.root, &args, &prompt) {
+        Ok(output) => output,
+        Err(err) => {
+            return LlmOutcome {
+                gaps: Vec::new(),
+                skipped: Some(err),
+            };
+        }
+    };
+    match gaps_from_cursor_output(&output) {
+        Some(gaps) => LlmOutcome {
+            gaps,
+            skipped: None,
+        },
+        None => LlmOutcome {
+            gaps: Vec::new(),
+            skipped: Some("cursor-agent response was not spec-gap json".into()),
+        },
+    }
+}
+
+fn cursor_prompt(spec: &str, intent: Option<&str>) -> String {
+    let spec: String = spec.chars().take(MAX_SPEC_CHARS).collect();
+    let intent = intent.unwrap_or("").trim();
+    let goal = if intent.is_empty() {
+        String::new()
+    } else {
+        format!("Intent:\n{intent}\n\n")
+    };
+    format!(
+        "{goal}Spec:\n{spec}\n\n\
+Compare the spec with this repository. Read the files before you claim anything is missing. \
+Do not edit files. Do not run commands that change the tree. \
+Return JSON only: {{\"gaps\":[{{\"item\":\"...\",\"detail\":\"...\"}}]}}. \
+List spec items the code does not satisfy. If nothing is missing, return {{\"gaps\":[]}}."
+    )
+}
+
+pub fn gaps_from_cursor_output(text: &str) -> Option<Vec<LlmGap>> {
+    let trimmed = text.trim();
+    if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+        return gaps_from_cursor_value(&value);
+    }
+    let mut last = None;
+    for line in trimmed.lines() {
+        if let Ok(value) = serde_json::from_str::<Value>(line) {
+            if value.get("gaps").is_some()
+                || value.get("result").is_some()
+                || value.get("type").and_then(Value::as_str) == Some("result")
+            {
+                last = Some(value);
+            }
+        }
+    }
+    last.and_then(|value| gaps_from_cursor_value(&value))
+}
+
+fn gaps_from_cursor_value(value: &Value) -> Option<Vec<LlmGap>> {
+    if value.get("gaps").is_some() {
+        return parse_gaps(&value.to_string());
+    }
+    let result = value.get("result")?;
+    if let Some(text) = result.as_str() {
+        return parse_gaps(text);
+    }
+    gaps_from_cursor_value(result)
+}
+
+fn run_cursor_agent(root: &Path, args: &[String], prompt: &str) -> Result<String, String> {
+    let mut command = std::process::Command::new("cursor-agent");
+    command.args(args).arg(prompt).current_dir(root);
+    let output = command
+        .output()
+        .map_err(|err| format!("cursor-agent is not available: {err}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "cursor-agent exited {}: {}",
+            output.status,
+            stderr.trim()
+        ));
+    }
+    String::from_utf8(output.stdout).map_err(|err| err.to_string())
+}
+
 fn review_with(
     request: LlmRequest<'_>,
     post: impl Fn(&str, Option<&str>, &Value) -> Result<Value, String>,
@@ -329,6 +449,24 @@ fn spec_section(spec: &str, heading: &str) -> String {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[test]
+    fn cursor_args_are_read_only_ask_mode() {
+        let args = cursor_agent_args(Path::new("/repo"), "gpt-5.3-codex-high");
+        assert!(args.windows(2).any(|pair| pair == ["--mode", "ask"]));
+        assert!(args.iter().any(|arg| arg == "--print"));
+        assert!(!args.iter().any(|arg| arg == "--force" || arg == "--yolo"));
+        assert!(args.windows(2).any(|pair| pair == ["--workspace", "/repo"]));
+    }
+
+    #[test]
+    fn cursor_output_reads_gaps_from_a_result_string() {
+        let text = "{\"type\":\"result\",\"result\":\"{\\\"gaps\\\":[{\\\"item\\\":\\\"background images\\\",\\\"detail\\\":\\\"not implemented\\\"}]}\"}";
+        let gaps = gaps_from_cursor_output(text).unwrap();
+        assert_eq!(gaps[0].item, "background images");
+        let lines = "{\"type\":\"result\",\"result\":\"{\\\"gaps\\\":[]}\"}\n";
+        assert!(gaps_from_cursor_output(lines).unwrap().is_empty());
+    }
 
     #[test]
     fn parses_gap_json_and_ignores_score_prose() {

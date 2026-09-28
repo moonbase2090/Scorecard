@@ -25,6 +25,8 @@ budget_seconds = 180
 
 [llm]
 enabled = false
+# ollama (default, local) or cursor. cursor sends the spec and files the agent reads to Cursor.
+backend = "ollama"
 endpoint = "http://127.0.0.1:11434/v1"
 model = "qwen2.5-coder"
 
