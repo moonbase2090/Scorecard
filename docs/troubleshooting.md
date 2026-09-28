@@ -26,7 +26,7 @@ The `crap` gate shows `advisory` with `coverage was not measured`, and COV shows
 | C++ | `lcov` |
 | PHP | PHPUnit with `pcov` |
 
-Until coverage runs, CRAP scores are an upper bound and CRAP failures do not fail the run.
+Until coverage runs, no CRAP scores are reported and nothing is treated as 0% coverage; the `crap` gate stays advisory.
 
 ## `types: compiler errors` with a rustup message
 

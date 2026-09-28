@@ -275,7 +275,7 @@ mod tests {
         };
         let md = to_markdown(&card);
         assert!(md.contains(
-            "Coverage was not measured, so CRAP assumes 0% coverage. These numbers are an upper bound."
+            "Coverage was not measured, so no CRAP scores are reported and nothing is treated as 0% coverage."
         ));
         assert!(md.contains("| 132 | 11 | not measured | classify | src/lib.rs |"));
         card.engines_run.push("coverage".into());

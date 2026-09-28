@@ -179,7 +179,7 @@ fn push_crap(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize
     }
     let measured = crate::report::coverage_measured(card);
     if !measured {
-        let note = "  coverage not measured: CRAP assumes 0% coverage (upper bound)";
+        let note = "  coverage not measured: no CRAP scores, nothing treated as 0%";
         out.push_str(&paint(opts.color, dim(), &fit(note, width, opts.color)));
         out.push('\n');
     }
@@ -640,7 +640,7 @@ mod tests {
             exit_code: 0,
         };
         let text = to_pretty(&card, &opts);
-        assert!(text.contains("coverage not measured: CRAP assumes 0% coverage (upper bound)"));
+        assert!(text.contains("coverage not measured: no CRAP scores, nothing treated as 0%"));
         assert!(text.contains("   132   11    --  classify"));
         card.engines_run.push("coverage".into());
         let text = to_pretty(&card, &opts);

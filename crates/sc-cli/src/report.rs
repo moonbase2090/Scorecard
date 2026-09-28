@@ -500,14 +500,14 @@ fn gates(out: &mut String, card: &Scorecard) {
 
 /// Coverage counts as measured only when the coverage engine ran. Incomplete
 /// coverage still leaves measured rows scored; only a missing coverage run
-/// means every CRAP number assumes 0%.
+/// means no CRAP numbers are reported at all.
 pub(crate) fn coverage_measured(card: &Scorecard) -> bool {
     card.engines_run.iter().any(|engine| engine == "coverage")
 }
 
 /// One sentence for every renderer when coverage was not measured.
 pub(crate) const COVERAGE_NOT_MEASURED: &str =
-    "Coverage was not measured, so CRAP assumes 0% coverage. These numbers are an upper bound.";
+    "Coverage was not measured, so no CRAP scores are reported and nothing is treated as 0% coverage.";
 
 /// One line for a `--diff` report: how many paths were scored, and how many
 /// other source paths remain in the tree. `None` when not a diff run or when
@@ -1250,7 +1250,7 @@ mod tests {
         let html = to_html(&c);
         assert!(html.contains("<b>—</b><span>coverage not measured</span>"));
         assert!(html.contains("<span class=\"cov\">not measured</span>"));
-        assert!(html.contains("CRAP assumes 0% coverage"));
+        assert!(html.contains("nothing is treated as 0% coverage"));
         assert!(!html.contains("<span>coverage</span>"));
         assert!(html.contains("<span>crap max</span>"));
         assert!(html.contains("<span>over threshold</span>"));
