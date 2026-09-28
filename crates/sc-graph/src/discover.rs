@@ -110,20 +110,15 @@ fn glob_hit(pattern: &str, path: &str) -> bool {
         return false;
     }
     if let Some(body) = pattern.strip_suffix("/**") {
-        let anywhere = body.starts_with("**/");
         let body = body.trim_start_matches("**/").trim_matches('/');
         if body.is_empty() {
             return true;
         }
         let parts: Vec<&str> = body.split('/').filter(|s| !s.is_empty()).collect();
         let comps: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-        if anywhere {
-            return comps
-                .windows(parts.len())
-                .any(|window| window == parts.as_slice());
-        }
-        // `target/**` is the root directory, not `src/target`.
-        return comps.len() >= parts.len() && comps[..parts.len()] == *parts.as_slice();
+        return comps
+            .windows(parts.len())
+            .any(|window| window == parts.as_slice());
     }
     path == pattern || path.starts_with(&format!("{pattern}/"))
 }
@@ -138,7 +133,7 @@ mod tests {
         assert!(is_excluded("target/debug/lib.rs", &patterns));
         assert!(is_excluded("generated/foo.rs", &patterns));
         assert!(!is_excluded("src/lib.rs", &patterns));
-        assert!(!is_excluded("src/target/keys.py", &patterns));
-        assert!(is_excluded("src/target/keys.py", &["**/target/**".into()]));
+        assert!(is_excluded("src/target/lib.rs", &patterns));
+        assert!(is_excluded("src/generated/proto.rs", &patterns));
     }
 }
