@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
@@ -115,8 +115,19 @@ fn strip_parent_llvm_cov(cmd: &mut Command) {
 }
 
 pub fn run_cmd(cmd: &mut Command, timeout: Duration) -> Result<Captured, CommandError> {
+    run_cmd_input(cmd, timeout, None)
+}
+
+pub fn run_cmd_input(
+    cmd: &mut Command,
+    timeout: Duration,
+    input: Option<&[u8]>,
+) -> Result<Captured, CommandError> {
     if timeout.is_zero() {
         return Err(CommandError::Timeout);
+    }
+    if input.is_some() {
+        cmd.stdin(Stdio::piped());
     }
     #[cfg(unix)]
     {
@@ -147,6 +158,11 @@ pub fn run_cmd(cmd: &mut Command, timeout: Duration) -> Result<Captured, Command
         let _ = stderr.read_to_string(&mut buf);
         buf
     });
+    if let Some(input) = input {
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(input);
+        }
+    }
 
     let start = Instant::now();
     let status = loop {
