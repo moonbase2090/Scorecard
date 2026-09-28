@@ -165,6 +165,11 @@ pub enum Detected {
     Ambiguous(Vec<PackId>),
 }
 
+/// Files larger than this are not read. The gate says the scan was partial.
+const MAX_SECRET_BYTES: u64 = 1024 * 1024;
+/// A NUL in this prefix means the file is binary and is not a text secret.
+const BINARY_PROBE: usize = 8192;
+
 pub fn text_secrets(root: &Path, exclude: &[String]) -> Vec<sc_core::Finding> {
     let mut files = Vec::new();
     let mut seen_dirs = std::collections::HashSet::new();
@@ -178,12 +183,24 @@ pub fn text_secrets(root: &Path, exclude: &[String]) -> Vec<sc_core::Finding> {
         &mut seen_files,
     );
     let mut findings = Vec::new();
+    let mut oversized = Vec::new();
     for path in files {
         let rel = path
             .strip_prefix(root)
             .unwrap_or(&path)
             .to_string_lossy()
             .replace('\\', "/");
+        match path.metadata() {
+            Ok(meta) if meta.len() > MAX_SECRET_BYTES => {
+                oversized.push(rel);
+                continue;
+            }
+            Ok(_) => {}
+            Err(err) => {
+                findings.push(unreadable(&rel, &err));
+                continue;
+            }
+        }
         // `read_to_string` skips the whole file on one non-UTF-8 byte, which
         // hides every secret in it. Scan the bytes we can read.
         let bytes = match std::fs::read(&path) {
@@ -193,8 +210,14 @@ pub fn text_secrets(root: &Path, exclude: &[String]) -> Vec<sc_core::Finding> {
                 continue;
             }
         };
+        if bytes.iter().take(BINARY_PROBE).any(|byte| *byte == 0) {
+            continue;
+        }
         let text = String::from_utf8_lossy(&bytes);
         findings.extend(crate::secrets::secrets_in_text(&text, &rel));
+    }
+    if !oversized.is_empty() {
+        findings.push(partial_scan(&oversized));
     }
     findings
 }
@@ -214,6 +237,36 @@ fn unreadable(rel: &str, err: &std::io::Error) -> sc_core::Finding {
         evidence: serde_json::json!({ "error": err.to_string() }),
         suggested_action: Some(
             "Restore read access, or add the path to scope.exclude in analyzer.toml".into(),
+        ),
+        disposition: String::new(),
+    }
+}
+
+fn partial_scan(paths: &[String]) -> sc_core::Finding {
+    let first = &paths[0];
+    let message = if paths.len() == 1 {
+        format!(
+            "skipped {first} because it is over 1 MiB, so the secrets scan was partial and does not pass. Exclude it with `exclude = [\"{first}\"]` under `[scope]` in analyzer.toml."
+        )
+    } else {
+        format!(
+            "skipped {} files over 1 MiB, including {first}, so the secrets scan was partial and does not pass. Exclude them with `exclude = [\"{first}\"]` under `[scope]` in analyzer.toml.",
+            paths.len()
+        )
+    };
+    sc_core::Finding {
+        id: format!("secrets:partial:{first}"),
+        rule: "secrets.partial".into(),
+        engine: "secrets".into(),
+        severity: "error".into(),
+        file: first.clone(),
+        span: None,
+        symbol: None,
+        message,
+        evidence: serde_json::json!({ "files": paths, "limit_bytes": MAX_SECRET_BYTES }),
+        suggested_action: Some(
+            "Exclude the large file under [scope] in analyzer.toml, or move the secret out of it"
+                .into(),
         ),
         disposition: String::new(),
     }
@@ -247,7 +300,10 @@ fn collect_text(
             continue;
         }
         if path.is_dir() {
-            if skip_dir(name) {
+            if name == "cache" && dir.file_name().and_then(|part| part.to_str()) == Some(".yarn") {
+                continue;
+            }
+            if skip_dir(name, dir == root) {
                 continue;
             }
             let rel = path
@@ -259,7 +315,7 @@ fn collect_text(
                 continue;
             }
             collect_text(root, &path, exclude, out, seen_dirs, seen_files);
-        } else if secret_file(name) {
+        } else {
             let rel = path
                 .strip_prefix(root)
                 .unwrap_or(&path)
@@ -277,59 +333,22 @@ fn collect_text(
     }
 }
 
-fn skip_dir(name: &str) -> bool {
-    name == ".git"
-        || name == "target"
-        || name == "node_modules"
-        || name == "dist"
-        || name == ".sc"
-        || name == ".venv"
-        || name == "venv"
-        || (name.starts_with('.') && name != ".github")
-}
-
-fn secret_file(name: &str) -> bool {
-    if name == ".env" || name.starts_with(".env.") {
-        return true;
-    }
+fn skip_dir(name: &str, at_root: bool) -> bool {
     matches!(
-        std::path::Path::new(name)
-            .extension()
-            .and_then(|ext| ext.to_str()),
-        Some(
-            "rs" | "js"
-                | "jsx"
-                | "mjs"
-                | "cjs"
-                | "ts"
-                | "tsx"
-                | "py"
-                | "go"
-                | "toml"
-                | "json"
-                | "sh"
-                | "bash"
-                | "java"
-                | "cs"
-                | "php"
-                | "c"
-                | "cc"
-                | "cpp"
-                | "cxx"
-                | "h"
-                | "hh"
-                | "hpp"
-                | "hxx"
-                | "html"
-                | "htm"
-                | "css"
-                | "pem"
-                | "yml"
-                | "yaml"
-                | "md"
-                | "env",
-        )
-    )
+        name,
+        ".git"
+            | ".sc"
+            | ".venv"
+            | "venv"
+            | "node_modules"
+            | ".tox"
+            | ".mypy_cache"
+            | ".pytest_cache"
+            | ".next"
+            | ".nuxt"
+            | ".cache"
+            | ".gradle"
+    ) || (at_root && matches!(name, "target" | "dist"))
 }
 
 pub fn detect(root: &Path, override_pack: &str) -> Result<Detected, String> {
@@ -670,7 +689,7 @@ mod tests {
             "{files:?}"
         );
         assert!(
-            !files.iter().any(|file| file.contains(".hidden/")),
+            files.iter().any(|file| file.contains(".hidden/")),
             "{files:?}"
         );
         assert!(
@@ -694,6 +713,59 @@ mod tests {
             findings.iter().any(
                 |finding| finding.file == "leak.py" && finding.rule == "secrets.aws_access_key"
             ),
+            "{findings:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn common_secret_locations_are_read_and_a_large_file_is_partial() {
+        let key = format!("AKIA{}", "IOSFODNN7EXAMPLE");
+        let root = temp("secrets-places");
+        let begin = "-----BEGIN ";
+        let end = "PRIVATE KEY-----";
+        fs::write(root.join("id_rsa"), format!("{begin}OPENSSH {end}\n")).unwrap();
+        fs::create_dir_all(root.join(".circleci")).unwrap();
+        fs::write(root.join(".circleci/config.yml"), format!("aws: {key}\n")).unwrap();
+        fs::create_dir_all(root.join("src/target")).unwrap();
+        fs::write(
+            root.join("src/target/keys.py"),
+            format!("KEY = \"{key}\"\n"),
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("target")).unwrap();
+        fs::write(root.join("target/keys.py"), format!("KEY = \"{key}\"\n")).unwrap();
+        fs::write(root.join(".npmrc"), format!("token={key}\n")).unwrap();
+        fs::write(
+            root.join("big.bin"),
+            vec![b'a'; MAX_SECRET_BYTES as usize + 1],
+        )
+        .unwrap();
+        let mut hidden = format!("{key}\n").into_bytes();
+        hidden.insert(0, 0);
+        fs::write(root.join("blob.dat"), hidden).unwrap();
+        fs::create_dir_all(root.join("testdata")).unwrap();
+        fs::write(root.join("testdata/leak.py"), format!("KEY = \"{key}\"\n")).unwrap();
+
+        let findings = text_secrets(&root, &["testdata/**".into()]);
+        let files: Vec<&str> = findings
+            .iter()
+            .map(|finding| finding.file.as_str())
+            .collect();
+        assert!(files.contains(&"id_rsa"), "{files:?}");
+        assert!(files.contains(&".circleci/config.yml"), "{files:?}");
+        assert!(files.contains(&"src/target/keys.py"), "{files:?}");
+        assert!(files.contains(&".npmrc"), "{files:?}");
+        assert!(!files.contains(&"target/keys.py"), "{files:?}");
+        assert!(!files.contains(&"blob.dat"), "{files:?}");
+        assert!(
+            !files.iter().any(|file| file.contains("testdata/")),
+            "{files:?}"
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.rule == "secrets.partial" && finding.file == "big.bin"),
             "{findings:?}"
         );
         let _ = fs::remove_dir_all(&root);
