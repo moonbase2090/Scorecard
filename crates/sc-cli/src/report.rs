@@ -483,11 +483,65 @@ pub(crate) fn coverage_measured(card: &Scorecard) -> bool {
 pub(crate) const COVERAGE_NOT_MEASURED: &str =
     "Coverage was not measured, so CRAP assumes 0% coverage. These numbers are an upper bound.";
 
+/// A diff run only scores changed functions, so it has no tree-wide CRAP
+/// count. Say what the number covers and where the tree total lives
+/// rather than inventing one. `None` outside diff scope.
+pub(crate) fn diff_baseline(card: &Scorecard) -> Option<String> {
+    if card.scope.mode != "diff" {
+        return None;
+    }
+    let tree = match base_branch(card) {
+        Some(branch) => format!("the latest push run of {branch}"),
+        None => "a tree-scope run (sc analyze without --diff)".into(),
+    };
+    Some(format!(
+        "diff scope: {} over threshold in this diff. The tree-wide count is on {tree}.",
+        plural(
+            card.metrics.crap_over_threshold as usize,
+            "function",
+            "functions"
+        )
+    ))
+}
+
+/// Short terminal form of `diff_baseline`; fits 80 columns.
+pub(crate) fn diff_baseline_short(card: &Scorecard) -> Option<String> {
+    if card.scope.mode != "diff" {
+        return None;
+    }
+    let tree = match base_branch(card) {
+        Some(branch) => format!("latest {branch} push run"),
+        None => "a run without --diff".into(),
+    };
+    Some(format!(
+        "diff scope: {} over threshold here; tree count: {tree}",
+        card.metrics.crap_over_threshold
+    ))
+}
+
+/// The branch a diff was taken against (`origin/main` reads as `main`).
+/// `None` for a commit-ish base such as HEAD~1 or a SHA, which has no push
+/// run of its own to point at.
+fn base_branch(card: &Scorecard) -> Option<&str> {
+    let base = card.scope.base.as_deref()?;
+    let branch = base.strip_prefix("origin/").unwrap_or(base);
+    let commitish = branch.is_empty()
+        || branch.starts_with("HEAD")
+        || branch.contains(['~', '^'])
+        || (branch.len() >= 7 && branch.chars().all(|c| c.is_ascii_hexdigit()));
+    (!commitish).then_some(branch)
+}
+
 fn crap(out: &mut String, card: &Scorecard) {
     let measured = coverage_measured(card);
     out.push_str("<h2>worst crap · threshold ");
     out.push_str(&card.crap.threshold.to_string());
     out.push_str("</h2>\n<div class=\"card\">");
+    if let Some(line) = diff_baseline(card) {
+        out.push_str("<p style=\"color:var(--dim);margin:0 0 8px\">");
+        out.push_str(&esc(&line));
+        out.push_str("</p>");
+    }
     if !measured {
         out.push_str("<p style=\"color:var(--dim);margin:0 0 8px\">");
         out.push_str(COVERAGE_NOT_MEASURED);
@@ -1027,6 +1081,22 @@ mod tests {
         assert!(html.contains("<p>error: using chunks_exact</p><details class=\"log\"><summary>full output</summary><pre>   Compiling demo v0.1.0\nerror: using chunks_exact &lt;T&gt;</pre></details>"));
         // The CRAP card has no log, so exactly one disclosure.
         assert_eq!(html.matches("<details class=\"log\">").count(), 1);
+    }
+
+    #[test]
+    fn html_diff_scope_prints_the_diff_count_and_points_at_the_base() {
+        let mut c = card();
+        c.scope.mode = "diff".into();
+        c.scope.base = Some("origin/main".into());
+        c.metrics.crap_over_threshold = 4;
+        let html = to_html(&c);
+        assert!(html.contains("diff scope: 4 functions over threshold in this diff. The tree-wide count is on the latest push run of main."));
+        c.scope.base = Some("HEAD~1".into());
+        c.metrics.crap_over_threshold = 1;
+        let html = to_html(&c);
+        assert!(html.contains("diff scope: 1 function over threshold in this diff. The tree-wide count is on a tree-scope run (sc analyze without --diff)."));
+        c.scope.mode = "tree".into();
+        assert!(!to_html(&c).contains("diff scope:"));
     }
 
     #[test]

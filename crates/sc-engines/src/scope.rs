@@ -19,6 +19,8 @@ pub struct Selection {
     pub paths: Vec<String>,
     pub loc_changed: u64,
     pub files_changed: u64,
+    /// Resolved diff base, only in diff mode.
+    pub base: Option<String>,
 }
 
 pub fn empty_selection() -> Selection {
@@ -62,6 +64,7 @@ fn tree_like(mode: &str, files: Vec<AnalyzedFile>) -> Selection {
         paths,
         loc_changed,
         files_changed,
+        base: None,
     }
 }
 
@@ -128,6 +131,7 @@ fn select_diff(
         paths,
         loc_changed,
         files_changed,
+        base: Some(base),
     })
 }
 

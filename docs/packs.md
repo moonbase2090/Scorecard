@@ -86,7 +86,7 @@ Skipping coverage, mutation, or the LLM does not by itself exit 2.
 
 `sc analyze testdata/crap_untested` should finish in well under 30 seconds after dependencies are already fetched. These fixtures have no crates.io dependencies.
 
-In tree mode the scorecard fields `loc_changed`, `files_changed`, and `coverage_changed` describe the analyzed `src` tree, not a git diff. `hallucinated_imports` is 0. `mutation.status` is `skipped`.
+In tree mode the scorecard fields `loc_changed`, `files_changed`, and `coverage_changed` describe the analyzed `src` tree, not a git diff. `hallucinated_imports` is 0. `mutation.status` is `skipped`. In `--diff` mode `scope.base` records the resolved base ref (omitted in other modes), and `crap_over_threshold` counts only changed functions.
 
 Perf findings `perf.nested_loop` and `perf.clone_in_loop` are warnings. They do not have a gate.
 

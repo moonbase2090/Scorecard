@@ -94,6 +94,10 @@ pub fn to_markdown(card: &Scorecard) -> String {
 
     out.push_str("## Worst CRAP\n\n");
     out.push_str(&format!("Threshold {}.\n\n", card.crap.threshold));
+    if let Some(line) = crate::report::diff_baseline(card) {
+        out.push_str(&line);
+        out.push_str("\n\n");
+    }
     let measured = crate::report::coverage_measured(card);
     if !measured {
         out.push_str(crate::report::COVERAGE_NOT_MEASURED);
@@ -224,6 +228,16 @@ mod tests {
         let md = to_markdown(&card);
         assert!(md.contains("- FAILED tests/test_x.py::test_x\n\n<details><summary>full output</summary>\n\n````text\n....F\n```\nFAILED"));
         assert!(md.contains("\n````\n\n</details>"));
+    }
+
+    #[test]
+    fn markdown_diff_scope_names_the_diff_count() {
+        let mut card = Scorecard::skeleton(".", 30);
+        card.scope.mode = "diff".into();
+        card.scope.base = Some("main".into());
+        card.metrics.crap_over_threshold = 2;
+        let md = to_markdown(&card);
+        assert!(md.contains("## Worst CRAP\n\nThreshold 30.\n\ndiff scope: 2 functions over threshold in this diff. The tree-wide count is on the latest push run of main.\n"));
     }
 
     #[test]
