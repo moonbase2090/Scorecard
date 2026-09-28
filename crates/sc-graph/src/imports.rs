@@ -10,6 +10,7 @@ pub struct ImportHit {
 }
 
 pub fn imports_in_file(file: &syn::File, rel: &str) -> Vec<ImportHit> {
+    let scoped = scoped_names(file);
     let mut out = Vec::new();
     for item in &file.items {
         match item {
@@ -17,8 +18,8 @@ pub fn imports_in_file(file: &syn::File, rel: &str) -> Vec<ImportHit> {
                 let mut names = Vec::new();
                 crate_names(&use_item.tree, None, &mut names);
                 let line = use_item.use_token.span.start().line as u32;
-                for name in names {
-                    if is_builtin(&name) {
+                for (name, bare) in names {
+                    if is_builtin(&name) || (bare && scoped.contains(&name)) {
                         continue;
                     }
                     out.push(ImportHit {
@@ -47,7 +48,9 @@ pub fn imports_in_file(file: &syn::File, rel: &str) -> Vec<ImportHit> {
     out
 }
 
-fn crate_names(tree: &UseTree, prefix: Option<&str>, out: &mut Vec<String>) {
+/// Each crate a `use` tree names, and whether it was a bare `use name;` or
+/// `use name as alias;` with no path.
+fn crate_names(tree: &UseTree, prefix: Option<&str>, out: &mut Vec<(String, bool)>) {
     match tree {
         UseTree::Path(path) => {
             let ident = path.ident.to_string();
@@ -55,16 +58,17 @@ fn crate_names(tree: &UseTree, prefix: Option<&str>, out: &mut Vec<String>) {
             let prefix = next.as_deref().or(prefix);
             crate_names(&path.tree, prefix, out);
         }
-        // A bare `use Name;` or `use Name as Alias;` re-exports a name that is
-        // already in scope. Only a path or `extern crate` names a crate.
-        UseTree::Name(_) | UseTree::Rename(_) => {
-            if let Some(prefix) = prefix {
-                out.push(prefix.to_string());
-            }
-        }
+        UseTree::Name(name) => match prefix {
+            Some(prefix) => out.push((prefix.to_string(), false)),
+            None => out.push((name.ident.to_string(), true)),
+        },
+        UseTree::Rename(rename) => match prefix {
+            Some(prefix) => out.push((prefix.to_string(), false)),
+            None => out.push((rename.ident.to_string(), true)),
+        },
         UseTree::Glob(_) => {
             if let Some(prefix) = prefix {
-                out.push(prefix.to_string());
+                out.push((prefix.to_string(), false));
             }
         }
         UseTree::Group(group) => {
@@ -72,6 +76,52 @@ fn crate_names(tree: &UseTree, prefix: Option<&str>, out: &mut Vec<String>) {
                 crate_names(item, prefix, out);
             }
         }
+    }
+}
+
+/// Names already in scope in this file: the last segment (or alias) of each
+/// `use a::b::Name`, and each item defined here. A bare `use Name;` of one of
+/// these re-exports it, as in `use format::KindFormatter;` followed by
+/// `pub use KindFormatter as DefaultFormatter;`. Any other bare name is a crate.
+fn scoped_names(file: &syn::File) -> std::collections::BTreeSet<String> {
+    let mut out = std::collections::BTreeSet::new();
+    for item in &file.items {
+        let ident = match item {
+            Item::Use(use_item) => {
+                path_leaves(&use_item.tree, false, &mut out);
+                continue;
+            }
+            Item::Const(item) => &item.ident,
+            Item::Enum(item) => &item.ident,
+            Item::Fn(item) => &item.sig.ident,
+            Item::Mod(item) => &item.ident,
+            Item::Static(item) => &item.ident,
+            Item::Struct(item) => &item.ident,
+            Item::Trait(item) => &item.ident,
+            Item::Type(item) => &item.ident,
+            Item::Union(item) => &item.ident,
+            _ => continue,
+        };
+        out.insert(ident.to_string());
+    }
+    out
+}
+
+fn path_leaves(tree: &UseTree, under_path: bool, out: &mut std::collections::BTreeSet<String>) {
+    match tree {
+        UseTree::Path(path) => path_leaves(&path.tree, true, out),
+        UseTree::Name(name) if under_path => {
+            out.insert(name.ident.to_string());
+        }
+        UseTree::Rename(rename) if under_path => {
+            out.insert(rename.rename.to_string());
+        }
+        UseTree::Group(group) => {
+            for item in &group.items {
+                path_leaves(item, under_path, out);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -160,15 +210,30 @@ extern crate self as this_crate;
         let src = r#"
 use proc_macro::TokenStream;
 extern crate proc_macro;
-use format::{KindFormatter, RichFormatter};
+use format::{KindFormatter, RichFormatter as Rich};
 pub use KindFormatter as DefaultFormatter;
-pub use RichFormatter;
-use serde as serde_alias;
+pub use Rich;
+pub struct Local;
+pub use Local as Alias;
 "#;
         let file = syn::parse_file(src).unwrap();
         let hits = imports_in_file(&file, "src/lib.rs");
         let names: Vec<_> = hits.iter().map(|hit| hit.crate_name.as_str()).collect();
         assert_eq!(names, vec!["format"]);
+    }
+
+    #[test]
+    fn a_bare_use_of_a_name_not_in_scope_is_a_crate() {
+        let src = r#"
+use serde;
+use rand as random;
+use format::Kind;
+pub use Kind;
+"#;
+        let file = syn::parse_file(src).unwrap();
+        let hits = imports_in_file(&file, "src/lib.rs");
+        let names: Vec<_> = hits.iter().map(|hit| hit.crate_name.as_str()).collect();
+        assert_eq!(names, vec!["format", "rand", "serde"]);
     }
 
     #[test]
