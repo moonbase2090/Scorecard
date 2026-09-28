@@ -192,7 +192,13 @@ pub fn text_secrets(root: &Path, exclude: &[String]) -> Vec<sc_core::Finding> {
             .replace('\\', "/");
         match path.metadata() {
             Ok(meta) if meta.len() > MAX_SECRET_BYTES => {
-                oversized.push(rel);
+                // A Go build writes a binary named after the package. That file
+                // is large and starts with a NUL. It is not a partial text scan.
+                match binary_prefix(&path) {
+                    Ok(true) => continue,
+                    Ok(false) => oversized.push(rel),
+                    Err(err) => findings.push(unreadable(&rel, &err)),
+                }
                 continue;
             }
             Ok(_) => {}
@@ -240,6 +246,13 @@ fn unreadable(rel: &str, err: &std::io::Error) -> sc_core::Finding {
         ),
         disposition: String::new(),
     }
+}
+
+fn binary_prefix(path: &std::path::Path) -> std::io::Result<bool> {
+    let mut file = std::fs::File::open(path)?;
+    let mut buf = [0u8; BINARY_PROBE];
+    let n = std::io::Read::read(&mut file, &mut buf)?;
+    Ok(buf[..n].contains(&0))
 }
 
 fn partial_scan(paths: &[String]) -> sc_core::Finding {
@@ -741,6 +754,9 @@ mod tests {
             vec![b'a'; MAX_SECRET_BYTES as usize + 1],
         )
         .unwrap();
+        let mut large_binary = vec![0u8; MAX_SECRET_BYTES as usize + 1];
+        large_binary[1] = b'A';
+        fs::write(root.join("go_pack"), large_binary).unwrap();
         let mut hidden = format!("{key}\n").into_bytes();
         hidden.insert(0, 0);
         fs::write(root.join("blob.dat"), hidden).unwrap();
@@ -766,6 +782,10 @@ mod tests {
             findings
                 .iter()
                 .any(|finding| finding.rule == "secrets.partial" && finding.file == "big.bin"),
+            "{findings:?}"
+        );
+        assert!(
+            !findings.iter().any(|finding| finding.file == "go_pack"),
             "{findings:?}"
         );
         let _ = fs::remove_dir_all(&root);
