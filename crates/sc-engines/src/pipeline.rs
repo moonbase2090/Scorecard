@@ -2871,8 +2871,14 @@ mod tests {
         assert_eq!(token_values("echo a\\ b"), ["echo", "a b"]);
         assert_eq!(token_values("echo a\\\nb"), ["echo", "ab"]);
         assert_eq!(token_values("echo a\\"), ["echo", "a"]);
-        assert_eq!(token_values("echo \"unterminated"), ["echo", "unterminated"]);
-        assert_eq!(token_values("echo 'un\\terminated"), ["echo", "un\\terminated"]);
+        assert_eq!(
+            token_values("echo \"unterminated"),
+            ["echo", "unterminated"]
+        );
+        assert_eq!(
+            token_values("echo 'un\\terminated"),
+            ["echo", "un\\terminated"]
+        );
         assert_eq!(token_values("echo \"ab\\"), ["echo", "ab"]);
         assert_eq!(
             clippy_workspace("VAR='a b' cargo clippy", true),
