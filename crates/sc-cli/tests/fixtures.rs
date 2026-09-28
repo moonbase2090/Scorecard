@@ -632,6 +632,64 @@ fn config_init_writes_a_starter_and_does_not_overwrite() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
+#[test]
+fn cpp_missing_header_fails_the_types_gate() {
+    // A missing #include is a compile failure, not a missing compiler.
+    let (code, card, _, stderr) = analyze(&["testdata/cpp_missing_header"]);
+    assert_eq!(code, 1, "stderr={stderr}\ncard={card}");
+    let compile_gate = card["gates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|gate| gate["id"] == "types")
+        .expect("types gate missing");
+    assert!(
+        !compile_gate["pass"].as_bool().unwrap(),
+        "types gate should fail: {card}"
+    );
+    assert!(
+        compile_gate["enforced"].as_bool().unwrap(),
+        "types gate should be enforced: {card}"
+    );
+    let compile_findings: Vec<_> = card["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["engine"] == "compile" && f["severity"] == "error")
+        .collect();
+    assert!(
+        !compile_findings.is_empty(),
+        "expected a compile error finding: {card}"
+    );
+}
+
+#[test]
+fn node_not_found_output_fails_the_tests_gate() {
+    // A test script that outputs "not found" and exits 1 is a real test
+    // failure, not evidence that npm is missing.
+    let (code, card, _, stderr) = analyze(&["testdata/node_not_found_output"]);
+    assert_eq!(code, 1, "stderr={stderr}\ncard={card}");
+    let tests_gate = card["gates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|gate| gate["id"] == "tests")
+        .expect("tests gate missing");
+    assert!(
+        !tests_gate["pass"].as_bool().unwrap(),
+        "tests gate should fail: {card}"
+    );
+    assert!(
+        tests_gate["enforced"].as_bool().unwrap(),
+        "tests gate should be enforced: {card}"
+    );
+    let gate_reason = tests_gate["reason"].as_str().unwrap_or("");
+    assert!(
+        !gate_reason.contains("no test script"),
+        "reason should not say no test script: {card}"
+    );
+}
+
 fn sc_with_home(home: &std::path::Path, args: &[&str]) -> (i32, String, String) {
     let output = Command::new(env!("CARGO_BIN_EXE_sc"))
         .env("HOME", home)

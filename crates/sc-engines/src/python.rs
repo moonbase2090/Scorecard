@@ -1161,7 +1161,7 @@ fn which(name: &str) -> bool {
 fn tool_missing(stderr: &str, stdout: &str) -> bool {
     let text = format!("{stderr}\n{stdout}").to_ascii_lowercase();
     text.contains("no such command")
-        || text.contains("not found")
+        || text.contains("command not found")
         || text.contains("no module named")
 }
 
