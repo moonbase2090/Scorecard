@@ -197,7 +197,15 @@ fn review_with(
     request: LlmRequest<'_>,
     post: impl Fn(&str, Option<&str>, &Value) -> Result<Value, String>,
 ) -> LlmOutcome {
-    let (endpoint, model, key) = resolve_target(request.endpoint, request.model);
+    let (endpoint, model, key) = if request.api_key.is_some() {
+        (
+            request.endpoint.trim_end_matches('/').to_string(),
+            request.model.to_string(),
+            request.api_key.map(str::to_string),
+        )
+    } else {
+        resolve_target(request.endpoint, request.model)
+    };
     if endpoint.contains("api.x.ai") && key.is_none() {
         return LlmOutcome {
             gaps: Vec::new(),
@@ -233,7 +241,7 @@ fn review_with(
             Err(err) => {
                 return LlmOutcome {
                     gaps: Vec::new(),
-                    skipped: Some(err),
+                    skipped: Some(redact_secret(&err, key.as_deref())),
                 };
             }
         };
@@ -281,6 +289,27 @@ fn review_with(
         gaps: Vec::new(),
         skipped: Some("llm tool round limit reached".into()),
     }
+}
+
+/// Reads `env_name` and returns the key. The error names the variable and
+/// never includes a key value.
+pub fn env_api_key(env_name: &str) -> Result<String, String> {
+    let name = if env_name.trim().is_empty() {
+        "OPENROUTER_API_KEY"
+    } else {
+        env_name.trim()
+    };
+    match std::env::var(name) {
+        Ok(value) if !value.trim().is_empty() => Ok(value),
+        _ => Err(format!("{name} is not set")),
+    }
+}
+
+pub fn redact_secret(text: &str, secret: Option<&str>) -> String {
+    let Some(secret) = secret.filter(|value| value.len() >= 6) else {
+        return text.to_string();
+    };
+    text.replace(secret, "[redacted]")
 }
 
 pub fn parse_gaps(text: &str) -> Option<Vec<LlmGap>> {
@@ -466,6 +495,43 @@ mod tests {
         assert_eq!(gaps[0].item, "background images");
         let lines = "{\"type\":\"result\",\"result\":\"{\\\"gaps\\\":[]}\"}\n";
         assert!(gaps_from_cursor_output(lines).unwrap().is_empty());
+    }
+
+    #[test]
+    fn missing_env_key_names_the_variable_and_not_a_secret() {
+        let name = "SC_TEST_OPENROUTER_ABSENT";
+        std::env::remove_var(name);
+        let err = env_api_key(name).unwrap_err();
+        assert!(err.contains(name));
+        assert!(!err.contains("sk-"));
+        assert_eq!(
+            redact_secret("bearer sk-live-secret failed", Some("sk-live-secret")),
+            "bearer [redacted] failed"
+        );
+    }
+
+    #[test]
+    fn explicit_key_stays_on_the_requested_endpoint() {
+        let dir = std::env::temp_dir();
+        let seen = std::cell::RefCell::new(String::new());
+        let outcome = review_with(
+            LlmRequest {
+                endpoint: "https://openrouter.ai/api/v1",
+                model: "x-ai/grok-4",
+                api_key: Some("openrouter-secret-value"),
+                spec: "Spec item.",
+                root: &dir,
+                intent: None,
+            },
+            |endpoint, key, _body| {
+                *seen.borrow_mut() = format!("{endpoint}|{}", key.unwrap_or(""));
+                Ok(json!({"choices":[{"message":{"content":"{\"gaps\":[]}"}}]}))
+            },
+        );
+        assert!(outcome.skipped.is_none());
+        let seen = seen.into_inner();
+        assert!(seen.starts_with("https://openrouter.ai/api/v1|openrouter-secret-value"));
+        assert!(!seen.contains("api.x.ai"));
     }
 
     #[test]
