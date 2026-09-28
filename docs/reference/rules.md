@@ -31,8 +31,6 @@ Every finding has a rule id. Severity `error` counts against the gate; `warning`
 | `html.misnested` | error | fix | Tags close in the wrong order. | Close the inner tag first. |
 | `html.unclosed` | error | fix | A tag is never closed. | Close the tag. |
 | `links.missing` | warning | ask | A link or `src` points at a file that is not in the tree. | Point it at an existing file, or remove it. |
-| `perf.nested_loop` | warning | ignore | A loop inside a loop. | Consider a lookup table or a single pass. |
-| `perf.clone_in_loop` | warning | ignore | A value is cloned on every loop iteration. | Clone once outside the loop, or borrow. |
 | `engine.unavailable` | warning (error when a required toolchain is missing) | ask | A check could not run; the message says which tool or setting is missing. | See [troubleshooting](../troubleshooting.md). |
 | `config.invalid` | error | fix | `analyzer.toml` could not be read, or names an unknown gate. `sc` exits 2. | Fix the file at the path in the message. |
 

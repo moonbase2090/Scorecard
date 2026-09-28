@@ -1106,13 +1106,8 @@ mod tests {
             "src/b.rs",
             "b",
         ));
-        c.findings.push(finding(
-            "perf.nested_loop",
-            "perf",
-            "warning",
-            "src/a.rs",
-            "a",
-        ));
+        c.findings
+            .push(finding("links.missing", "perf", "warning", "src/a.rs", "a"));
         c.findings.push(finding(
             "test.failed",
             "tests",
@@ -1125,12 +1120,12 @@ mod tests {
         let crap = html
             .find("<summary><code>crap.over_threshold</code> · 2")
             .unwrap();
-        let perf = html
-            .find("<summary><code>perf.nested_loop</code> · 1")
+        let links = html
+            .find("<summary><code>links.missing</code> · 1")
             .unwrap();
-        assert!(test < crap && crap < perf);
+        assert!(test < crap && crap < links);
         assert!(html.contains("<details class=\"group\" open><summary><code>test.failed</code>"));
-        assert!(html.contains("<details class=\"group\"><summary><code>perf.nested_loop</code>"));
+        assert!(html.contains("<details class=\"group\"><summary><code>links.missing</code>"));
         assert!(html.contains("<span class=\"pill fail\">2 errors</span>"));
     }
 
