@@ -147,6 +147,16 @@ pub fn to_markdown(card: &Scorecard) -> String {
             out.push_str(&format!("- symbol: `{symbol}`\n"));
         }
         out.push_str(&format!("- {}\n", finding.message));
+        let (functions, more) = crate::report::evidence_functions(finding);
+        if !functions.is_empty() {
+            out.push_str("- functions:\n");
+            for (location, symbol) in &functions {
+                out.push_str(&format!("  - `{location}` `{symbol}`\n"));
+            }
+            if more > 0 {
+                out.push_str(&format!("  - {more} more\n"));
+            }
+        }
         if let Some(log) = crate::report::raw_log(finding) {
             let fence = "`".repeat(longest_backtick_run(log).max(2) + 1);
             out.push_str(&format!(
@@ -238,6 +248,34 @@ mod tests {
         card.metrics.crap_over_threshold = 2;
         let md = to_markdown(&card);
         assert!(md.contains("## Worst CRAP\n\nThreshold 30.\n\ndiff scope: 2 functions over threshold in this diff. The tree-wide count is on the latest push run of main.\n"));
+    }
+
+    #[test]
+    fn markdown_lists_evidence_functions() {
+        let mut card = Scorecard::skeleton(".", 30);
+        card.findings.push(Finding {
+            id: "coverage:unmatched".into(),
+            rule: "coverage.unmatched".into(),
+            engine: "coverage".into(),
+            severity: "warning".into(),
+            file: ".".into(),
+            span: None,
+            symbol: None,
+            message: "2 analyzed function(s) had no llvm-cov record".into(),
+            evidence: serde_json::json!({
+                "unmatched": 3,
+                "functions": [
+                    {"file": "src/a.rs", "symbol": "a::run", "line": 12},
+                    {"file": "src/b.rs", "symbol": "b::go"},
+                ],
+            }),
+            suggested_action: None,
+            disposition: String::new(),
+        });
+        let md = to_markdown(&card);
+        assert!(md.contains(
+            "- functions:\n  - `src/a.rs:12` `a::run`\n  - `src/b.rs` `b::go`\n  - 1 more\n"
+        ));
     }
 
     #[test]
