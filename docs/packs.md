@@ -19,7 +19,7 @@ Two markers and no override is an error. Set `pack` in `analyzer.toml`, or pass 
 
 The web pack needs no external tools. It parses HTML with `html5ever`, checks internal `href` and `src` paths against the tree, and scores CRAP on `.js` files and inline scripts. Secrets use the same patterns as the other packs. The `html` gate is enforced when `fail_on` is the built-in list or names `html`. Set `[html] enforce = "off"` to report markup without failing the process, or `"on"` to enforce it on a custom `fail_on` list. The `links` gate is advisory unless `fail_on` names `links` or `[links] enforce = true`. Accessibility checks are the `a11y` engine. See `docs/a11y.md`. The gate is advisory unless `fail_on` names `a11y` or `[a11y] enforce = true`.
 
-A gate with `enforced: false` is reported and does not fail the process. Rust enforces types, tests, CRAP, secrets, and lint. An undeclared dependency is advisory (`sca`) and does not change the exit code. Python enforces `python3 -m compileall`, pytest when a test suite is present, Ruff, secrets, and CRAP. An import that is not in `pyproject.toml` is the same advisory. Pytest writes line coverage when pytest-cov is available. The other packs use the same CRAP formula.
+A gate with `enforced: false` is reported and does not fail the process. Rust enforces types, tests, CRAP, secrets, and lint. An undeclared dependency is advisory (`sca`) and does not change the exit code. Python enforces `python3 -m compileall`, pytest when a test suite is present, Ruff, secrets, and CRAP. A local Python module is not a finding. An installed or published import missing from `pyproject.toml` is the same advisory (`sca.undeclared_dependency`). `sca.hallucinated_import` is only a name that resolves nowhere. Pytest writes line coverage when pytest-cov is available. The other packs use the same CRAP formula.
 
 | Pack | Coverage report |
 |---|---|
@@ -37,7 +37,7 @@ Node checks syntax with `node --check` and runs `npm test` when a test script ex
 
 `--diff` selects Rust `#[test]` names (`test_selection` is `rust-tests`). Every other pack uses the full suite. On `--diff`, `cargo test` runs only `#[test]` functions in files that mention a changed symbol, at most eight names. An empty set, or a larger set, runs the full `cargo test`.
 
-On a Rust tree, `sc` runs `cargo check`, `cargo test`, complexity, `cargo llvm-cov`, CRAP, hallucinated imports, and a small secrets scan. `--diff` and `--paths` narrow the CRAP gate. Mutation, the spec check, and the LLM review are off unless you ask for them. A Cargo workspace is scored from each member's `src` directory, found with `cargo metadata`. A top-level `src` is included when it exists.
+On a Rust tree, `sc` runs `cargo check`, `cargo test`, complexity, `cargo llvm-cov`, CRAP, undeclared dependencies, and a small secrets scan. `--diff` and `--paths` narrow the CRAP gate. Mutation, the spec check, and the LLM review are off unless you ask for them. A Cargo workspace is scored from each member's `src` directory, found with `cargo metadata`. A top-level `src` is included when it exists.
 
 ## Flags
 
@@ -79,14 +79,15 @@ Skipping coverage, mutation, or the LLM does not by itself exit 2.
 | `testdata/workspace_src` | Virtual Cargo workspace with no top-level `src`. Exit 0. Scope includes both members, and CRAP is not zero. |
 | `testdata/crap_untested` | CC-heavy `classify`, no tests. Exit 1, finding `crap.over_threshold`. |
 | `testdata/crap_tested` | The same `classify` with tests that cover its branches. Exit 0 when llvm-cov is installed. |
-| `testdata/fake_dep` | Uses `missing_crate` under `cfg(any())`. Exit 0. Warning `sca.hallucinated_import`, disposition `ask`. |
-| `testdata/local_mod` | `pub use` of a local `mod`. Exit 0. No `sca.hallucinated_import`. |
+| `testdata/fake_dep` | Uses `missing_crate` under `cfg(any())`. Exit 0. Warning `sca.undeclared_dependency`, disposition `ask`. |
+| `testdata/local_mod` | `pub use` of a local `mod`. Exit 0. No dependency finding. |
+| `testdata/py_local_import` | Imports a root module, root `conftest.py`, and a module on pytest `pythonpath`. Exit 0. No dependency finding. |
 | `testdata/web_site` | Static HTML. Exit 0. Pack `web`. |
 | `testdata/web_site_bad` | Missing doctype and viewport, a misnested tag, a missing local link, and a token. Exit 1. |
 
 `sc analyze testdata/crap_untested` should finish in well under 30 seconds after dependencies are already fetched. These fixtures have no crates.io dependencies.
 
-In tree mode the scorecard fields `loc_changed`, `files_changed`, and `coverage_changed` describe the analyzed `src` tree, not a git diff. `hallucinated_imports` is 0. `mutation.status` is `skipped`. In `--diff` mode `scope.base` records the resolved base ref (omitted in other modes), and `crap_over_threshold` counts only changed functions.
+In tree mode the scorecard fields `loc_changed`, `files_changed`, and `coverage_changed` describe the analyzed `src` tree, not a git diff. `hallucinated_imports` and `undeclared_dependencies` are 0. `mutation.status` is `skipped`. In `--diff` mode `scope.base` records the resolved base ref (omitted in other modes), and `crap_over_threshold` counts only changed functions.
 
 Perf findings `perf.nested_loop` and `perf.clone_in_loop` are warnings. They do not have a gate.
 

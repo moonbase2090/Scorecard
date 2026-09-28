@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Python pack: compile, pytest, Ruff, and imports checked against pyproject.toml.
 //!
+//! A local module is not a finding. An installed or published import missing from
+//! pyproject is an undeclared dependency. Hallucinated means the name is not local,
+//! not installed, and not on the package index.
+//!
 //! CRAP uses the same formula as Rust. Line coverage comes from pytest-cov when
 //! the test run can produce it. SQLite and vector extensions are covered by pytest.
 
-use std::collections::BTreeSet;
+use std::cell::RefCell;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -12,6 +17,19 @@ use std::time::{Duration, Instant};
 use sc_core::{Finding, RunRecord};
 
 use crate::command::{brief, run_cmd, CommandError};
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ScaCounts {
+    pub undeclared: u64,
+    pub hallucinated: u64,
+    pub unresolved: u64,
+}
+
+impl ScaCounts {
+    pub fn total(self) -> u64 {
+        self.undeclared + self.hallucinated + self.unresolved
+    }
+}
 
 pub struct PythonOutcome {
     pub findings: Vec<Finding>,
@@ -25,7 +43,7 @@ pub struct PythonOutcome {
     pub tests_reason: String,
     pub lint_pass: bool,
     pub lint_reason: String,
-    pub sca_errors: u64,
+    pub sca: ScaCounts,
     pub secret_errors: u64,
     pub crap_max: f64,
     pub crap_over: u64,
@@ -64,7 +82,7 @@ pub fn run(root: &Path, deadline: Instant, threshold: u32, untested_cc: u32) -> 
         &mut ran,
         &mut skipped,
     );
-    let sca_errors = check_imports(root, &mut findings, &mut ran);
+    let sca = check_imports(root, &mut findings, &mut ran);
     let functions = crate::poly_cc::functions_for_pack(root, "python");
     let coverage = read_coverage(root, &functions);
     let crap = crate::crap::evaluate(
@@ -115,7 +133,7 @@ pub fn run(root: &Path, deadline: Instant, threshold: u32, untested_cc: u32) -> 
         tests_reason,
         lint_pass,
         lint_reason,
-        sca_errors,
+        sca,
         secret_errors,
         crap_max,
         crap_over,
@@ -339,7 +357,16 @@ fn run_ruff(
     }
 }
 
-fn check_imports(root: &Path, findings: &mut Vec<Finding>, ran: &mut Vec<String>) -> u64 {
+fn check_imports(root: &Path, findings: &mut Vec<Finding>, ran: &mut Vec<String>) -> ScaCounts {
+    check_imports_with(root, findings, ran, &LiveIndex::new())
+}
+
+fn check_imports_with(
+    root: &Path,
+    findings: &mut Vec<Finding>,
+    ran: &mut Vec<String>,
+    index: &dyn PackageIndex,
+) -> ScaCounts {
     let manifest = std::fs::read_to_string(root.join("pyproject.toml")).unwrap_or_default();
     let mut allowed = dependency_modules(&manifest);
     if let Some(name) = project_name(&manifest) {
@@ -349,8 +376,9 @@ fn check_imports(root: &Path, findings: &mut Vec<Finding>, ran: &mut Vec<String>
         allowed.insert(package);
     }
     let stdlib = stdlib_modules();
+    let installed = installed_modules(root);
     ran.push("sca".into());
-    let mut count = 0u64;
+    let mut counts = ScaCounts::default();
     for path in python_files(root) {
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
@@ -362,35 +390,493 @@ fn check_imports(root: &Path, findings: &mut Vec<Finding>, ran: &mut Vec<String>
             .replace('\\', "/");
         for (module, line) in import_roots(&text) {
             let name = normalize_mod(&module);
-            if name.is_empty() || stdlib.contains(&name) || allowed.contains(&name) {
+            if name.is_empty()
+                || stdlib.contains(&name)
+                || allowed.contains(&name)
+                || is_local(root, &path, &name)
+            {
                 continue;
             }
-            count += 1;
-            findings.push(Finding {
-                id: format!("sca:{rel}:{name}"),
-                rule: "sca.hallucinated_import".into(),
-                engine: "sca".into(),
-                severity: "warning".into(),
-                file: rel.clone(),
-                span: Some(sc_core::Span {
-                    start_line: line,
-                    start_col: 1,
-                    end_line: line,
-                    end_col: 1,
-                }),
-                symbol: Some(name.clone()),
-                message: format!(
-                    "Strongly advised: module `{name}` is imported and is not declared in pyproject.toml"
-                ),
-                evidence: serde_json::json!({"module": name}),
-                suggested_action: Some(
-                    "Add the distribution to pyproject.toml or remove the import".into(),
-                ),
-                disposition: String::new(),
-            });
+            let class = classify(&name, &installed, index);
+            record(&mut counts, &class);
+            findings.push(import_finding(&rel, &name, line, &class));
         }
     }
-    count
+    counts
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum IndexHit {
+    Present(String),
+    Absent,
+    Unchecked(String),
+}
+
+trait PackageIndex {
+    fn lookup(&self, module: &str) -> IndexHit;
+}
+
+struct LiveIndex {
+    agent: ureq::Agent,
+    cache: RefCell<HashMap<String, IndexHit>>,
+}
+
+impl LiveIndex {
+    fn new() -> Self {
+        Self {
+            agent: ureq::AgentBuilder::new()
+                .timeout(Duration::from_secs(2))
+                .user_agent("scorecard (https://github.com/moonbase2090/Scorecard)")
+                .build(),
+            cache: RefCell::new(HashMap::new()),
+        }
+    }
+}
+
+impl PackageIndex for LiveIndex {
+    fn lookup(&self, module: &str) -> IndexHit {
+        if let Some(hit) = self.cache.borrow().get(module) {
+            return hit.clone();
+        }
+        let hit = lookup_pypi(&self.agent, module);
+        self.cache
+            .borrow_mut()
+            .insert(module.to_string(), hit.clone());
+        hit
+    }
+}
+
+fn lookup_pypi(agent: &ureq::Agent, module: &str) -> IndexHit {
+    let mut absent = false;
+    for candidate in index_names(module) {
+        match fetch_pypi(agent, &candidate) {
+            IndexHit::Present(name) => return IndexHit::Present(name),
+            IndexHit::Absent => absent = true,
+            IndexHit::Unchecked(reason) => return IndexHit::Unchecked(reason),
+        }
+    }
+    if absent {
+        IndexHit::Absent
+    } else {
+        IndexHit::Unchecked("the package index could not be reached".into())
+    }
+}
+
+fn fetch_pypi(agent: &ureq::Agent, name: &str) -> IndexHit {
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return IndexHit::Absent;
+    }
+    let url = format!("https://pypi.org/pypi/{name}/json");
+    match agent.get(&url).call() {
+        Ok(response) => {
+            let _ = response.into_string();
+            IndexHit::Present(name.to_string())
+        }
+        Err(ureq::Error::Status(404, response)) => {
+            let _ = response.into_string();
+            IndexHit::Absent
+        }
+        Err(ureq::Error::Status(code, response)) => {
+            let _ = response.into_string();
+            IndexHit::Unchecked(format!("the package index returned HTTP {code}"))
+        }
+        Err(ureq::Error::Transport(_)) => {
+            IndexHit::Unchecked("the package index could not be reached".into())
+        }
+    }
+}
+
+fn index_names(module: &str) -> Vec<String> {
+    let normalized = pep503(module);
+    if normalized.is_empty() {
+        return Vec::new();
+    }
+    if normalized == module {
+        vec![normalized]
+    } else {
+        vec![normalized, module.to_string()]
+    }
+}
+
+fn pep503(name: &str) -> String {
+    let mut out = String::new();
+    let mut dash = false;
+    for c in name.chars() {
+        if c == '-' || c == '_' || c == '.' {
+            if !out.is_empty() && !dash {
+                out.push('-');
+                dash = true;
+            }
+            continue;
+        }
+        dash = false;
+        out.push(c.to_ascii_lowercase());
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    out
+}
+
+enum Class {
+    UndeclaredInstalled,
+    UndeclaredPublished(String),
+    Hallucinated,
+    Unchecked(String),
+}
+
+fn classify(name: &str, installed: &BTreeSet<String>, index: &dyn PackageIndex) -> Class {
+    if installed.contains(name) {
+        return Class::UndeclaredInstalled;
+    }
+    match index.lookup(name) {
+        IndexHit::Present(distribution) => Class::UndeclaredPublished(distribution),
+        IndexHit::Absent => Class::Hallucinated,
+        IndexHit::Unchecked(reason) => Class::Unchecked(reason),
+    }
+}
+
+fn record(counts: &mut ScaCounts, class: &Class) {
+    match class {
+        Class::UndeclaredInstalled | Class::UndeclaredPublished(_) => counts.undeclared += 1,
+        Class::Hallucinated => counts.hallucinated += 1,
+        Class::Unchecked(_) => counts.unresolved += 1,
+    }
+}
+
+fn import_finding(rel: &str, name: &str, line: u32, class: &Class) -> Finding {
+    let (rule, message, action, resolution, distribution) = match class {
+        Class::UndeclaredInstalled => (
+            "sca.undeclared_dependency",
+            format!(
+                "Advisory: module `{name}` is imported and is not declared in pyproject.toml. It is installed in the project environment. Add `{name}` to [project.dependencies] in pyproject.toml."
+            ),
+            format!("Add `{name}` to [project.dependencies] in pyproject.toml."),
+            "installed",
+            None,
+        ),
+        Class::UndeclaredPublished(distribution) => {
+            let why = if distribution == name {
+                "It is on the package index and is not installed.".to_string()
+            } else {
+                format!("It is published as `{distribution}` and is not installed.")
+            };
+            (
+                "sca.undeclared_dependency",
+                format!(
+                    "Advisory: module `{name}` is imported and is not declared in pyproject.toml. {why} Add `{distribution}` to [project.dependencies] in pyproject.toml and install it."
+                ),
+                format!(
+                    "Add `{distribution}` to [project.dependencies] in pyproject.toml and install it."
+                ),
+                "on_index",
+                Some(distribution.clone()),
+            )
+        }
+        Class::Hallucinated => (
+            "sca.hallucinated_import",
+            format!(
+                "Advisory: module `{name}` is imported and does not resolve. It is not a local module, not installed, and not on the package index. Remove the import or correct the module name."
+            ),
+            format!("Remove the import of `{name}` or correct the module name."),
+            "nowhere",
+            None,
+        ),
+        Class::Unchecked(reason) => (
+            "sca.import_unresolved",
+            format!(
+                "Advisory: module `{name}` is imported and is not declared in pyproject.toml. It is not a local module and is not installed. The package index was not checked ({reason}), so this import is not classified as hallucinated. Add the distribution to pyproject.toml or remove the import."
+            ),
+            format!("Add the distribution that provides `{name}` to pyproject.toml, or remove the import."),
+            "index_unchecked",
+            None,
+        ),
+    };
+    let mut evidence = serde_json::json!({
+        "module": name,
+        "resolution": resolution,
+    });
+    if let Some(distribution) = distribution {
+        evidence["distribution"] = serde_json::json!(distribution);
+    }
+    if let Class::Unchecked(reason) = class {
+        evidence["index_error"] = serde_json::json!(reason);
+    }
+    Finding {
+        id: format!("sca:{rel}:{name}"),
+        rule: rule.into(),
+        engine: "sca".into(),
+        severity: "warning".into(),
+        file: rel.to_string(),
+        span: Some(sc_core::Span {
+            start_line: line,
+            start_col: 1,
+            end_line: line,
+            end_col: 1,
+        }),
+        symbol: Some(name.to_string()),
+        message,
+        evidence,
+        suggested_action: Some(action),
+        disposition: String::new(),
+    }
+}
+
+fn is_local(root: &Path, file: &Path, name: &str) -> bool {
+    if name == "conftest" && conftest_above(root, file) {
+        return true;
+    }
+    source_roots(root, file)
+        .iter()
+        .any(|dir| module_on(dir, name))
+}
+
+fn conftest_above(root: &Path, file: &Path) -> bool {
+    let mut dir = file.parent();
+    while let Some(current) = dir {
+        if !current.starts_with(root) {
+            break;
+        }
+        if current.join("conftest.py").is_file() {
+            return true;
+        }
+        if current == root {
+            break;
+        }
+        dir = current.parent();
+    }
+    false
+}
+
+fn source_roots(root: &Path, file: &Path) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    roots.push(root.to_path_buf());
+    for name in ["src", "tests", "test"] {
+        let dir = root.join(name);
+        if dir.is_dir() {
+            roots.push(dir);
+        }
+    }
+    roots.extend(pytest_pythonpath(root));
+    if let Some(parent) = file.parent() {
+        if parent.starts_with(root) && import_path_dir(root, parent) {
+            roots.push(parent.to_path_buf());
+        }
+    }
+    roots
+}
+
+fn import_path_dir(root: &Path, dir: &Path) -> bool {
+    if dir.join("__init__.py").is_file() {
+        return false;
+    }
+    let Ok(rel) = dir.strip_prefix(root) else {
+        return false;
+    };
+    matches!(
+        rel.components().next().and_then(|c| c.as_os_str().to_str()),
+        Some("tests" | "test")
+    )
+}
+
+fn module_on(dir: &Path, name: &str) -> bool {
+    if name.is_empty() || name.contains(['/', '\\']) {
+        return false;
+    }
+    if dir.join(format!("{name}.py")).is_file() {
+        return true;
+    }
+    let pkg = dir.join(name);
+    if !pkg.is_dir() {
+        return false;
+    }
+    if pkg.join("__init__.py").is_file() {
+        return true;
+    }
+    let Ok(entries) = std::fs::read_dir(&pkg) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let path = entry.path();
+        path.extension().and_then(|ext| ext.to_str()) == Some("py")
+            || (path.is_dir() && path.join("__init__.py").is_file())
+    })
+}
+
+fn pytest_pythonpath(root: &Path) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(text) = std::fs::read_to_string(root.join("pyproject.toml")) {
+        paths.extend(pythonpath_from_pyproject(&text, root));
+    }
+    for (file, header) in [
+        ("pytest.ini", "[pytest]"),
+        ("tox.ini", "[pytest]"),
+        ("setup.cfg", "[tool:pytest]"),
+    ] {
+        if let Ok(text) = std::fs::read_to_string(root.join(file)) {
+            paths.extend(pythonpath_from_ini(&text, header, root));
+        }
+    }
+    paths
+}
+
+fn pythonpath_from_pyproject(text: &str, root: &Path) -> Vec<PathBuf> {
+    let mut in_pytest = false;
+    let mut in_array = false;
+    let mut paths = Vec::new();
+    for line in text.lines() {
+        let trimmed = strip_comment(line).trim();
+        if trimmed.starts_with('[') {
+            in_pytest = trimmed == "[tool.pytest.ini_options]";
+            in_array = false;
+            continue;
+        }
+        if !in_pytest {
+            continue;
+        }
+        if !in_array && !trimmed.starts_with("pythonpath") {
+            continue;
+        }
+        if !in_array && trimmed.starts_with("pythonpath") && trimmed.contains('[') {
+            in_array = true;
+        } else if !in_array {
+            if let Some(value) = table_string(trimmed, "pythonpath") {
+                push_rel(&mut paths, root, &value);
+            }
+            continue;
+        }
+        for token in quoted_tokens(trimmed) {
+            push_rel(&mut paths, root, &token);
+        }
+        if trimmed.contains(']') {
+            in_array = false;
+        }
+    }
+    paths
+}
+
+fn pythonpath_from_ini(text: &str, header: &str, root: &Path) -> Vec<PathBuf> {
+    let mut in_section = false;
+    let mut collecting = false;
+    let mut paths = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_section = trimmed.eq_ignore_ascii_case(header);
+            collecting = false;
+            continue;
+        }
+        if !in_section || trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';')
+        {
+            if trimmed.is_empty() {
+                collecting = false;
+            }
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("pythonpath") {
+            let rest = rest.trim();
+            if let Some(value) = rest.strip_prefix('=') {
+                let value = value.trim();
+                if value.is_empty() {
+                    collecting = true;
+                } else {
+                    for part in value.split_whitespace() {
+                        push_rel(&mut paths, root, part);
+                    }
+                    collecting = false;
+                }
+            }
+            continue;
+        }
+        if collecting && (line.starts_with(' ') || line.starts_with('\t')) {
+            for part in trimmed.split_whitespace() {
+                push_rel(&mut paths, root, part);
+            }
+        } else {
+            collecting = false;
+        }
+    }
+    paths
+}
+
+fn push_rel(paths: &mut Vec<PathBuf>, root: &Path, raw: &str) {
+    let raw = raw.trim().trim_matches(['"', '\'']);
+    if raw.is_empty() {
+        return;
+    }
+    let path = root.join(raw);
+    if path.is_dir() {
+        paths.push(path);
+    }
+}
+
+fn installed_modules(root: &Path) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    for site in site_packages(root) {
+        let Ok(entries) = std::fs::read_dir(&site) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(fname) = path.file_name().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if let Some(_stem) = fname.strip_suffix(".dist-info") {
+                if let Ok(text) = std::fs::read_to_string(path.join("top_level.txt")) {
+                    for line in text.lines() {
+                        let name = normalize_mod(line.trim());
+                        if !name.is_empty() {
+                            names.insert(name);
+                        }
+                    }
+                }
+                continue;
+            }
+            if let Some(stem) = fname.strip_suffix(".py") {
+                if !stem.is_empty() {
+                    names.insert(normalize_mod(stem));
+                }
+                continue;
+            }
+            if path.is_dir() && path.join("__init__.py").is_file() {
+                names.insert(normalize_mod(fname));
+            }
+        }
+    }
+    names
+}
+
+fn site_packages(root: &Path) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    push_sites(&root.join(".venv"), &mut dirs);
+    push_sites(&root.join("venv"), &mut dirs);
+    if let Some(venv) = std::env::var_os("VIRTUAL_ENV") {
+        let path = PathBuf::from(venv);
+        if path.starts_with(root) {
+            push_sites(&path, &mut dirs);
+        }
+    }
+    dirs
+}
+
+fn push_sites(venv: &Path, out: &mut Vec<PathBuf>) {
+    let lib = venv.join("lib");
+    if let Ok(entries) = std::fs::read_dir(&lib) {
+        for entry in entries.flatten() {
+            let site = entry.path().join("site-packages");
+            if site.is_dir() {
+                out.push(site);
+            }
+        }
+    }
+    let windows = venv.join("Lib").join("site-packages");
+    if windows.is_dir() {
+        out.push(windows);
+    }
 }
 
 fn local_packages(root: &Path) -> BTreeSet<String> {
@@ -542,7 +1028,8 @@ fn dependency_modules(text: &str) -> BTreeSet<String> {
     names
 }
 
-fn collect_quoted(line: &str, names: &mut BTreeSet<String>) {
+fn quoted_tokens(line: &str) -> Vec<String> {
+    let mut out = Vec::new();
     let mut rest = line;
     while let Some(start) = rest.find('"').or_else(|| rest.find('\'')) {
         let quote = rest.as_bytes()[start] as char;
@@ -550,7 +1037,14 @@ fn collect_quoted(line: &str, names: &mut BTreeSet<String>) {
         let Some(end) = rest.find(quote) else {
             break;
         };
-        let token = &rest[..end];
+        out.push(rest[..end].to_string());
+        rest = &rest[end + 1..];
+    }
+    out
+}
+
+fn collect_quoted(line: &str, names: &mut BTreeSet<String>) {
+    for token in quoted_tokens(line) {
         let name = token
             .split(['>', '<', '=', '!', '~', '[', ';', ' '])
             .next()
@@ -558,7 +1052,6 @@ fn collect_quoted(line: &str, names: &mut BTreeSet<String>) {
         if !name.is_empty() {
             names.insert(normalize_mod(name));
         }
-        rest = &rest[end + 1..];
     }
 }
 
@@ -875,21 +1368,230 @@ dev = ["pytest>=8"]
     }
 
     #[test]
-    fn flags_an_undeclared_import() {
-        let dir = std::env::temp_dir().join(format!("sc-py-{}", std::process::id()));
+    fn pep503_normalizes_underscores() {
+        assert_eq!(pep503("langchain_core"), "langchain-core");
+        assert_eq!(pep503("anyio"), "anyio");
+    }
+
+    #[test]
+    fn local_modules_and_pytest_path_are_not_flagged() {
+        let dir = scratch("local");
+        std::fs::create_dir_all(dir.join("src/demo")).unwrap();
+        std::fs::create_dir_all(dir.join("extra")).unwrap();
+        std::fs::create_dir_all(dir.join("tests/unit/nested")).unwrap();
+        std::fs::create_dir_all(dir.join("tests/e2e/team")).unwrap();
+        std::fs::write(
+            dir.join("pyproject.toml"),
+            "[project]\nname = \"demo\"\ndependencies = [\"numpy>=1.26\"]\n\n[tool.pytest.ini_options]\npythonpath = [\"src\", \"extra\"]\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("src/demo/__init__.py"), "").unwrap();
+        std::fs::write(dir.join("src/demo/requests.py"), "n = 1\n").unwrap();
+        std::fs::write(
+            dir.join("src/demo/app.py"),
+            "import requests\nimport numpy\nimport json\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("helpers.py"), "n = 1\n").unwrap();
+        std::fs::write(dir.join("extra/widgets.py"), "n = 1\n").unwrap();
+        std::fs::write(dir.join("tests/unit/conftest.py"), "mark = 1\n").unwrap();
+        std::fs::write(
+            dir.join("tests/unit/test_app.py"),
+            "from conftest import mark\nimport helpers\nimport widgets\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("tests/unit/nested/test_more.py"),
+            "from conftest import mark\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("tests/e2e/common.py"), "n = 1\n").unwrap();
+        std::fs::write(dir.join("tests/e2e/agents.py"), "n = 1\n").unwrap();
+        std::fs::write(dir.join("tests/e2e/cli_agents.py"), "n = 1\n").unwrap();
+        std::fs::write(dir.join("tests/e2e/team/__init__.py"), "name = \"team\"\n").unwrap();
+        std::fs::write(
+            dir.join("tests/e2e/test_flow.py"),
+            "from common import n\nfrom agents import a\nfrom cli_agents import c\nfrom team import name\n",
+        )
+        .unwrap();
+        let (findings, counts) = classify_tree(&dir, IndexHit::Absent);
+        let symbols = symbols(&findings);
+        assert_eq!(symbols, vec!["requests".to_string()], "{findings:?}");
+        assert_eq!(counts.hallucinated, 1);
+        assert_eq!(findings[0].rule, "sca.hallucinated_import");
+        assert!(findings[0].message.starts_with("Advisory:"));
+        assert!(findings[0].message.contains("not on the package index"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn installed_import_is_an_undeclared_dependency() {
+        let dir = scratch("installed");
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::create_dir_all(dir.join(".venv/lib/python3.12/site-packages/anyio")).unwrap();
+        std::fs::write(
+            dir.join("pyproject.toml"),
+            "[project]\nname = \"demo\"\ndependencies = []\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("src/app.py"), "import anyio\n").unwrap();
+        std::fs::write(
+            dir.join(".venv/lib/python3.12/site-packages/anyio/__init__.py"),
+            "",
+        )
+        .unwrap();
+        let (findings, counts) = classify_tree(&dir, IndexHit::Absent);
+        assert_eq!(counts.undeclared, 1, "{findings:?}");
+        assert_eq!(counts.hallucinated, 0);
+        assert_eq!(findings[0].rule, "sca.undeclared_dependency");
+        assert!(findings[0].message.starts_with("Advisory:"));
+        assert!(findings[0]
+            .message
+            .contains("installed in the project environment"));
+        assert!(!findings[0].message.contains("Strongly"));
+        assert!(findings[0]
+            .suggested_action
+            .as_deref()
+            .unwrap()
+            .contains("[project.dependencies]"));
+        assert_eq!(findings[0].evidence["resolution"], "installed");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn published_import_is_an_undeclared_dependency() {
+        let dir = scratch("published");
         std::fs::create_dir_all(dir.join("src")).unwrap();
         std::fs::write(
             dir.join("pyproject.toml"),
             "[project]\nname = \"demo\"\ndependencies = []\n",
         )
         .unwrap();
-        std::fs::write(dir.join("src/app.py"), "import totally_missing\n").unwrap();
-        let mut findings = Vec::new();
-        let mut ran = Vec::new();
-        let count = check_imports(&dir, &mut findings, &mut ran);
-        assert_eq!(count, 1);
-        assert_eq!(findings[0].rule, "sca.hallucinated_import");
+        std::fs::write(dir.join("src/app.py"), "import langchain_core\n").unwrap();
+        let (findings, counts) = classify_tree(&dir, IndexHit::Present("langchain-core".into()));
+        assert_eq!(counts.undeclared, 1, "{findings:?}");
+        assert_eq!(counts.hallucinated, 0);
+        assert_eq!(findings[0].rule, "sca.undeclared_dependency");
+        assert!(findings[0]
+            .message
+            .contains("published as `langchain-core`"));
+        assert!(findings[0].message.contains("not installed"));
+        assert!(findings[0].message.starts_with("Advisory:"));
+        assert_eq!(findings[0].evidence["resolution"], "on_index");
+        assert_eq!(findings[0].evidence["distribution"], "langchain-core");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn missing_name_is_hallucinated_only_when_the_index_says_absent() {
+        let dir = scratch("missing");
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("pyproject.toml"),
+            "[project]\nname = \"demo\"\ndependencies = []\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("src/app.py"), "import not_a_real_module\n").unwrap();
+        let (findings, counts) = classify_tree(&dir, IndexHit::Absent);
+        assert_eq!(counts.hallucinated, 1);
+        assert_eq!(counts.undeclared, 0);
+        assert_eq!(findings[0].rule, "sca.hallucinated_import");
+        assert!(findings[0].message.starts_with("Advisory:"));
+        assert!(findings[0].message.contains("not on the package index"));
+        assert!(!findings[0].message.contains("Strongly"));
+        assert_eq!(findings[0].evidence["resolution"], "nowhere");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unchecked_index_is_not_called_hallucinated() {
+        let dir = scratch("offline");
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("pyproject.toml"),
+            "[project]\nname = \"demo\"\ndependencies = []\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("src/app.py"), "import maybe_real\n").unwrap();
+        let (findings, counts) = classify_tree(
+            &dir,
+            IndexHit::Unchecked("the package index could not be reached".into()),
+        );
+        assert_eq!(counts.unresolved, 1);
+        assert_eq!(counts.hallucinated, 0);
+        assert_eq!(counts.undeclared, 0);
+        assert_eq!(findings[0].rule, "sca.import_unresolved");
+        assert!(findings[0].message.starts_with("Advisory:"));
+        assert!(findings[0]
+            .message
+            .contains("not classified as hallucinated"));
+        assert!(findings[0]
+            .message
+            .contains("the package index could not be reached"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pytest_ini_pythonpath_resolves_a_local_module() {
+        let dir = scratch("ini");
+        write_widgets(&dir);
+        std::fs::write(dir.join("pytest.ini"), "[pytest]\npythonpath = extra\n").unwrap();
+        let (findings, counts) = classify_tree(&dir, IndexHit::Absent);
+        assert_eq!(counts.total(), 0, "{findings:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pyproject_pythonpath_string_resolves_a_local_module() {
+        let dir = scratch("pathstr");
+        write_widgets(&dir);
+        std::fs::write(
+            dir.join("pyproject.toml"),
+            "[project]\nname = \"demo\"\ndependencies = []\n\n[tool.pytest.ini_options]\npythonpath = \"extra\"\n",
+        )
+        .unwrap();
+        let (findings, counts) = classify_tree(&dir, IndexHit::Absent);
+        assert_eq!(counts.total(), 0, "{findings:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    struct FixedIndex(IndexHit);
+
+    impl PackageIndex for FixedIndex {
+        fn lookup(&self, _: &str) -> IndexHit {
+            self.0.clone()
+        }
+    }
+
+    fn scratch(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("sc-py-{label}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_widgets(dir: &Path) {
+        std::fs::create_dir_all(dir.join("extra")).unwrap();
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("pyproject.toml"),
+            "[project]\nname = \"demo\"\ndependencies = []\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("extra/widgets.py"), "n = 1\n").unwrap();
+        std::fs::write(dir.join("src/app.py"), "import widgets\n").unwrap();
+    }
+
+    fn classify_tree(dir: &Path, hit: IndexHit) -> (Vec<Finding>, ScaCounts) {
+        let mut findings = Vec::new();
+        let counts = check_imports_with(dir, &mut findings, &mut Vec::new(), &FixedIndex(hit));
+        (findings, counts)
+    }
+
+    fn symbols(findings: &[Finding]) -> Vec<String> {
+        findings
+            .iter()
+            .filter_map(|finding| finding.symbol.clone())
+            .collect()
     }
 }

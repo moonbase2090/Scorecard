@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 /// The import is cfg-off so `cargo check` still passes.
-/// `sc` still sees `missing_crate` and reports `sca.hallucinated_import`.
+/// `sc` still sees `missing_crate` and reports `sca.undeclared_dependency`.
 #[cfg(any())]
 use missing_crate::Thing;
 
