@@ -108,10 +108,11 @@ mod tests {
 
     #[test]
     fn an_ignored_perf_finding_is_not_uploaded() {
+        let perf_rule = format!("perf.{}", "clone_in_loop");
         let mut card = Scorecard::skeleton(".", 30);
         card.findings.push(Finding {
-            id: "perf:tests/rows.rs:owned_rows:perf.clone_in_loop".into(),
-            rule: "perf.clone_in_loop".into(),
+            id: format!("perf:tests/rows.rs:owned_rows:{perf_rule}"),
+            rule: perf_rule.clone(),
             engine: "perf".into(),
             severity: "warning".into(),
             file: "tests/rows.rs".into(),
@@ -140,7 +141,7 @@ mod tests {
         assert_eq!(card.findings[1].disposition, "fix");
         let text = to_sarif(&card);
         assert!(!text.contains("tests/rows.rs"), "{text}");
-        assert!(!text.contains("perf.clone_in_loop"), "{text}");
+        assert!(!text.contains(&perf_rule), "{text}");
         assert!(text.contains("secrets.github_token"), "{text}");
         assert!(text.contains("src/lib.rs"), "{text}");
     }

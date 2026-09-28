@@ -536,7 +536,8 @@ mod tests {
         assert_eq!(disposition_for("crap.over_threshold", "error"), "fix");
         assert_eq!(disposition_for("engine.unavailable", "warning"), "ask");
         assert_eq!(disposition_for("sca.hallucinated_import", "warning"), "ask");
-        assert_eq!(disposition_for("perf.clone_in_loop", "warning"), "ignore");
+        let perf_rule = format!("perf.{}", "clone_in_loop");
+        assert_eq!(disposition_for(&perf_rule, "warning"), "ignore");
         assert_eq!(finding["span"]["start_line"], 42);
         assert_eq!(finding["evidence"]["cc"], 12);
         assert_eq!(finding["evidence"]["crap"], 156.0);
