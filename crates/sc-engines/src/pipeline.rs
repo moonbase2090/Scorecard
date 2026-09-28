@@ -2826,6 +2826,60 @@ mod tests {
         assert_eq!(clippy_workspace("npm test", true), "npm test");
     }
 
+    fn token_values(script: &str) -> Vec<String> {
+        shell_tokens(script)
+            .iter()
+            .filter(|token| !token.separator)
+            .map(|token| token.value.clone())
+            .collect()
+    }
+
+    #[test]
+    fn shell_tokens_skips_comments_and_blank_separators() {
+        assert!(shell_tokens("").is_empty());
+        assert!(shell_tokens("   ").is_empty());
+        assert!(shell_tokens("# only a comment").is_empty());
+        assert_eq!(token_values("cargo # trailing comment"), ["cargo"]);
+        assert_eq!(token_values("cargo\tclippy"), ["cargo", "clippy"]);
+        let newline = shell_tokens("cargo\nclippy");
+        assert_eq!(newline.len(), 3);
+        assert!(newline[1].separator);
+        assert_eq!(newline[0].value, "cargo");
+        assert_eq!(newline[2].value, "clippy");
+        let carriage = shell_tokens("cargo\rclippy");
+        assert_eq!(carriage.len(), 3);
+        assert!(carriage[1].separator);
+    }
+
+    #[test]
+    fn shell_tokens_splits_operators_and_double_operators() {
+        let separators = shell_tokens("a;b|c&d(e)f{g}h");
+        assert!(separators.iter().any(|token| token.separator));
+        assert_eq!(token_values("a&&b||c"), ["a", "b", "c"]);
+        assert_eq!(
+            shell_tokens("a&&b").iter().filter(|t| t.separator).count(),
+            1
+        );
+    }
+
+    #[test]
+    fn shell_tokens_handles_quotes_and_escapes() {
+        assert_eq!(token_values("echo 'a b'"), ["echo", "a b"]);
+        assert_eq!(token_values("echo \"a b\""), ["echo", "a b"]);
+        assert_eq!(token_values("echo \"a\\\"b\""), ["echo", "a\"b"]);
+        assert_eq!(token_values("echo 'a\\b'"), ["echo", "a\\b"]);
+        assert_eq!(token_values("echo a\\ b"), ["echo", "a b"]);
+        assert_eq!(token_values("echo a\\\nb"), ["echo", "ab"]);
+        assert_eq!(token_values("echo a\\"), ["echo", "a"]);
+        assert_eq!(token_values("echo \"unterminated"), ["echo", "unterminated"]);
+        assert_eq!(token_values("echo 'un\\terminated"), ["echo", "un\\terminated"]);
+        assert_eq!(token_values("echo \"ab\\"), ["echo", "ab"]);
+        assert_eq!(
+            clippy_workspace("VAR='a b' cargo clippy", true),
+            "VAR='a b' cargo clippy --workspace"
+        );
+    }
+
     #[test]
     fn workspace_root_checks_every_member_but_member_analysis_stays_in_scope() {
         let root = std::env::temp_dir().join(format!("sc-ws-broken-{}", std::process::id()));
