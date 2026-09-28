@@ -31,7 +31,7 @@ A gate with `enforced: false` is reported and does not fail the process. Rust en
 | C++ | `.sc/coverage/cpp.info` from lcov after CTest |
 | Go | `go test -coverprofile` |
 
-Node runs c8 with `--all`. Python passes each directory that holds a scored function to pytest-cov as a `--cov` source. In both packs, a file the tests never load is scored at 0% coverage instead of being left out.
+Node runs c8 or nyc with `--all`. Python passes each directory that holds a scored function to pytest-cov as a `--cov` source, and the `coverage.py` fallback uses the same directories as `--source`. In both packs, a file the tests never load is scored at 0% coverage instead of being left out.
 
 The command pack has no coverage runner. When a pack writes no coverage report, no function is scored: the CRAP table is empty, and the `crap` gate is advisory with the reason that coverage was not measured. The run reports `coverage.missing`.
 

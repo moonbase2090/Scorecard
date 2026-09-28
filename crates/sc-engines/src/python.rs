@@ -95,7 +95,8 @@ pub fn run(
     let mut coverage_reason: Option<String> = None;
     let mut coverage_fix: Option<&'static str> = None;
     if coverage.is_none() && tests_enforced && tests_pass {
-        if let Err(err) = run_coverage_fallback(root, deadline, &mut runs) {
+        if let Err(err) = run_coverage_fallback(root, deadline, &cov_sources(&functions), &mut runs)
+        {
             coverage_reason = Some(err);
             coverage_fix = Some(
                 "Install coverage.py (`python3 -m pip install coverage`) and re-run `sc analyze`",
@@ -409,23 +410,35 @@ fn cov_sources(functions: &[sc_graph::FunctionInfo]) -> Vec<String> {
     dirs.into_iter().collect()
 }
 
+fn coverage_source_flags(sources: &[String]) -> String {
+    sources
+        .iter()
+        .map(|dir| format!("--source={}", crate::command::shell_quote_arg(dir)))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn run_coverage_fallback(
     root: &Path,
     deadline: Instant,
+    sources: &[String],
     runs: &mut Vec<RunRecord>,
 ) -> Result<(), String> {
     let cov_file = root.join(".sc").join("coverage").join("pytest.json");
     if let Some(parent) = cov_file.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
+    // Match pytest-cov's --cov sources so a never-imported file is still
+    // measured at 0% instead of left out of the report (#120 / #79).
+    let source_flags = coverage_source_flags(sources);
     let command = if root.join("uv.lock").is_file() || root.join(".venv").is_dir() {
         format!(
-            "uv run --extra dev --with coverage coverage run -m pytest -q && uv run --extra dev --with coverage coverage json -o {}",
+            "uv run --extra dev --with coverage coverage run {source_flags} -m pytest -q && uv run --extra dev --with coverage coverage json -o {}",
             cov_file.display()
         )
     } else {
         format!(
-            "python3 -m coverage run -m pytest -q && python3 -m coverage json -o {}",
+            "python3 -m coverage run {source_flags} -m pytest -q && python3 -m coverage json -o {}",
             cov_file.display()
         )
     };
@@ -2273,6 +2286,13 @@ dev = ["pytest>=8"]
         ];
         assert_eq!(cov_sources(&functions), [".", "src/app", "tools"]);
         assert_eq!(cov_sources(&[]), ["."]);
+    }
+
+    #[test]
+    fn coverage_fallback_passes_the_same_sources_as_pytest_cov() {
+        let flags = coverage_source_flags(&[".".into(), "src/app".into(), "tools".into()]);
+        assert_eq!(flags, "--source='.' --source='src/app' --source='tools'");
+        assert!(flags.contains("--source='src/app'"));
     }
 
     #[test]
