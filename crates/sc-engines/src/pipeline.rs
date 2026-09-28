@@ -2788,22 +2788,7 @@ mod tests {
         assert!(output.scorecard.runs.iter().any(|run| {
             run.engine == "tests" && run.command == "cargo test" && run.exit_code == Some(0)
         }));
-        assert!(
-            output
-                .scorecard
-                .scope
-                .paths
-                .iter()
-                .any(|path| path.ends_with("crates/app/src/lib.rs")),
-            "{:?}",
-            output.scorecard.scope.paths
-        );
-        assert!(output
-            .scorecard
-            .scope
-            .paths
-            .iter()
-            .all(|path| !path.contains("/crates/broken/")));
+        assert_eq!(output.scorecard.scope.paths, vec!["src/lib.rs"]);
         assert!(!output
             .scorecard
             .runs

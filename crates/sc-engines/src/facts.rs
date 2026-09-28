@@ -38,17 +38,18 @@ pub(crate) fn analyze_tree_with_workspace(
     if workspace_root {
         dirs.extend(member_src_dirs(metadata.as_ref()));
     }
-    let paths = source_files_under(root, &dirs, exclude);
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let paths = source_files_under(&root, &dirs, exclude);
     let rels: Vec<String> = paths
         .iter()
         .map(|path| {
-            path.strip_prefix(root)
+            path.strip_prefix(&root)
                 .unwrap_or(path)
                 .to_string_lossy()
                 .replace('\\', "/")
         })
         .collect();
-    (analyze_rels(root, &rels), workspace_root)
+    (analyze_rels(&root, &rels), workspace_root)
 }
 
 pub fn analyze_rels(root: &Path, rels: &[String]) -> Vec<AnalyzedFile> {
