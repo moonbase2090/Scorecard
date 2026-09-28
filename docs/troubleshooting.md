@@ -38,7 +38,7 @@ rustup default stable
 
 ## `several language packs match (rust, node)`
 
-Exit 2 when the matching languages have the same amount of source, such as one Rust file and one JavaScript file, or one Python file and one C header. Pass `--pack rust`, or add `pack = "rust"` to `analyzer.toml`. If one language has more source files, that pack is used and this error does not happen. Headers do not count. The terminal may cut this message short; `.sc/last-scorecard.json` has the full text. An empty tree says to set `pack` in `analyzer.toml` or pass `--pack`.
+Exit 2 when more than one language marker matches and more than one of those languages has source files, or none of them do. A larger file count does not choose a pack. Pass `--pack rust`, or add `pack = "rust"` to `analyzer.toml`. Headers do not count as source and do not turn a Python project into an ambiguous tree. The terminal may cut this message short; `.sc/last-scorecard.json` has the full text. An empty tree says to set `pack` in `analyzer.toml` or pass `--pack`.
 
 ## The header says `dirty`
 

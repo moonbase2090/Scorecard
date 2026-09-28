@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Language pack detection.
 //!
-//! One marker selects a pack. Several markers use the language with more
-//! source files; a tie is ambiguous. An unknown tree does not pretend to pass.
+//! One marker selects a pack. Several markers stay ambiguous unless only one
+//! of them has source files. An unknown tree does not pretend to pass.
 
 use std::path::Path;
 
@@ -274,42 +274,7 @@ pub fn detect(root: &Path, override_pack: &str) -> Result<Detected, String> {
     if is_c_family(root) {
         found.push(PackId::Cpp);
     }
-    if header_tie(root)
-        && !found.iter().any(|id| {
-            matches!(
-                id,
-                PackId::Rust
-                    | PackId::Go
-                    | PackId::Java
-                    | PackId::CSharp
-                    | PackId::Php
-                    | PackId::Node
-            )
-        })
-    {
-        return Ok(Detected::Ambiguous(vec![PackId::Python, PackId::Cpp]));
-    }
     Ok(resolve_markers(root, found))
-}
-
-/// One Python file and one header is not a C++ program and not a clear Python
-/// program. More headers must not outvote the Python file.
-fn header_tie(root: &Path) -> bool {
-    if has_project_file(root, &["c", "cc", "cpp", "cxx"]) {
-        return false;
-    }
-    count_ext(root, &["py"]) == 1 && count_ext(root, &["h", "hh", "hpp", "hxx"]) == 1
-}
-
-fn count_ext(root: &Path, exts: &[&str]) -> usize {
-    let mut count = 0usize;
-    visit(root, 0, &mut 0, &mut |path| {
-        if ext_is(path, exts) {
-            count += 1;
-        }
-        true
-    });
-    count
 }
 
 fn resolve_markers(root: &Path, found: Vec<PackId>) -> Detected {
@@ -319,21 +284,17 @@ fn resolve_markers(root: &Path, found: Vec<PackId>) -> Detected {
         0 => Detected::Unknown,
         1 => Detected::Pack(found[0]),
         _ => {
+            // A file count must not choose a pack. One language owns the tree
+            // only when every other marker has no source files.
             let counts = source_counts(root);
-            let mut ranked: Vec<(usize, PackId)> = found
+            let owners: Vec<PackId> = found
                 .iter()
-                .map(|id| (counts[pack_index(*id)], *id))
+                .copied()
+                .filter(|id| counts[pack_index(*id)] > 0)
                 .collect();
-            ranked.sort_by(|left, right| {
-                right
-                    .0
-                    .cmp(&left.0)
-                    .then(left.1.as_str().cmp(right.1.as_str()))
-            });
-            if ranked[0].0 > ranked.get(1).map(|item| item.0).unwrap_or(0) {
-                Detected::Pack(ranked[0].1)
-            } else {
-                Detected::Ambiguous(found)
+            match owners.as_slice() {
+                [only] => Detected::Pack(*only),
+                _ => Detected::Ambiguous(found),
             }
         }
     }
@@ -547,17 +508,12 @@ mod tests {
         );
 
         let tie = temp("headers-tie");
-        fs::write(tie.join("Makefile"), "all:\n").unwrap();
         fs::write(tie.join("pyproject.toml"), "[project]\nname = \"d\"\n").unwrap();
         fs::write(tie.join("app.py"), "def value():\n    return 1\n").unwrap();
-        fs::write(tie.join("only.h"), "int marker;\n").unwrap();
-        match detect(&tie, "").unwrap() {
-            Detected::Ambiguous(packs) => {
-                assert!(packs.contains(&PackId::Python), "{packs:?}");
-                assert!(packs.contains(&PackId::Cpp), "{packs:?}");
-            }
-            other => panic!("expected ambiguous, got {other:?}"),
-        }
+        fs::write(tie.join("ext.h"), "int marker;\n").unwrap();
+        assert_eq!(detect(&tie, "").unwrap(), Detected::Pack(PackId::Python));
+        fs::write(tie.join("Makefile"), "all:\n").unwrap();
+        assert_eq!(detect(&tie, "").unwrap(), Detected::Pack(PackId::Python));
         let _ = fs::remove_dir_all(&many);
         let _ = fs::remove_dir_all(&reported);
         let _ = fs::remove_dir_all(&tie);
@@ -609,15 +565,39 @@ mod tests {
     }
 
     #[test]
-    fn the_language_with_more_source_files_is_used() {
-        let dir = temp("django");
-        fs::write(dir.join("package.json"), "{}\n").unwrap();
+    fn several_manifests_stay_ambiguous_when_each_has_source() {
+        let dir = temp("both-source");
+        fs::write(
+            dir.join("package.json"),
+            "{\"scripts\":{\"test\":\"node __tests__/add.test.js\"}}\n",
+        )
+        .unwrap();
         fs::write(dir.join("pyproject.toml"), "[project]\nname = \"d\"\n").unwrap();
-        fs::write(dir.join("app.js"), "console.log(1)\n").unwrap();
-        fs::write(dir.join("a.py"), "x = 1\n").unwrap();
-        fs::write(dir.join("b.py"), "y = 1\n").unwrap();
-        assert_eq!(detect(&dir, "").unwrap(), Detected::Pack(PackId::Python));
+        fs::create_dir_all(dir.join("__tests__")).unwrap();
+        fs::write(
+            dir.join("__tests__/add.test.js"),
+            "throw new Error('fail')\n",
+        )
+        .unwrap();
+        fs::create_dir_all(dir.join("tools")).unwrap();
+        fs::write(dir.join("tools/a.py"), "x = 1\n").unwrap();
+        fs::write(dir.join("tools/b.py"), "y = 1\n").unwrap();
+        fs::write(dir.join("tools/c.py"), "z = 1\n").unwrap();
+        match detect(&dir, "").unwrap() {
+            Detected::Ambiguous(packs) => {
+                assert!(packs.contains(&PackId::Node), "{packs:?}");
+                assert!(packs.contains(&PackId::Python), "{packs:?}");
+            }
+            other => panic!("expected ambiguous, got {other:?}"),
+        }
+
+        let clear = temp("py-owns");
+        fs::write(clear.join("package.json"), "{}\n").unwrap();
+        fs::write(clear.join("pyproject.toml"), "[project]\nname = \"d\"\n").unwrap();
+        fs::write(clear.join("a.py"), "x = 1\n").unwrap();
+        assert_eq!(detect(&clear, "").unwrap(), Detected::Pack(PackId::Python));
         let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&clear);
     }
 
     #[test]

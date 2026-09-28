@@ -2387,35 +2387,22 @@ mod tests {
     }
 
     #[test]
-    fn one_python_file_and_one_header_names_pack() {
+    fn one_python_file_and_one_header_stays_python() {
         let dir = std::env::temp_dir().join(format!("sc-header-tie-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("Makefile"), "all:\n").unwrap();
         std::fs::write(dir.join("pyproject.toml"), "[project]\nname = \"d\"\n").unwrap();
         std::fs::write(dir.join("app.py"), "def value():\n    return 1\n").unwrap();
-        std::fs::write(dir.join("only.h"), "int marker;\n").unwrap();
-        let output = analyze(AnalyzeRequest {
-            root: dir.clone(),
-            repo: "tie".into(),
-            fail_on: vec!["types".into(), "tests".into(), "crap".into()],
-            budget: Duration::from_secs(30),
-            config: Config::default(),
-            diff_base: None,
-            diff_head: None,
-            path_list: Vec::new(),
-            spec_path: None,
-            mutation_override: None,
-            llm_override: None,
-            intent: None,
-        });
-        assert_eq!(output.status, RunStatus::AnalyzerError);
-        assert!(output.scorecard.findings.iter().any(|finding| {
-            finding.message.contains("python")
-                && finding.message.contains("cpp")
-                && finding.message.contains("--pack")
-                && finding.message.contains("analyzer.toml")
-        }));
+        std::fs::write(dir.join("ext.h"), "int marker;\n").unwrap();
+        assert_eq!(
+            crate::pack::detect(&dir, "").unwrap(),
+            crate::pack::Detected::Pack(crate::pack::PackId::Python)
+        );
+        std::fs::write(dir.join("Makefile"), "all:\n").unwrap();
+        assert_eq!(
+            crate::pack::detect(&dir, "").unwrap(),
+            crate::pack::Detected::Pack(crate::pack::PackId::Python)
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
