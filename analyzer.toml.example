@@ -58,5 +58,7 @@ disable = []
 
 [commands]
 # Empty skips lint. Non-zero exit is `lint.failed`.
-# Add `lint` to `gates.fail_on` to make that exit fail the process.
-lint = "cargo clippy -- -D warnings"
+# The default matches `cargo clippy`: warnings do not fail the gate.
+# A crate that already denies warnings still fails. To deny them here:
+# lint = "cargo clippy -- -D warnings"
+lint = "cargo clippy"
