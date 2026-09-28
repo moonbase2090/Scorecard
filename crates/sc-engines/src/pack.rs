@@ -551,8 +551,27 @@ mod tests {
         fs::create_dir_all(cs.join("src/App")).unwrap();
         fs::write(cs.join("src/App/App.csproj"), "<Project></Project>\n").unwrap();
         assert_eq!(detect(&cs, "").unwrap(), Detected::Pack(PackId::CSharp));
+
+        let mixed = temp("rust-cs");
+        fs::write(mixed.join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
+        fs::write(mixed.join("src_lib.rs"), "fn value() {}\n").unwrap();
+        fs::create_dir_all(mixed.join("fixture")).unwrap();
+        fs::write(mixed.join("fixture/App.csproj"), "<Project></Project>\n").unwrap();
+        fs::write(mixed.join("fixture/App.cs"), "class App {}\n").unwrap();
+        match detect(&mixed, "").unwrap() {
+            Detected::Ambiguous(packs) => {
+                assert!(packs.contains(&PackId::Rust), "{packs:?}");
+                assert!(packs.contains(&PackId::CSharp), "{packs:?}");
+            }
+            other => panic!("expected ambiguous, got {other:?}"),
+        }
+        assert_eq!(
+            detect(&mixed, "rust").unwrap(),
+            Detected::Pack(PackId::Rust)
+        );
         let _ = fs::remove_dir_all(&py);
         let _ = fs::remove_dir_all(&cs);
+        let _ = fs::remove_dir_all(&mixed);
     }
 
     #[test]
