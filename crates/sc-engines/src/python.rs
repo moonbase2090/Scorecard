@@ -52,7 +52,13 @@ pub struct PythonOutcome {
     pub crap_worst: Vec<sc_core::CrapFunction>,
 }
 
-pub fn run(root: &Path, deadline: Instant, threshold: u32, untested_cc: u32) -> PythonOutcome {
+pub fn run(
+    root: &Path,
+    deadline: Instant,
+    threshold: u32,
+    untested_cc: u32,
+    started: std::time::SystemTime,
+) -> PythonOutcome {
     let mut findings = Vec::new();
     let mut runs = Vec::new();
     let mut ran = Vec::new();
@@ -85,7 +91,7 @@ pub fn run(root: &Path, deadline: Instant, threshold: u32, untested_cc: u32) -> 
         &mut skipped,
     );
     let sca = check_imports(root, &mut findings, &mut ran);
-    let coverage = read_coverage(root, &functions);
+    let coverage = read_coverage(root, &functions, started);
     let crap = crate::crap::evaluate(
         &functions,
         coverage.as_ref(),
@@ -1256,9 +1262,10 @@ fn shell(
 fn read_coverage(
     root: &Path,
     functions: &[sc_graph::FunctionInfo],
+    since: std::time::SystemTime,
 ) -> Option<crate::coverage::CoverageData> {
     let path = root.join(".sc").join("coverage").join("pytest.json");
-    if !path.is_file() {
+    if !crate::pack_cov::written_during_run(&path, since) {
         return None;
     }
     let text = std::fs::read_to_string(&path).ok()?;
@@ -1463,10 +1470,14 @@ mod tests {
             },
             cc: 2,
         }];
-        let data = read_coverage(&root, &functions).unwrap();
+        let before = crate::pack_cov::run_start() - std::time::Duration::from_secs(60);
+        let data = read_coverage(&root, &functions, before).unwrap();
         assert_eq!(data.functions.len(), 1);
         assert!(data.functions[0].coverage > 0.5);
-        assert!(read_coverage(&root.join("missing"), &functions).is_none());
+        assert!(read_coverage(&root.join("missing"), &functions, before).is_none());
+        // A report older than this run is left from an earlier one.
+        let after = crate::pack_cov::run_start() + std::time::Duration::from_secs(60);
+        assert!(read_coverage(&root, &functions, after).is_none());
         std::fs::create_dir_all(root.join("tests")).unwrap();
         std::fs::write(
             root.join("tests/test_ok.py"),
