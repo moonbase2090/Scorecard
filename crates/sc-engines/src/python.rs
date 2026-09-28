@@ -1234,12 +1234,14 @@ fn read_coverage(
     let text = std::fs::read_to_string(&path).ok()?;
     let value: serde_json::Value = serde_json::from_str(&text).ok()?;
     let files = value.get("files")?.as_object()?;
+    let known: Vec<&str> = functions.iter().map(|item| item.file.as_str()).collect();
+    let owners = crate::coverage::file_owners(files.keys().map(|name| name.as_str()), &known);
     let mut covered = Vec::new();
     for function in functions {
-        let known: Vec<&str> = functions.iter().map(|item| item.file.as_str()).collect();
-        let Some((_, file)) = files.iter().find(|(name, _)| {
-            crate::coverage::path_owned(name, &function.file, known.iter().copied())
-        }) else {
+        let Some((_, file)) = files
+            .iter()
+            .find(|(name, _)| crate::coverage::report_owns(&owners, name, &function.file))
+        else {
             continue;
         };
         let executed = line_set(file, "executed_lines");

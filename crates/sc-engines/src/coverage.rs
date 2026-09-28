@@ -240,6 +240,78 @@ pub fn symbol_matches(demangled: &str, symbol: &str) -> bool {
 
 /// True when `cov_file` is `rel`, or ends at a path boundary with `rel`,
 /// and no longer known file is a better suffix of `cov_file`.
+/// One report path maps to one project file. Built once per report.
+pub fn file_owners<'a>(
+    reports: impl IntoIterator<Item = &'a str>,
+    known: &[&str],
+) -> std::collections::HashMap<String, String> {
+    let mut map = std::collections::HashMap::new();
+    for report in reports {
+        if let Some(file) = owner_of(report, known) {
+            map.insert(normalize_path(report), file.to_string());
+        }
+    }
+    map
+}
+
+pub fn report_owns(
+    owners: &std::collections::HashMap<String, String>,
+    report: &str,
+    file: &str,
+) -> bool {
+    owners
+        .get(&normalize_path(report))
+        .is_some_and(|owner| owner == &normalize_path(file))
+}
+
+fn owner_of<'a>(report: &str, known: &[&'a str]) -> Option<&'a str> {
+    let mut best: Option<(usize, &'a str)> = None;
+    for file in known {
+        if !path_owned(report, file, known.iter().copied()) {
+            continue;
+        }
+        let prefix = path_prefix_len(report, file)?;
+        best = Some(match best {
+            None => (prefix, *file),
+            Some((best_prefix, _)) if prefix < best_prefix => (prefix, *file),
+            Some(kept) => kept,
+        });
+    }
+    if let Some((_, file)) = best {
+        return Some(file);
+    }
+    // JaCoCo's package plus source file is a suffix of the project path.
+    let report_path = normalize_path(report);
+    if report_path.is_empty() {
+        return None;
+    }
+    let mut suffix_hits = Vec::new();
+    for file in known {
+        let file_path = normalize_path(file);
+        if file_path == report_path || file_path.ends_with(&format!("/{report_path}")) {
+            suffix_hits.push(*file);
+        }
+    }
+    if suffix_hits.len() == 1 {
+        return Some(suffix_hits[0]);
+    }
+    if report_path.contains('/') {
+        return None;
+    }
+    let mut only = None;
+    for file in known {
+        let base = normalize_path(file);
+        let base = base.rsplit('/').next().unwrap_or("");
+        if base == report_path {
+            if only.is_some() {
+                return None;
+            }
+            only = Some(*file);
+        }
+    }
+    only
+}
+
 pub fn path_owned<'a>(cov_file: &str, rel: &str, known: impl IntoIterator<Item = &'a str>) -> bool {
     if path_prefix_len(cov_file, rel).is_none() {
         return false;

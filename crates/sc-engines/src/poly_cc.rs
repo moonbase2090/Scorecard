@@ -234,7 +234,7 @@ fn files_with(root: &Path, exts: &[&str], lang: Lang) -> Vec<FunctionInfo> {
 }
 
 fn collect(root: &Path, dir: &Path, depth: u32, exts: &[&str], out: &mut Vec<String>) {
-    if depth > 6 || out.len() >= 400 {
+    if depth > 32 {
         return;
     }
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -246,17 +246,23 @@ fn collect(root: &Path, dir: &Path, depth: u32, exts: &[&str], out: &mut Vec<Str
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("");
-        if name.starts_with('.')
+        if name == ".git"
+            || name == ".sc"
+            || name == ".venv"
             || name == "node_modules"
             || name == "target"
-            || name == "dist"
             || name == "__pycache__"
-            || name == ".venv"
-            || name == "vendor"
         {
             continue;
         }
         if path.is_dir() {
+            if path
+                .symlink_metadata()
+                .map(|meta| meta.file_type().is_symlink())
+                .unwrap_or(false)
+            {
+                continue;
+            }
             if !test_dir(name) {
                 collect(root, &path, depth + 1, exts, out);
             }
@@ -611,6 +617,22 @@ mod tests {
             .map(|finding| finding.file.as_str())
             .collect();
         assert_eq!(flagged, ["src/pick.js"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn function_walk_includes_vendor_and_a_deep_file() {
+        let dir = std::env::temp_dir().join(format!("sc-walk-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("vendor")).unwrap();
+        std::fs::write(dir.join("vendor/index.js"), "function choose(){return 1}\n").unwrap();
+        let deep = dir.join("a/b/c/d/e/f/g");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("deep.js"), "function choose(){return 1}\n").unwrap();
+        let mut out = Vec::new();
+        collect(&dir, &dir, 0, &["js"], &mut out);
+        assert!(out.iter().any(|path| path == "vendor/index.js"), "{out:?}");
+        assert!(out.iter().any(|path| path.ends_with("deep.js")), "{out:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

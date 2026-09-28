@@ -68,37 +68,47 @@ fn find_named(dir: &Path, names: &[&str], depth: u32) -> Option<String> {
 pub fn istanbul(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
     let value: serde_json::Value = serde_json::from_str(text).ok()?;
     let files = value.as_object()?;
+    let owners = owners(files.keys().map(|name| name.as_str()), functions);
     Some(from_hits(functions, |function| {
-        let file = files
-            .iter()
-            .find(|(name, _)| file_match(name, &function.file, functions))?;
-        let map = file.1.get("statementMap")?.as_object()?;
-        let hits = file.1.get("s")?.as_object()?;
         let mut hit = 0u32;
         let mut total = 0u32;
-        for (id, loc) in map {
-            let line = loc.pointer("/start/line")?.as_u64()? as u32;
-            if line < function.span.start_line || line > function.span.end_line {
+        let mut saw = false;
+        for (name, body) in files {
+            if !crate::coverage::report_owns(&owners, name, &function.file) {
                 continue;
             }
-            total += 1;
-            if hits.get(id).and_then(|count| count.as_u64()).unwrap_or(0) > 0 {
-                hit += 1;
+            let map = body.get("statementMap")?.as_object()?;
+            let hits = body.get("s")?.as_object()?;
+            for (id, loc) in map {
+                let line = loc.pointer("/start/line")?.as_u64()? as u32;
+                if line < function.span.start_line || line > function.span.end_line {
+                    continue;
+                }
+                saw = true;
+                total += 1;
+                if hits.get(id).and_then(|count| count.as_u64()).unwrap_or(0) > 0 {
+                    hit += 1;
+                }
             }
         }
-        (total > 0).then_some((hit, total))
+        saw.then_some((hit, total))
     }))
 }
 
 pub fn jacoco(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
     let text = xml_lines(text);
+    let mut package = String::new();
     let mut source = String::new();
     let mut rows: Vec<(String, String, u32, u32)> = Vec::new();
     let mut method = String::new();
     for line in text.lines() {
         let trimmed = line.trim();
+        if trimmed.starts_with("<package ") {
+            package = attr(trimmed, "name").unwrap_or_default().replace('.', "/");
+            source.clear();
+        }
         if let Some(name) = attr(trimmed, "sourcefilename") {
-            source = name;
+            source = join_source(&package, &name);
         }
         if trimmed.starts_with("<method ") {
             method = attr(trimmed, "name").unwrap_or_default();
@@ -118,10 +128,12 @@ pub fn jacoco(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
     if rows.is_empty() {
         return None;
     }
+    let owners = owners(rows.iter().map(|(file, _, _, _)| file.as_str()), functions);
     Some(from_hits(functions, |function| {
         rows.iter()
             .find(|(file, name, _, _)| {
-                file_match(file, &function.file, functions) && *name == function.symbol
+                crate::coverage::report_owns(&owners, file, &function.file)
+                    && *name == function.symbol
             })
             .map(|(_, _, covered, missed)| (*covered, covered + missed))
     }))
@@ -153,22 +165,15 @@ pub fn cobertura(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData>
     if lines.is_empty() {
         return None;
     }
+    let owners = owners(lines.iter().map(|(name, _, _)| name.as_str()), functions);
     Some(from_hits(functions, |function| {
-        let mut hit = 0u32;
-        let mut total = 0u32;
-        for (name, line, hits) in &lines {
-            if !file_match(name, &function.file, functions) {
-                continue;
-            }
-            if *line < function.span.start_line || *line > function.span.end_line {
-                continue;
-            }
-            total += 1;
-            if *hits > 0 {
-                hit += 1;
-            }
-        }
-        (total > 0).then_some((hit, total))
+        sum_owned(
+            &owners,
+            &function.file,
+            function.span.start_line,
+            function.span.end_line,
+            &lines,
+        )
     }))
 }
 
@@ -197,22 +202,15 @@ pub fn clover(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
         if lines.is_empty() {
             return None;
         }
+        let owners = owners(lines.iter().map(|(name, _, _)| name.as_str()), functions);
         Some(from_hits(functions, |function| {
-            let mut hit = 0u32;
-            let mut total = 0u32;
-            for (name, line, count) in &lines {
-                if !file_match(name, &function.file, functions)
-                    || *line < function.span.start_line
-                    || *line > function.span.end_line
-                {
-                    continue;
-                }
-                total += 1;
-                if *count > 0 {
-                    hit += 1;
-                }
-            }
-            (total > 0).then_some((hit, total))
+            sum_owned(
+                &owners,
+                &function.file,
+                function.span.start_line,
+                function.span.end_line,
+                &lines,
+            )
         }))
     })
 }
@@ -235,22 +233,15 @@ pub fn lcov(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
     if lines.is_empty() {
         return None;
     }
+    let owners = owners(lines.iter().map(|(name, _, _)| name.as_str()), functions);
     Some(from_hits(functions, |function| {
-        let mut hit = 0u32;
-        let mut total = 0u32;
-        for (name, line, hits) in &lines {
-            if !file_match(name, &function.file, functions)
-                || *line < function.span.start_line
-                || *line > function.span.end_line
-            {
-                continue;
-            }
-            total += 1;
-            if *hits > 0 {
-                hit += 1;
-            }
-        }
-        (total > 0).then_some((hit, total))
+        sum_owned(
+            &owners,
+            &function.file,
+            function.span.start_line,
+            function.span.end_line,
+            &lines,
+        )
     }))
 }
 
@@ -286,38 +277,42 @@ fn from_hits(
     }
 }
 
-fn file_match(report: &str, function_file: &str, functions: &[FunctionInfo]) -> bool {
+fn owners<'a>(
+    reports: impl IntoIterator<Item = &'a str>,
+    functions: &'a [FunctionInfo],
+) -> std::collections::HashMap<String, String> {
     let known: Vec<&str> = functions.iter().map(|item| item.file.as_str()).collect();
-    if crate::coverage::path_owned(report, function_file, known.iter().copied()) {
-        return true;
+    crate::coverage::file_owners(reports, &known)
+}
+
+fn sum_owned(
+    owners: &std::collections::HashMap<String, String>,
+    file: &str,
+    start: u32,
+    end: u32,
+    lines: &[(String, u32, u32)],
+) -> Option<(u32, u32)> {
+    let mut hit = 0u32;
+    let mut total = 0u32;
+    for (name, line, hits) in lines {
+        if !crate::coverage::report_owns(owners, name, file) || *line < start || *line > end {
+            continue;
+        }
+        total += 1;
+        if *hits > 0 {
+            hit += 1;
+        }
     }
-    // JaCoCo records only the source basename. A path with a directory is a
-    // different file, even when the basename matches.
-    let report = report.replace('\\', "/");
-    if report.contains('/') {
-        return false;
+    (total > 0).then_some((hit, total))
+}
+
+fn join_source(package: &str, file: &str) -> String {
+    let package = package.trim_matches('/');
+    if package.is_empty() || file.contains('/') {
+        file.to_string()
+    } else {
+        format!("{package}/{file}")
     }
-    let function_base = function_file
-        .replace('\\', "/")
-        .rsplit('/')
-        .next()
-        .unwrap_or("")
-        .to_string();
-    if report.is_empty() || report != function_base {
-        return false;
-    }
-    functions
-        .iter()
-        .filter(|item| {
-            item.file
-                .replace('\\', "/")
-                .rsplit('/')
-                .next()
-                .unwrap_or("")
-                == function_base
-        })
-        .count()
-        == 1
 }
 
 fn xml_lines(text: &str) -> String {
@@ -394,6 +389,78 @@ mod tests {
         let data = istanbul(text, &[pkg, other]).unwrap();
         assert!(data.for_function("pkg/index.js", "choose").is_some());
         assert!(data.for_function("other/index.js", "choose").is_none());
+    }
+
+    #[test]
+    fn jacoco_joins_the_package_name_to_the_source_file() {
+        let text = r#"
+            <report>
+              <package name="com/a">
+                <class name="com/a/Util" sourcefilename="Util.java">
+                  <method name="choose"><counter type="LINE" missed="0" covered="2"/></method>
+                </class>
+              </package>
+              <package name="com/b">
+                <class name="com/b/Util" sourcefilename="Util.java">
+                  <method name="choose"><counter type="LINE" missed="2" covered="0"/></method>
+                </class>
+              </package>
+            </report>
+        "#;
+        let a = FunctionInfo {
+            file: "src/main/java/com/a/Util.java".into(),
+            ..sample_java()
+        };
+        let b = FunctionInfo {
+            file: "src/main/java/com/b/Util.java".into(),
+            ..sample_java()
+        };
+        let data = jacoco(text, &[a, b]).unwrap();
+        let covered = data
+            .for_function("src/main/java/com/a/Util.java", "choose")
+            .unwrap();
+        let missed = data
+            .for_function("src/main/java/com/b/Util.java", "choose")
+            .unwrap();
+        assert!((covered - 1.0).abs() < 1e-9, "{covered}");
+        assert!(missed.abs() < 1e-9, "{missed}");
+    }
+
+    #[test]
+    fn lcov_does_not_add_hits_from_a_longer_path() {
+        let text =
+            "SF:helper/src/lib.rs\nDA:2,4\nend_of_record\nSF:src/lib.rs\nDA:2,0\nend_of_record\n";
+        let short = FunctionInfo {
+            file: "src/lib.rs".into(),
+            ..sample()
+        };
+        let long = FunctionInfo {
+            file: "helper/src/lib.rs".into(),
+            ..sample()
+        };
+        let data = lcov(text, &[short, long]).unwrap();
+        let short_cov = data.for_function("src/lib.rs", "choose").unwrap();
+        let long_cov = data.for_function("helper/src/lib.rs", "choose").unwrap();
+        assert!(short_cov.abs() < 1e-9, "{short_cov}");
+        assert!((long_cov - 1.0).abs() < 1e-9, "{long_cov}");
+    }
+
+    #[test]
+    fn vendor_index_does_not_cover_the_root_file() {
+        let text = r#"{"vendor/index.js":{"statementMap":{"0":{"start":{"line":2}}},"s":{"0":8}},"index.js":{"statementMap":{"0":{"start":{"line":2}}},"s":{"0":0}}}"#;
+        let root = FunctionInfo {
+            file: "index.js".into(),
+            ..sample()
+        };
+        let vendor = FunctionInfo {
+            file: "vendor/index.js".into(),
+            ..sample()
+        };
+        let data = istanbul(text, &[root, vendor]).unwrap();
+        let root_cov = data.for_function("index.js", "choose").unwrap();
+        let vendor_cov = data.for_function("vendor/index.js", "choose").unwrap();
+        assert!(root_cov.abs() < 1e-9, "{root_cov}");
+        assert!((vendor_cov - 1.0).abs() < 1e-9, "{vendor_cov}");
     }
 
     #[test]
