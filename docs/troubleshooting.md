@@ -4,7 +4,7 @@ Each section starts with what the report says.
 
 ## `tests: pytest is not installed`
 
-When the project has `uv.lock` or a `.venv` directory, `sc` runs `uv run --extra dev --with pytest-cov pytest`. Otherwise it runs `python3 -m pytest` from `PATH`. Create the environment once:
+When the project has `uv.lock` or a `.venv` directory, `sc` runs `uv run --extra dev --with pytest-cov pytest`. If `uv` itself is not installed, the finding says `uv is not installed`. Install `uv`, then create the environment once:
 
 ```bash
 uv venv && uv pip install -e ".[dev]"
