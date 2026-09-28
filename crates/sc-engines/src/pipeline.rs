@@ -1692,10 +1692,12 @@ struct ClippyDiagnostic {
 
 fn first_clippy_diagnostic(root: &Path, output: &str) -> Option<ClippyDiagnostic> {
     let lines: Vec<_> = output.lines().collect();
+    let mut first_warning = None;
     for (index, line) in lines.iter().enumerate() {
         let Some(message) = lint_diagnostic_message(line) else {
             continue;
         };
+        let is_error = line.trim_start().starts_with("error: ");
         let mut location = None;
         let mut lint = None;
         for line in lines.iter().skip(index + 1) {
@@ -1710,16 +1712,22 @@ fn first_clippy_diagnostic(root: &Path, output: &str) -> Option<ClippyDiagnostic
             }
         }
         if let (Some((file, line, column)), Some(lint)) = (location, lint) {
-            return Some(ClippyDiagnostic {
+            let diagnostic = ClippyDiagnostic {
                 file: crate::compile::normalize_file(root, &file),
                 line,
                 column,
                 lint,
                 message: message.to_string(),
-            });
+            };
+            if is_error {
+                return Some(diagnostic);
+            }
+            if first_warning.is_none() {
+                first_warning = Some(diagnostic);
+            }
         }
     }
-    None
+    first_warning
 }
 
 fn lint_diagnostic_message(line: &str) -> Option<&str> {
@@ -3006,7 +3014,7 @@ mod tests {
     #[test]
     fn lint_failures_report_the_first_clippy_location_and_name() {
         let root = std::env::temp_dir();
-        let script = r#"printf '%s\n' 'Checking demo v0.1.0' 'warning: this redundant pattern should be removed' ' --> src/lib.rs:8:5' ' = note: `#[warn(clippy::redundant_pattern_matching)]` on by default' ' = help: for further information visit https://rust-lang.github.io/rust-clippy/master/index.html#redundant_pattern_matching' 'warning: second diagnostic' ' --> src/other.rs:9:1' ' = help: for further information visit https://rust-lang.github.io/rust-clippy/master/index.html#needless_return' >&2; exit 1"#;
+        let script = r#"printf '%s\n' 'Checking demo v0.1.0' 'warning: this redundant pattern should be removed' ' --> src/lib.rs:8:5' ' = note: `#[warn(clippy::redundant_pattern_matching)]` on by default' ' = help: for further information visit https://rust-lang.github.io/rust-clippy/master/index.html#redundant_pattern_matching' 'error: this unwrap is denied' ' --> src/denied.rs:12:7' ' = note: `#[deny(clippy::unwrap_used)]` on by default' ' = help: for further information visit https://rust-lang.github.io/rust-clippy/master/index.html#unwrap_used' >&2; exit 1"#;
         let mut ran = Vec::new();
         let mut skipped = Vec::new();
         let mut findings = Vec::new();
@@ -3027,17 +3035,24 @@ mod tests {
         );
 
         let finding = findings.first().expect("lint failure finding");
-        assert_eq!(finding.file, "src/lib.rs");
-        assert_eq!(finding.span.as_ref().unwrap().start_line, 8);
-        assert_eq!(finding.span.as_ref().unwrap().start_col, 5);
-        assert_eq!(
-            finding.symbol.as_deref(),
-            Some("clippy::redundant_pattern_matching")
-        );
+        assert_eq!(finding.file, "src/denied.rs");
+        assert_eq!(finding.span.as_ref().unwrap().start_line, 12);
+        assert_eq!(finding.span.as_ref().unwrap().start_col, 7);
+        assert_eq!(finding.symbol.as_deref(), Some("clippy::unwrap_used"));
         assert_eq!(
             finding.message,
-            "lint command failed: this redundant pattern should be removed"
+            "lint command failed: this unwrap is denied"
         );
+
+        let warning = first_clippy_diagnostic(
+            &root,
+            "warning: first warning\n --> src/warning.rs:4:2\n = note: `#[warn(clippy::needless_return)]` on by default",
+        )
+        .expect("first warning when no error diagnostic is available");
+        assert_eq!(warning.file, "src/warning.rs");
+        assert_eq!(warning.line, 4);
+        assert_eq!(warning.column, 2);
+        assert_eq!(warning.lint, "clippy::needless_return");
     }
 
     #[test]

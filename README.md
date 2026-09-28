@@ -58,7 +58,7 @@ exit 0: gates passed
 
 Exit status: `0` the enforced gates passed, `1` an enforced gate failed, `2` `sc` could not run. [Reading the report](docs/report.md) explains every section.
 
-Clippy findings point to the first diagnostic's file, line, and lint name:
+Clippy findings use the first error with a file, line, and lint name. If no such error exists, they use the first warning with those details:
 
 ```bash doctest project=lint_diagnostic
 set +e
