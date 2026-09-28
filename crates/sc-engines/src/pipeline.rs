@@ -1943,7 +1943,6 @@ fn import_findings(
         skipped.push("sca".into());
         return 0;
     }
-    let allowed = crate::manifest::manifest_crate_names(root);
     // First segments that resolve inside the crate are never external:
     // declared `mod` names, `extern crate` aliases, and file modules
     // (`src/score.rs`, `src/foo/mod.rs`) across the analyzed sources.
@@ -1957,6 +1956,7 @@ fn import_findings(
     ran.push("sca".into());
     let mut count = 0u64;
     for file in &selection.files {
+        let allowed = crate::manifest::declared_for_file(root, &file.rel);
         count += undeclared_imports(file, &allowed, &local, findings);
     }
     count
@@ -1991,11 +1991,11 @@ fn undeclared_imports(
             }),
             symbol: Some(crate_name.to_string()),
             message: format!(
-                "Advisory: crate `{crate_name}` is used in source and is not in Cargo.toml"
+                "Advisory: crate `{crate_name}` is used in source and is not in this crate's Cargo.toml"
             ),
             evidence: serde_json::json!({"crate": crate_name}),
             suggested_action: Some(format!(
-                "Add `{crate_name}` to Cargo.toml or remove the import"
+                "Add `{crate_name}` to this crate's Cargo.toml or remove the import"
             )),
             disposition: String::new(),
         });
@@ -3282,6 +3282,60 @@ mod tests {
         );
         assert_eq!(count, 1, "{findings:?}");
         assert_eq!(findings[0].symbol.as_deref(), Some("missing"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_dependency_of_another_crate_is_still_undeclared() {
+        use crate::scope::Selection;
+        let dir = std::env::temp_dir().join(format!("sc-sca-sibling-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("a/src")).unwrap();
+        std::fs::create_dir_all(dir.join("b/src")).unwrap();
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"a\", \"b\"]\n\n[workspace.dependencies]\nserde = \"1\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("a/Cargo.toml"),
+            "[package]\nname = \"crate-a\"\nversion = \"0.1.0\"\n\n[dependencies]\nhtml5ever = \"0.1\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("b/Cargo.toml"),
+            "[package]\nname = \"crate-b\"\nversion = \"0.1.0\"\n\n[dependencies]\nbytes = \"1\"\n",
+        )
+        .unwrap();
+        let files = vec![
+            analyzed("a/src/lib.rs", &["html5ever", "serde"], &[]),
+            analyzed("b/src/lib.rs", &["html5ever", "bytes", "serde"], &[]),
+        ];
+        let selection = Selection {
+            mode: "tree".into(),
+            files,
+            crap_functions: Vec::new(),
+            new_symbols: std::collections::BTreeSet::new(),
+            narrow_untested: false,
+            paths: Vec::new(),
+            loc_changed: 0,
+            files_changed: 0,
+            base: None,
+            workspace_root: true,
+        };
+        let mut findings = Vec::new();
+        let count = import_findings(
+            &dir,
+            &selection,
+            true,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut findings,
+        );
+        assert_eq!(count, 1, "{findings:?}");
+        assert_eq!(findings[0].file, "b/src/lib.rs");
+        assert_eq!(findings[0].symbol.as_deref(), Some("html5ever"));
+        assert!(findings[0].message.contains("this crate's Cargo.toml"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
