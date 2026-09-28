@@ -26,8 +26,11 @@ struct Step {
     engine: &'static str,
     command: Option<String>,
     absent: String,
-    /// A failing command with `enforce: false` is reported and does not fail the run.
+    /// A failing command with `enforce: false` is reported and does not fail the run
+    /// when every error is a missing header. Any other error still fails the run.
     enforce: bool,
+    /// A failed command is reported and does not fail the run, whatever the error.
+    advisory_failure: bool,
 }
 
 pub fn run(pack: PackId, root: &Path, deadline: Instant, user_lint: Option<&str>) -> ToolReport {
@@ -40,6 +43,7 @@ pub fn run(pack: PackId, root: &Path, deadline: Instant, user_lint: Option<&str>
             command: Some(lint.to_string()),
             absent: "lint command is empty".into(),
             enforce: true,
+            advisory_failure: false,
         });
     }
     let mut report = ToolReport {
@@ -100,6 +104,7 @@ fn node_plan(root: &Path) -> Vec<Step> {
             command: compile,
             absent: "node is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "tests",
@@ -107,6 +112,7 @@ fn node_plan(root: &Path) -> Vec<Step> {
             command: test,
             absent: "package.json has no test script".into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "lint",
@@ -119,6 +125,7 @@ fn node_plan(root: &Path) -> Vec<Step> {
             },
             absent: "eslint is not configured".into(),
             enforce: true,
+            advisory_failure: false,
         },
     ]
 }
@@ -136,6 +143,7 @@ fn bash_plan(root: &Path) -> Vec<Step> {
             },
             absent: "bash is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "tests",
@@ -143,6 +151,7 @@ fn bash_plan(root: &Path) -> Vec<Step> {
             command: bash_tests(root),
             absent: "bats is not installed or no .bats suite exists".into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "lint",
@@ -154,6 +163,7 @@ fn bash_plan(root: &Path) -> Vec<Step> {
             },
             absent: "shellcheck is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
     ]
 }
@@ -171,6 +181,7 @@ fn go_plan(root: &Path) -> Vec<Step> {
             command: via("go", "go build ./...".into()),
             absent: "go is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "tests",
@@ -181,6 +192,7 @@ fn go_plan(root: &Path) -> Vec<Step> {
             ),
             absent: "go is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "lint",
@@ -188,6 +200,7 @@ fn go_plan(root: &Path) -> Vec<Step> {
             command: via("go", "go vet ./...".into()),
             absent: "go is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
     ]
 }
@@ -241,6 +254,7 @@ fn java_plan(root: &Path) -> Vec<Step> {
             command: compile,
             absent: "javac, mvn, or gradle is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "tests",
@@ -248,6 +262,7 @@ fn java_plan(root: &Path) -> Vec<Step> {
             command: test,
             absent: test_absent.into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "lint",
@@ -255,6 +270,7 @@ fn java_plan(root: &Path) -> Vec<Step> {
             command: None,
             absent: "no Java linter is configured".into(),
             enforce: true,
+            advisory_failure: false,
         },
     ]
 }
@@ -268,6 +284,7 @@ fn csharp_plan() -> Vec<Step> {
             command: via("dotnet", format!("{prefix} dotnet build --nologo -v q")),
             absent: "dotnet is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "tests",
@@ -275,6 +292,7 @@ fn csharp_plan() -> Vec<Step> {
             command: via("dotnet", format!("{prefix} {CSHARP_TEST}")),
             absent: "dotnet is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "lint",
@@ -282,6 +300,7 @@ fn csharp_plan() -> Vec<Step> {
             command: None,
             absent: "C# analyzers run as part of dotnet build".into(),
             enforce: true,
+            advisory_failure: false,
         },
     ]
 }
@@ -299,6 +318,7 @@ fn php_plan(root: &Path) -> Vec<Step> {
             },
             absent: "php is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "tests",
@@ -312,6 +332,7 @@ fn php_plan(root: &Path) -> Vec<Step> {
             },
             absent: "phpunit is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "lint",
@@ -333,6 +354,7 @@ fn php_plan(root: &Path) -> Vec<Step> {
             },
             absent: "phpstan is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
     ]
 }
@@ -340,13 +362,20 @@ fn php_plan(root: &Path) -> Vec<Step> {
 fn cpp_plan(root: &Path) -> Vec<Step> {
     let files = list_files(root, &["c", "cc", "cpp", "cxx"]);
     let (c_files, cxx_files) = split_c_family(&files);
+    let flags = if c_files.is_empty() && cxx_files.is_empty() {
+        MakefileFlags::none()
+    } else {
+        MakefileFlags::read(root)
+    };
+    let build_db = types_enforced(root);
     vec![
         Step {
             gate: "types",
             engine: "compile",
-            command: cpp_compile(root, &c_files, &cxx_files),
+            command: cpp_compile(root, &c_files, &cxx_files, &flags),
             absent: cpp_absent(&c_files, &cxx_files),
-            enforce: types_enforced(root),
+            enforce: build_db,
+            advisory_failure: flags.uncertain && !build_db,
         },
         Step {
             gate: "tests",
@@ -358,6 +387,7 @@ fn cpp_plan(root: &Path) -> Vec<Step> {
             },
             absent: "CTest suite is not present".into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "lint",
@@ -369,6 +399,7 @@ fn cpp_plan(root: &Path) -> Vec<Step> {
             },
             absent: "clang-tidy is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
     ]
 }
@@ -407,8 +438,11 @@ fn apply(root: &Path, deadline: Instant, step: Step, report: &mut ToolReport) {
                 };
                 // Without a build database, only missing headers stay advisory.
                 // An undeclared name or a syntax error still fails the gate.
-                let advisory = !step.enforce
-                    && include_only_failure(&format!("{}\n{}", captured.stdout, captured.stderr));
+                // A Makefile whose flags make could not evaluate stays advisory
+                // for every error, because the check may not match the build.
+                let output = format!("{}\n{}", captured.stdout, captured.stderr);
+                let advisory =
+                    step.advisory_failure || (!step.enforce && include_only_failure(&output));
                 if !advisory {
                     let rule = match step.engine {
                         "tests" => "test.failed",
@@ -434,9 +468,15 @@ fn apply(root: &Path, deadline: Instant, step: Step, report: &mut ToolReport) {
                         &format!("{} failed", step.engine),
                     ));
                 } else {
-                    let reason = format!(
-                        "{failed}. Include paths and generated headers are not known without CMakeLists.txt or compile_commands.json, so this types check is not enforced."
-                    );
+                    let reason = if step.advisory_failure {
+                        format!(
+                            "{failed}. The Makefile sets flags make could not evaluate, so this types check is not enforced. Install make, or write those flags without a variable or a conditional."
+                        )
+                    } else {
+                        format!(
+                            "{failed}. Include paths and generated headers are not known without CMakeLists.txt or compile_commands.json, so this types check is not enforced."
+                        )
+                    };
                     report.findings.push(Finding {
                         id: format!("{}:failed", step.engine),
                         rule: "compile.failed".into(),
@@ -620,17 +660,21 @@ fn syntax_group(bin: &str, prefix: &str, files: &[String]) -> Option<String> {
     }
 }
 
-fn cpp_compile(root: &Path, c_files: &[String], cxx_files: &[String]) -> Option<String> {
+fn cpp_compile(
+    root: &Path,
+    c_files: &[String],
+    cxx_files: &[String],
+    flags: &MakefileFlags,
+) -> Option<String> {
     if !c_files.is_empty() || !cxx_files.is_empty() {
-        let (c_flags, cxx_flags) = makefile_flags(root);
         let c = syntax_group(
             "cc",
-            &flag_prefix("cc -fsyntax-only -x c", &c_flags),
+            &flag_prefix("cc -fsyntax-only -x c", &flags.c),
             c_files,
         );
         let cxx = syntax_group(
             "g++",
-            &flag_prefix("g++ -fsyntax-only", &cxx_flags),
+            &flag_prefix("g++ -fsyntax-only", &flags.cxx),
             cxx_files,
         );
         if let (Some(c), Some(cxx)) = (c, cxx) {
@@ -796,16 +840,138 @@ fn flag_prefix(base: &str, flags: &[String]) -> String {
     prefix
 }
 
-/// `-I` and `-D` from the Makefile. `=`, `:=`, and `?=` set the variable the
-/// way `make` does, and a later assignment replaces an earlier one. `+=`
-/// appends. A project that builds with those flags must not fail the types
-/// gate for the macros and headers they supply.
-fn makefile_flags(root: &Path) -> (Vec<String>, Vec<String>) {
-    let text = ["Makefile", "makefile", "GNUmakefile"]
-        .iter()
-        .find_map(|name| std::fs::read_to_string(root.join(name)).ok())
-        .unwrap_or_default()
-        .replace("\\\n", " ");
+/// `-I` and `-D` from the Makefile, as `make` would pass them. A reference
+/// such as `$(DEFS)` is expanded, and an `ifeq` branch `make` does not take
+/// is left out. When `make` cannot evaluate a variable or a conditional, the
+/// types gate stays advisory.
+struct MakefileFlags {
+    c: Vec<String>,
+    cxx: Vec<String>,
+    uncertain: bool,
+}
+
+impl MakefileFlags {
+    fn none() -> Self {
+        Self {
+            c: Vec::new(),
+            cxx: Vec::new(),
+            uncertain: false,
+        }
+    }
+
+    fn read(root: &Path) -> Self {
+        let Some((name, text)) = makefile_source(root) else {
+            return Self::none();
+        };
+        if let Some((cpp, c, cxx)) = flags_from_make(root, name) {
+            let (c, cxx) = combine_flag_text(&cpp, &c, &cxx);
+            return Self {
+                c,
+                cxx,
+                uncertain: false,
+            };
+        }
+        let (c, cxx) = flags_from_text(&text);
+        Self {
+            c,
+            cxx,
+            uncertain: makefile_text_uncertain(&text),
+        }
+    }
+}
+
+fn makefile_source(root: &Path) -> Option<(&str, String)> {
+    ["Makefile", "makefile", "GNUmakefile"]
+        .into_iter()
+        .find_map(|name| {
+            std::fs::read_to_string(root.join(name))
+                .ok()
+                .map(|text| (name, text.replace("\\\n", " ")))
+        })
+}
+
+fn flags_from_make(root: &Path, makefile_name: &str) -> Option<(String, String, String)> {
+    if !which("make") {
+        return None;
+    }
+    let extra = extra_makefile_path();
+    // `$(info)` prints the expanded value. GNU make 3.81 has no `--eval`,
+    // so the probe is a second makefile. The goal is not the project's
+    // default target, and its recipe does not build anything.
+    let body = "\
+$(info __SC_CPPFLAGS__=$(CPPFLAGS))\n\
+$(info __SC_CFLAGS__=$(CFLAGS))\n\
+$(info __SC_CXXFLAGS__=$(CXXFLAGS))\n\
+__sc_flags:\n\
+\t@:\n";
+    std::fs::write(&extra, body).ok()?;
+    let mut cmd = Command::new("make");
+    cmd.current_dir(root)
+        .arg("-s")
+        .arg("--no-print-directory")
+        .arg("-f")
+        .arg(makefile_name)
+        .arg("-f")
+        .arg(&extra)
+        .arg("__sc_flags")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let captured = run_cmd(&mut cmd, std::time::Duration::from_secs(5));
+    let _ = std::fs::remove_file(&extra);
+    let captured = captured.ok()?;
+    if !captured.status.success() {
+        return None;
+    }
+    Some((
+        marked_make_value(&captured.stdout, "CPPFLAGS")?,
+        marked_make_value(&captured.stdout, "CFLAGS")?,
+        marked_make_value(&captured.stdout, "CXXFLAGS")?,
+    ))
+}
+
+fn extra_makefile_path() -> std::path::PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("sc-make-flags-{}-{n}.mk", std::process::id()))
+}
+
+fn marked_make_value(stdout: &str, name: &str) -> Option<String> {
+    let prefix = format!("__SC_{name}__=");
+    stdout
+        .lines()
+        .rev()
+        .find(|line| line.starts_with(&prefix))
+        .map(|line| line[prefix.len()..].to_string())
+}
+
+fn combine_flag_text(cpp: &str, c: &str, cxx: &str) -> (Vec<String>, Vec<String>) {
+    let cpp_tokens = compile_flag_tokens(cpp);
+    let mut c_flags = cpp_tokens.clone();
+    c_flags.extend(compile_flag_tokens(c));
+    let mut cxx_flags = cpp_tokens;
+    cxx_flags.extend(compile_flag_tokens(cxx));
+    (c_flags, cxx_flags)
+}
+
+fn makefile_text_uncertain(text: &str) -> bool {
+    text.contains("$(")
+        || text.contains("${")
+        || text.lines().any(|line| {
+            let line = strip_makefile_comment(line).trim();
+            line.starts_with("ifeq")
+                || line.starts_with("ifneq")
+                || line.starts_with("ifdef")
+                || line.starts_with("ifndef")
+                || line == "else"
+                || line.starts_with("else ")
+                || line == "endif"
+                || line.starts_with("endif ")
+        })
+}
+
+fn flags_from_text(text: &str) -> (Vec<String>, Vec<String>) {
     let mut cflags = MakeValue::default();
     let mut cxxflags = MakeValue::default();
     let mut cppflags = MakeValue::default();
@@ -821,14 +987,7 @@ fn makefile_flags(root: &Path) -> (Vec<String>, Vec<String>) {
         };
         apply_make_value(slot, op, value);
     }
-    let c_tokens = compile_flag_tokens(&cflags.text);
-    let cxx_tokens = compile_flag_tokens(&cxxflags.text);
-    let cpp_tokens = compile_flag_tokens(&cppflags.text);
-    let mut c = cpp_tokens.clone();
-    c.extend(c_tokens);
-    let mut cxx = cpp_tokens;
-    cxx.extend(cxx_tokens);
-    (c, cxx)
+    combine_flag_text(&cppflags.text, &cflags.text, &cxxflags.text)
 }
 
 #[derive(Default)]
@@ -1534,9 +1693,9 @@ mod tests {
             let _ = std::fs::remove_dir_all(&root);
             std::fs::create_dir_all(&root).unwrap();
             std::fs::write(root.join("Makefile"), makefile).unwrap();
-            let got = makefile_flags(&root);
+            let got = MakefileFlags::read(&root);
             let _ = std::fs::remove_dir_all(&root);
-            got
+            (got.c, got.cxx)
         }
 
         let (c, _) = flags("CFLAGS := -DVERSION=\\\"1.0\\\"\n");
@@ -1714,6 +1873,104 @@ mod tests {
     }
 
     #[test]
+    fn make_evaluates_a_variable_and_skips_an_untaken_branch() {
+        if !which("make") {
+            return;
+        }
+        fn flags(makefile: &str) -> Vec<String> {
+            let root = std::env::temp_dir().join(format!(
+                "sc-make-eval-{}-{}",
+                std::process::id(),
+                makefile.len()
+            ));
+            let _ = std::fs::remove_dir_all(&root);
+            std::fs::create_dir_all(&root).unwrap();
+            std::fs::write(root.join("Makefile"), makefile).unwrap();
+            let got = MakefileFlags::read(&root);
+            let _ = std::fs::remove_dir_all(&root);
+            got.c
+        }
+        let c = flags("DEFS = -DVERSION=\\\"1.0\\\"\nCFLAGS = -O2 $(DEFS)\nall:\n\texit 7\n");
+        assert_eq!(c, vec!["-DVERSION=\"1.0\"".to_string()]);
+        let c = flags("ifeq ($(NEVER),1)\nCFLAGS = -DHIDE\nendif\nall:\n\texit 7\n");
+        assert!(c.is_empty(), "{c:?}");
+        assert!(makefile_text_uncertain("CFLAGS = $(DEFS)\n"));
+        assert!(makefile_text_uncertain(
+            "ifeq ($(NEVER),1)\nCFLAGS = -DHIDE\nendif\n"
+        ));
+        assert!(!makefile_text_uncertain("CFLAGS = -DVERSION=1\n"));
+    }
+
+    #[test]
+    fn a_variable_in_cflags_reaches_the_compiler() {
+        if !which("cc") || !which("make") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-defs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "DEFS = -DVERSION=\\\"1.0\\\"\nCFLAGS = -O2 $(DEFS)\nall:\n\tcc $(CFLAGS) -o demo main.c\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("main.c"),
+            "#include <stdio.h>\nint main(void) { puts(VERSION); return 0; }\n",
+        )
+        .unwrap();
+        let steps = cpp_plan(&root);
+        let types = steps.iter().find(|step| step.gate == "types").unwrap();
+        let command = types.command.clone().unwrap_or_default();
+        assert!(command.contains("-DVERSION=\"1.0\""), "{command}");
+        assert!(!types.advisory_failure);
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(gate.pass, "{gate:?} {:?}", report.findings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_untaken_makefile_branch_is_not_passed_to_the_compiler() {
+        if !which("cc") || !which("make") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-ifeq-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "ifeq ($(NEVER),1)\nCFLAGS = -DHIDE\nendif\nall:\n\tcc $(CFLAGS) -o demo main.c\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("main.c"),
+            "int main(void) {\n#ifdef HIDE\n    return 0;\n#else\n    return undefined_thing;\n#endif\n}\n",
+        )
+        .unwrap();
+        let steps = cpp_plan(&root);
+        let types = steps.iter().find(|step| step.gate == "types").unwrap();
+        let command = types.command.clone().unwrap_or_default();
+        assert!(!command.contains("-DHIDE"), "{command}");
+        assert!(!types.advisory_failure);
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(!gate.pass, "{gate:?} {:?}", report.findings);
+        assert!(gate.enforced, "{gate:?} {:?}", report.findings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn cxx_file_uses_gxx() {
         let root = std::env::temp_dir().join(format!("sc-cxx-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -1797,6 +2054,7 @@ mod tests {
                 command: Some("true".into()),
                 absent: "missing".into(),
                 enforce: true,
+                advisory_failure: false,
             },
             &mut report,
         );
@@ -1809,6 +2067,7 @@ mod tests {
                 command: Some("false".into()),
                 absent: "missing".into(),
                 enforce: true,
+                advisory_failure: false,
             },
             &mut report,
         );
@@ -1821,6 +2080,7 @@ mod tests {
                 command: Some("sc-not-a-tool-zz".into()),
                 absent: "lint is not installed".into(),
                 enforce: true,
+                advisory_failure: false,
             },
             &mut report,
         );
@@ -1833,6 +2093,7 @@ mod tests {
                 command: None,
                 absent: "nothing to compile".into(),
                 enforce: true,
+                advisory_failure: false,
             },
             &mut report,
         );
