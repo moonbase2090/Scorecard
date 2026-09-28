@@ -19,7 +19,11 @@ Coverage needed to stay at or under 30:
 | 25 | ~80% |
 | ≥31 | refactor; tests cannot save it |
 
+<<<<<<< HEAD
 Names from the coverage tool are matched to parsed functions on a best-effort basis. Only a function with a coverage record is scored. A function with no record gets no CRAP number and no `crap.over_threshold` or `complexity.untested` finding, so it cannot fail the gate itself. The scorecard reports it with a warning: `coverage.unmatched` in the Rust pack, which names the functions, or `coverage.missing` in the other packs. A measured function that fails still fails the gate. [Gates](reference/gates.md) says when the `crap` gate is advisory. Measured 0% coverage is an error.
+=======
+Names from the coverage tool are matched to parsed functions on a best-effort basis. A function with no coverage record is not scored. When that happens and coverage did run, the scorecard includes a `coverage.unmatched` warning. Measured functions still get CRAP findings and can fail the gate. For an unscored function, reports say coverage was not measured. Measured 0% coverage stays an error.
+>>>>>>> fd24e44 (Fix unmeasured coverage scoring and advisory SCA weighting)
 
 Test code is not scored. Rust skips `#[test]` and `#[cfg(test)]` items. The other packs skip files under `test/`, `tests/`, `__tests__/`, `spec/`, `testdata/`, or a directory ending in `.Tests` or `.Test`. They also skip files named like tests: `test_*`, `*_test`, `*_tests`, `*_spec`, `*_unittest`, `*-test`, `*-spec`, `*.test.*`, `*.spec.*`, `*Test`, `*Tests`, and `conftest.py`.
 
@@ -27,4 +31,4 @@ At CC 5 and 0% coverage, CRAP is exactly 30, so the function passes. At CC 12 an
 
 `gates.new_fn_untested_cc` defaults to 15. In tree and `--paths` mode, every function in scope at or above that complexity with 0% coverage produces `complexity.untested` and fails the `crap` gate. With `--diff`, CRAP scores only changed functions, and `complexity.untested` scores only functions that are new relative to the base. At CC 11 and 0% coverage, CRAP already fails the default threshold, and `complexity.untested` does not fire.
 
-Dimension scores are described in [Reading the report](report.md#terminal-layout).
+Dimension scores are described in [Reading the report](report.md#terminal-layout). `sca` warnings subtract 0.01 because that gate is advisory by default. See `crates/sc-core/src/score.rs`.

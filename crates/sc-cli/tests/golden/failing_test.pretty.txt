@@ -18,13 +18,14 @@ scores
   a11y             1.00  [##########]
 
 worst crap  threshold 30
+  coverage not measured: CRAP is not scored for this run
   (none)
 
 findings
 warning
   coverage.missing
   .
-  Run tests with coverage enabled and verify function names and source paths ma~
+  Fix the test failures, then re-run `sc analyze` to score CRAP
 error
   test.failed
   src/lib.rs:12  tests::it_adds

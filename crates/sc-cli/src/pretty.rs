@@ -172,16 +172,16 @@ fn push_crap(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize
         out.push_str(&paint(opts.color, dim(), &fit(&line, width, opts.color)));
         out.push('\n');
     }
+    let measured = crate::report::coverage_measured(card);
+    if !measured {
+        let note = "  coverage not measured: CRAP is not scored for this run";
+        out.push_str(&paint(opts.color, dim(), &fit(note, width, opts.color)));
+        out.push('\n');
+    }
     let rows: Vec<&CrapFunction> = card.crap.worst.iter().take(5).collect();
     if rows.is_empty() {
         out.push_str("  (none)\n\n");
         return;
-    }
-    let measured = crate::report::coverage_measured(card);
-    if !measured {
-        let note = "  coverage not measured: CRAP assumes 0% coverage (upper bound)";
-        out.push_str(&paint(opts.color, dim(), &fit(note, width, opts.color)));
-        out.push('\n');
     }
     out.push_str("  CRAP   CC   COV  SYMBOL            LOCATION\n");
     for row in rows {
@@ -620,6 +620,15 @@ mod tests {
     fn crap_rows_show_dashes_when_coverage_was_not_measured() {
         let mut card = Scorecard::skeleton("demo", 30);
         card.verdict = "pass".into();
+        card.gates.push(Gate {
+            id: "crap".into(),
+            pass: false,
+            enforced: false,
+            reason: Some(
+                "coverage was not measured for all analyzed functions, so CRAP was not scored"
+                    .into(),
+            ),
+        });
         card.crap.worst = vec![CrapFunction {
             symbol: "classify".into(),
             file: "src/lib.rs".into(),
@@ -635,9 +644,11 @@ mod tests {
             exit_code: 0,
         };
         let text = to_pretty(&card, &opts);
-        assert!(text.contains("coverage not measured: CRAP assumes 0% coverage (upper bound)"));
+        assert!(text.contains("coverage not measured: CRAP is not scored for this run"));
         assert!(text.contains("   132   11    --  classify"));
-        card.engines_run.push("coverage".into());
+        card.gates[0].pass = true;
+        card.gates[0].enforced = true;
+        card.gates[0].reason = None;
         let text = to_pretty(&card, &opts);
         assert!(text.contains("   132   11    0%  classify"));
         assert!(!text.contains("not measured"));

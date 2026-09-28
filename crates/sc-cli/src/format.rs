@@ -255,6 +255,15 @@ mod tests {
     #[test]
     fn markdown_marks_unmeasured_coverage() {
         let mut card = Scorecard::skeleton(".", 30);
+        card.gates.push(Gate {
+            id: "crap".into(),
+            pass: false,
+            enforced: false,
+            reason: Some(
+                "coverage was not measured for all analyzed functions, so CRAP was not scored"
+                    .into(),
+            ),
+        });
         card.crap = CrapSection {
             threshold: 30,
             worst: vec![CrapFunction {
@@ -266,9 +275,13 @@ mod tests {
             }],
         };
         let md = to_markdown(&card);
-        assert!(md.contains("Coverage was not measured, so CRAP assumes 0% coverage."));
+        assert!(md.contains(
+            "Coverage was not measured for all analyzed functions, so CRAP is not scored."
+        ));
         assert!(md.contains("| 132 | 11 | not measured | classify | src/lib.rs |"));
-        card.engines_run.push("coverage".into());
+        card.gates[0].pass = true;
+        card.gates[0].enforced = true;
+        card.gates[0].reason = None;
         let md = to_markdown(&card);
         assert!(md.contains("| 132 | 11 | 0% | classify | src/lib.rs |"));
         assert!(!md.contains("not measured"));

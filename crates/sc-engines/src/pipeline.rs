@@ -209,6 +209,7 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
     if !crap.coverage_complete {
         findings.push(crate::coverage::missing_finding(
             "coverage report is not collected for this pack",
+            "Run JavaScript tests with c8 or nyc, then re-run `sc analyze`",
         ));
     }
     findings.extend(crap.findings.clone());
@@ -541,9 +542,10 @@ fn analyze_unsupported(
             .map(|data| crate::crap::unmatched_count(&functions, data))
             .unwrap_or(functions.len() as u64);
         if unmatched > 0 {
-            findings.push(crate::coverage::missing_finding(&format!(
-                "coverage data is missing for {unmatched} analyzed function(s)"
-            )));
+            findings.push(crate::coverage::missing_finding(
+                &format!("coverage data is missing for {unmatched} analyzed function(s)"),
+                coverage_fix_hint(pack),
+            ));
         }
     }
     findings.extend(crap.findings.clone());
@@ -946,9 +948,10 @@ fn coverage_phase(
                 }
             ),
         };
-        state
-            .findings
-            .push(crate::coverage::missing_finding(&reason));
+        state.findings.push(crate::coverage::missing_finding(
+            &reason,
+            "Fix the test failures, then re-run `sc analyze` to score CRAP",
+        ));
         return;
     }
     if !coverage_enabled {
@@ -1009,11 +1012,11 @@ fn coverage_phase(
         }
         Err(err) => {
             state.skipped.push("coverage".into());
-            state
-                .findings
-                .push(crate::coverage::missing_finding(&format!(
-                    "coverage tooling unavailable: {err}"
-                )));
+            let detail = rust_coverage_detail(&err);
+            state.findings.push(crate::coverage::missing_finding(
+                &format!("coverage tooling unavailable: {}", detail.reason),
+                detail.fix,
+            ));
         }
     }
 }
@@ -1119,6 +1122,7 @@ fn assemble_rust_report(
     {
         state.findings.push(crate::coverage::missing_finding(
             "coverage was not run for all analyzed functions",
+            "Install `cargo-llvm-cov` and run `sc analyze` again",
         ));
     }
     let crap_gate = crap_gate(
@@ -1839,6 +1843,49 @@ fn failure_detail(stdout: &str, stderr: &str) -> String {
         .unwrap_or_else(|| "cargo llvm-cov failed".to_string())
 }
 
+struct CoverageDetail<'a> {
+    reason: String,
+    fix: &'a str,
+}
+
+fn rust_coverage_detail(error: &str) -> CoverageDetail<'static> {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("no such command")
+        || lower.contains("llvm-cov is not installed")
+        || lower.contains("unknown command: `llvm-cov`")
+    {
+        return CoverageDetail {
+            reason: "cargo llvm-cov is not installed".into(),
+            fix: "Install it with `cargo install cargo-llvm-cov`, then re-run `sc analyze`",
+        };
+    }
+    CoverageDetail {
+        reason: error.to_string(),
+        fix: "Fix coverage tooling and re-run `sc analyze`",
+    }
+}
+
+fn coverage_fix_hint(pack: crate::pack::PackId) -> &'static str {
+    match pack {
+        crate::pack::PackId::Node => {
+            "Install c8 (`npm i -D c8`) or nyc (`npm i -D nyc`), then re-run `sc analyze`"
+        }
+        crate::pack::PackId::Go => "Run `go test -coverprofile=.sc/coverage/go.out ./...` and re-run `sc analyze`",
+        crate::pack::PackId::Java => "Run tests with JaCoCo enabled and re-run `sc analyze`",
+        crate::pack::PackId::CSharp => {
+            "Run `dotnet test /p:CollectCoverage=true` and re-run `sc analyze`"
+        }
+        crate::pack::PackId::Php => {
+            "Run phpunit with `--coverage-clover .sc/coverage/clover.xml` and re-run `sc analyze`"
+        }
+        crate::pack::PackId::Cpp => "Run tests with lcov output (`.sc/coverage/cpp.info`) and re-run `sc analyze`",
+        crate::pack::PackId::Bash => {
+            "Run the suite with kcov or cobertura XML output under `.sc/coverage`, then re-run `sc analyze`"
+        }
+        _ => "Enable this pack's coverage report and re-run `sc analyze`",
+    }
+}
+
 fn git_info(root: &Path) -> GitInfo {
     let head = run_git(root, &["rev-parse", "HEAD"]).ok().and_then(|text| {
         let trimmed = text.trim();
@@ -1916,7 +1963,10 @@ fn crap_gate(coverage_complete: bool, over: u64, untested: u64, untested_cc: u32
             id: "crap".into(),
             pass: false,
             enforced: false,
-            reason: Some("coverage was not measured for all analyzed functions".into()),
+            reason: Some(
+                "coverage was not measured for all analyzed functions, so CRAP was not scored"
+                    .into(),
+            ),
         };
     }
     let mut reason = crap_gate_reason(over, untested, untested_cc);

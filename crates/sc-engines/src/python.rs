@@ -91,7 +91,25 @@ pub fn run(
         &mut skipped,
     );
     let sca = check_imports(root, &mut findings, &mut ran);
-    let coverage = read_coverage(root, &functions, started);
+    let mut coverage = read_coverage(root, &functions, started);
+    let mut coverage_reason: Option<String> = None;
+    let mut coverage_fix: Option<&'static str> = None;
+    if coverage.is_none() && tests_enforced && tests_pass {
+        if let Err(err) = run_coverage_fallback(root, deadline, &mut runs) {
+            coverage_reason = Some(err);
+            coverage_fix = Some(
+                "Install coverage.py (`python3 -m pip install coverage`) and re-run `sc analyze`",
+            );
+        }
+        coverage = read_coverage(root, &functions, started);
+    }
+    if coverage.is_some() {
+        if !ran.iter().any(|engine| engine == "coverage") {
+            ran.push("coverage".into());
+        }
+    } else if !skipped.iter().any(|engine| engine == "coverage") {
+        skipped.push("coverage".into());
+    }
     let crap = crate::crap::evaluate(
         &functions,
         coverage.as_ref(),
@@ -104,12 +122,35 @@ pub fn run(
             .as_ref()
             .map(|data| crate::crap::unmatched_count(&functions, data))
             .unwrap_or(functions.len() as u64);
-        if unmatched > 0 {
-            findings.push(crate::coverage::missing_finding(&format!(
-                "coverage data is missing for {unmatched} analyzed function(s)"
-            )));
+        let (reason, fix) = if !tests_enforced {
+            (
+                "no pytest suite was detected, so coverage was not collected".to_string(),
+                "Add pytest tests, then run `sc analyze` again",
+            )
+        } else if !tests_pass {
+            (
+                format!("tests did not pass ({tests_reason}), so coverage was not collected"),
+                "Fix the tests, then run `sc analyze` again",
+            )
+        } else if coverage.is_none() {
+            (
+                coverage_reason.unwrap_or_else(|| {
+                    "pytest finished without writing `.sc/coverage/pytest.json`".into()
+                }),
+                coverage_fix.unwrap_or(
+                    "Install pytest-cov (`python3 -m pip install pytest-cov`) or coverage.py (`python3 -m pip install coverage`), then re-run `sc analyze`",
+                ),
+            )
+        } else {
+            (
+                format!("coverage data is missing for {unmatched} analyzed function(s)"),
+                "Run tests with full coverage reporting and verify source paths match the report",
+            )
+        };
+        if unmatched > 0 || coverage.is_none() {
+            findings.push(crate::coverage::missing_finding(&reason, fix));
         }
-        if coverage.is_none() {
+        if coverage.is_none() && !skipped.iter().any(|engine| engine == "coverage") {
             skipped.push("coverage".into());
         }
     }
@@ -289,6 +330,7 @@ fn run_pytest(
     } else {
         crate::toolchain::force_image(&command)
     };
+    let mut executed = command.clone();
     let captured = match shell(root, &command, deadline) {
         Ok(captured)
             if !captured.status.success()
@@ -296,6 +338,7 @@ fn run_pytest(
                     || captured.stderr.contains("unrecognized arguments")
                     || captured.stderr.contains("pytest-cov")) =>
         {
+            executed = base.clone();
             shell(root, &base, deadline)
         }
         other => other,
@@ -305,7 +348,7 @@ fn run_pytest(
             note(
                 runs,
                 "tests",
-                &command,
+                &executed,
                 captured.status.code(),
                 captured.elapsed,
             );
@@ -340,7 +383,7 @@ fn run_pytest(
             }
         }
         Err(err) => {
-            note(runs, "tests", &command, None, Duration::ZERO);
+            note(runs, "tests", &executed, None, Duration::ZERO);
             skipped.push("tests".into());
             findings.push(unavailable("tests", &err.message("pytest")));
             (true, false, "pytest did not run".into())
@@ -364,6 +407,46 @@ fn cov_sources(functions: &[sc_graph::FunctionInfo]) -> Vec<String> {
         dirs.insert(".".into());
     }
     dirs.into_iter().collect()
+}
+
+fn run_coverage_fallback(
+    root: &Path,
+    deadline: Instant,
+    runs: &mut Vec<RunRecord>,
+) -> Result<(), String> {
+    let cov_file = root.join(".sc").join("coverage").join("pytest.json");
+    if let Some(parent) = cov_file.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let command = if root.join("uv.lock").is_file() || root.join(".venv").is_dir() {
+        format!(
+            "uv run --extra dev --with coverage coverage run -m pytest -q && uv run --extra dev --with coverage coverage json -o {}",
+            cov_file.display()
+        )
+    } else {
+        format!(
+            "python3 -m coverage run -m pytest -q && python3 -m coverage json -o {}",
+            cov_file.display()
+        )
+    };
+    let result = shell(root, &command, deadline).map_err(|err| err.message("coverage.py"))?;
+    note(
+        runs,
+        "coverage",
+        &command,
+        result.status.code(),
+        result.elapsed,
+    );
+    if result.status.success() {
+        Ok(())
+    } else {
+        let detail = brief(&format!("{}\n{}", result.stdout, result.stderr));
+        if detail.is_empty() {
+            Err("coverage.py failed".into())
+        } else {
+            Err(format!("coverage.py failed: {detail}"))
+        }
+    }
 }
 
 fn run_ruff(

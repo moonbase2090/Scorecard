@@ -95,6 +95,14 @@ fn node_plan(root: &Path) -> Vec<Step> {
                 "mkdir -p .sc/coverage && c8 --all --reporter=json --reports-dir=.sc/coverage {command}"
             ),
         )
+        .or_else(|| {
+            via(
+                "nyc",
+                format!(
+                    "mkdir -p .sc/coverage && nyc --reporter=json --report-dir=.sc/coverage {command}"
+                ),
+            )
+        })
         .or_else(|| via("npm", command))
     });
     vec![

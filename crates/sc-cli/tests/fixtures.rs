@@ -263,6 +263,59 @@ fn fake_dep_warns_on_hallucinated_import() {
 }
 
 #[test]
+fn advisory_sca_findings_reduce_security_score_proportionally() {
+    let (code, card, _, stderr) = analyze(&["testdata/fake_dep_many"]);
+    assert_eq!(code, 0, "stderr={stderr}\ncard={card}");
+    let sca_count = card["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|finding| finding["rule"] == "sca.hallucinated_import")
+        .count();
+    assert_eq!(sca_count, 16, "{card}");
+    let security = card["scores"]["security"].as_f64().unwrap();
+    assert!(
+        (security - 0.84).abs() < 1e-9,
+        "security={security}\n{card}"
+    );
+}
+
+#[test]
+fn partial_python_coverage_keeps_measured_crap() {
+    let (_code, card, _, _stderr) = analyze(&["testdata/python_cov_partial"]);
+    let rules = rules(&card);
+    assert!(
+        rules.contains(&"coverage.missing"),
+        "expected a coverage.missing finding\n{card}"
+    );
+    assert!(
+        rules.contains(&"crap.over_threshold"),
+        "measured over-threshold CRAP must stay when another function is unmatched\n{card}"
+    );
+    assert!(
+        !card["crap"]["worst"].as_array().unwrap().is_empty(),
+        "worst CRAP must keep measured rows\n{card}"
+    );
+    assert!(
+        card["metrics"]["crap_max"].as_f64().unwrap() > 0.0,
+        "crap_max must not drop to 0 when measured rows exist\n{card}"
+    );
+    let crap = card["gates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|gate| gate["id"] == "crap")
+        .expect("crap gate");
+    assert_eq!(crap["pass"], false);
+    assert_eq!(crap["enforced"], true);
+    let reason = crap["reason"].as_str().unwrap_or("");
+    assert!(
+        reason.contains("not scored") || reason.contains("no coverage record"),
+        "reason={reason}\n{card}"
+    );
+}
+
+#[test]
 fn local_mod_pub_use_is_not_hallucinated() {
     let (code, card, _, stderr) = analyze(&["testdata/local_mod"]);
     assert_eq!(code, 0, "stderr={stderr}\ncard={card}");

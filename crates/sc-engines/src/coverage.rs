@@ -8,11 +8,16 @@ use sc_core::Finding;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-pub fn missing_finding(reason: &str) -> Finding {
+pub fn missing_finding(reason: &str, fix: &str) -> Finding {
     let reason = if reason.trim().is_empty() {
         "coverage data is unavailable"
     } else {
         reason
+    };
+    let fix = if fix.trim().is_empty() {
+        "Enable coverage tooling for this pack, then re-run `sc analyze`"
+    } else {
+        fix
     };
     Finding {
         id: "coverage:missing".into(),
@@ -24,10 +29,7 @@ pub fn missing_finding(reason: &str) -> Finding {
         symbol: None,
         message: format!("coverage was not measured ({reason})"),
         evidence: serde_json::json!({}),
-        suggested_action: Some(
-            "Run tests with coverage enabled and verify function names and source paths match"
-                .into(),
-        ),
+        suggested_action: Some(fix.into()),
         disposition: String::new(),
     }
 }

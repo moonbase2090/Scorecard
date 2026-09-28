@@ -1,4 +1,1 @@
-const assert = require("assert");
-const { choose } = require("../src/choose.js");
-
-assert.strictEqual(choose(1), "pos");
+// Kept for fixture layout; node coverage runs an inline script from package.json.

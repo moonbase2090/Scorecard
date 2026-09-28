@@ -487,15 +487,23 @@ fn gates(out: &mut String, card: &Scorecard) {
     out.push_str("</table></div>\n");
 }
 
-/// Coverage counts as measured only when the coverage engine ran. Otherwise
-/// every CRAP number assumes 0% coverage, and 0% must not read as a result.
+/// CRAP is scored only when every analyzed function has measured coverage.
+/// When the crap gate reports "not scored", renderers must show "not measured".
 pub(crate) fn coverage_measured(card: &Scorecard) -> bool {
-    card.engines_run.iter().any(|engine| engine == "coverage")
+    !card.gates.iter().any(|gate| {
+        gate.id == "crap"
+            && !gate.enforced
+            && !gate.pass
+            && gate
+                .reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("CRAP was not scored"))
+    })
 }
 
 /// One sentence for every renderer when coverage was not measured.
 pub(crate) const COVERAGE_NOT_MEASURED: &str =
-    "Coverage was not measured, so CRAP assumes 0% coverage. These numbers are an upper bound.";
+    "Coverage was not measured for all analyzed functions, so CRAP is not scored.";
 
 /// A diff run only scores changed functions, so it has no tree-wide CRAP
 /// count. Say what the number covers and where the tree total lives
@@ -1198,18 +1206,21 @@ mod tests {
 
     #[test]
     fn html_says_coverage_not_measured_instead_of_zero() {
-        // card() never ran the coverage engine.
-        let html = to_html(&card());
+        let mut c = card();
+        c.gates[0].enforced = false;
+        c.gates[0].reason = Some(
+            "coverage was not measured for all analyzed functions, so CRAP was not scored".into(),
+        );
+        let html = to_html(&c);
         assert!(html.contains("<b>—</b><span>coverage not measured</span>"));
         assert!(html.contains("<span class=\"cov\">not measured</span>"));
-        assert!(html.contains("CRAP assumes 0% coverage"));
+        assert!(html.contains("CRAP is not scored"));
         assert!(!html.contains("<span>coverage</span>"));
     }
 
     #[test]
     fn html_shows_measured_coverage_as_a_number() {
         let mut c = card();
-        c.engines_run.push("coverage".into());
         c.crap.worst[0].coverage = 0.5;
         c.metrics.coverage_changed = 0.5;
         let html = to_html(&c);
