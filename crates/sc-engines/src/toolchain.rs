@@ -1365,6 +1365,7 @@ fn compile_flag_tokens(value: &str) -> Vec<String> {
         .filter(|token| {
             token.starts_with("-I")
                 || token.starts_with("-D")
+                || token.starts_with("-U")
                 || token.starts_with("-isystem")
                 || token.starts_with("-include")
         })
@@ -2224,6 +2225,48 @@ mod tests {
         let types = steps.iter().find(|step| step.gate == "types").unwrap();
         let command = types.command.clone().unwrap_or_default();
         assert!(!command.contains("-DHIDE"), "{command}");
+        assert!(!types.advisory_failure);
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(!gate.pass, "{gate:?} {:?}", report.findings);
+        assert!(gate.enforced, "{gate:?} {:?}", report.findings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_later_undef_cancels_the_macro() {
+        if !which("cc") || !which("make") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-undef-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "CFLAGS = -DHIDE -UHIDE\nall:\n\tcc $(CFLAGS) -o demo main.c\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("main.c"),
+            "int main(void) {\n#ifdef HIDE\n    return 0;\n#else\n    return undefined_thing;\n#endif\n}\n",
+        )
+        .unwrap();
+        let built = std::process::Command::new("make")
+            .current_dir(&root)
+            .status()
+            .unwrap();
+        assert!(!built.success());
+        let steps = cpp_plan(&root);
+        let types = steps.iter().find(|step| step.gate == "types").unwrap();
+        let command = types.command.clone().unwrap_or_default();
+        let define = command.find("-DHIDE").expect(&command);
+        let undef = command.find("-UHIDE").expect(&command);
+        assert!(define < undef, "{command}");
         assert!(!types.advisory_failure);
         let report = run(
             PackId::Cpp,
