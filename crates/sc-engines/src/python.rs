@@ -440,8 +440,11 @@ fn run_coverage_fallback(
     if result.status.success() {
         Ok(())
     } else {
-        let detail = brief(&format!("{}
-{}", result.stdout, result.stderr));
+        let detail = brief(&format!(
+            "{}
+{}",
+            result.stdout, result.stderr
+        ));
         if detail.is_empty() {
             Err("coverage.py failed".into())
         } else {

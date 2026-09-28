@@ -1963,9 +1963,7 @@ fn crap_gate(coverage_complete: bool, over: u64, untested: u64, untested_cc: u32
             id: "crap".into(),
             pass: false,
             enforced: false,
-            reason: Some(
-                "some functions have no coverage record and were not scored".into(),
-            ),
+            reason: Some("some functions have no coverage record and were not scored".into()),
         };
     }
     let mut reason = crap_gate_reason(over, untested, untested_cc);
