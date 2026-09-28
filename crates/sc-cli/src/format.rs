@@ -28,37 +28,35 @@ pub fn to_json(card: &Scorecard) -> String {
 /// assert!(md.contains("**Repo:** ."));
 /// ```
 fn push_llm_markdown(out: &mut String, card: &Scorecard) {
-    let skipped = card.engines_skipped.iter().any(|engine| engine == "llm");
-    if card.llm.is_none() && !skipped {
+    let Some(section) = card.llm.as_ref() else {
+        return;
+    };
+    out.push_str("## LLM\n\n");
+    if section.status == "skipped" {
+        out.push_str("Skipped: ");
+        out.push_str(section.reason.as_deref().unwrap_or("llm did not run"));
+        out.push_str(".\n\n");
         return;
     }
-    out.push_str("## LLM\n\n");
-    match card.llm.as_ref() {
-        None => out.push_str("Skipped: llm is off. Turn it on with `--llm on --intent TEXT`, or set `enabled = true` under `[llm]` in analyzer.toml.\n\n"),
-        Some(section) if section.status == "skipped" => {
-            out.push_str("Skipped: ");
-            out.push_str(section.reason.as_deref().unwrap_or("llm did not run"));
-            out.push_str(".\n\n");
-        }
-        Some(section) => {
-            out.push_str(&format!(
-                "- backend: {}\n- model: {}\n- rounds: {}\n- verdict: {}\n",
-                section.backend.as_deref().unwrap_or("unknown"),
-                section.model.as_deref().unwrap_or("unknown"),
-                section.rounds.unwrap_or(0),
-                section.verdict.as_deref().unwrap_or("no gaps")
-            ));
-            if section.notes.is_empty() {
-                out.push('\n');
-            } else {
-                out.push('\n');
-                for note in section.notes.iter().take(10) {
-                    out.push_str(&format!("- {note}\n"));
-                }
-                out.push('\n');
-            }
+    if let Some(backend) = section.backend.as_deref() {
+        out.push_str(&format!("- backend: {backend}\n"));
+    }
+    if let Some(model) = section.model.as_deref() {
+        out.push_str(&format!("- model: {model}\n"));
+    }
+    if let Some(rounds) = section.rounds {
+        out.push_str(&format!("- rounds: {rounds}\n"));
+    }
+    if let Some(verdict) = section.verdict.as_deref() {
+        out.push_str(&format!("- verdict: {verdict}\n"));
+    }
+    if !section.notes.is_empty() {
+        out.push('\n');
+        for note in section.notes.iter().take(10) {
+            out.push_str(&format!("- {note}\n"));
         }
     }
+    out.push('\n');
 }
 
 pub fn to_markdown(card: &Scorecard) -> String {
@@ -236,7 +234,7 @@ mod tests {
     fn markdown_shows_llm_notes_and_a_plain_skip_reason() {
         let mut card = Scorecard::skeleton("demo", 30);
         let off = to_markdown(&card);
-        assert!(off.contains("Turn it on with `--llm on --intent TEXT`"));
+        assert!(!off.contains("## LLM"));
         card.llm = Some(LlmSection::skipped(
             "llm is on, but neither --spec nor --intent was given. Re-run with --spec PATH or --intent TEXT.",
         ));

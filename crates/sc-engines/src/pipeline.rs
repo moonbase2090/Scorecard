@@ -1961,12 +1961,16 @@ fn llm_start(
                 .into(),
         );
     }
-    let mut text = intent.to_string();
+    let mut text: String = intent.chars().take(24_000).collect();
     if !paths.is_empty() {
         text.push_str("\n\nPaths in scope:\n");
-        for path in paths {
+        let shown = paths.len().min(200);
+        for path in paths.iter().take(shown) {
             text.push_str(path);
             text.push('\n');
+        }
+        if paths.len() > shown {
+            text.push_str(&format!("{} more\n", paths.len() - shown));
         }
     }
     LlmStart::Run {
@@ -2240,6 +2244,16 @@ mod tests {
             llm_start(false, None, Some("goal"), &[]),
             LlmStart::Off
         ));
+        let paths: Vec<String> = (0..250).map(|index| format!("f{index}.rs")).collect();
+        match llm_start(true, None, Some("goal"), &paths) {
+            LlmStart::Run { intent, .. } => {
+                assert!(intent.contains("f0.rs"));
+                assert!(intent.contains("f199.rs"));
+                assert!(!intent.contains("f200.rs"));
+                assert!(intent.contains("50 more"));
+            }
+            other => panic!("expected a capped run, got {other:?}"),
+        }
     }
 
     #[test]

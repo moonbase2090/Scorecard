@@ -23,9 +23,6 @@ worst crap  threshold 30
 findings
   (none)
 
-llm
-  skipped: llm is off. Turn it on with --llm on --intent TEXT, or set enabled = true under [llm] in analyzer.toml.
-
 engines run: compile, tests, coverage, complexity, crap, sca, secrets, perf, lint
 engines skipped: spec, mutation, llm
 duration: 0.8s

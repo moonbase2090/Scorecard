@@ -851,38 +851,58 @@ fn finding_card(out: &mut String, finding: &sc_core::Finding, untested: bool) {
 }
 
 fn llm_section(out: &mut String, card: &Scorecard) {
-    let skipped = card.engines_skipped.iter().any(|engine| engine == "llm");
-    if card.llm.is_none() && !skipped {
+    let Some(section) = card.llm.as_ref() else {
+        return;
+    };
+    out.push_str("<h2>llm</h2>\n<div class=\"card\">");
+    if section.status == "skipped" {
+        out.push_str("<p>skipped: ");
+        out.push_str(&esc(section.reason.as_deref().unwrap_or("llm did not run")));
+        out.push_str("</p></div>\n");
         return;
     }
-    out.push_str("<h2>llm</h2>\n<div class=\"card\">");
-    match card.llm.as_ref() {
-        None => out.push_str("<p>skipped: llm is off. Turn it on with <code>--llm on --intent TEXT</code>, or set <code>enabled = true</code> under <code>[llm]</code> in analyzer.toml.</p>"),
-        Some(section) if section.status == "skipped" => {
-            out.push_str("<p>skipped: ");
-            out.push_str(&esc(section.reason.as_deref().unwrap_or("llm did not run")));
-            out.push_str("</p>");
+    out.push_str("<p>");
+    let mut wrote = false;
+    if let Some(backend) = section.backend.as_deref() {
+        out.push_str("backend <code>");
+        out.push_str(&esc(backend));
+        out.push_str("</code>");
+        wrote = true;
+    }
+    if let Some(model) = section.model.as_deref() {
+        if wrote {
+            out.push_str(" · ");
         }
-        Some(section) => {
-            out.push_str("<p>backend <code>");
-            out.push_str(&esc(section.backend.as_deref().unwrap_or("unknown")));
-            out.push_str("</code> · model <code>");
-            out.push_str(&esc(section.model.as_deref().unwrap_or("unknown")));
-            out.push_str("</code> · rounds ");
-            out.push_str(&section.rounds.unwrap_or(0).to_string());
-            out.push_str(" · verdict <strong>");
-            out.push_str(&esc(section.verdict.as_deref().unwrap_or("no gaps")));
-            out.push_str("</strong></p>");
-            if !section.notes.is_empty() {
-                out.push_str("<ul>");
-                for note in section.notes.iter().take(10) {
-                    out.push_str("<li>");
-                    out.push_str(&esc(note));
-                    out.push_str("</li>");
-                }
-                out.push_str("</ul>");
-            }
+        out.push_str("model <code>");
+        out.push_str(&esc(model));
+        out.push_str("</code>");
+        wrote = true;
+    }
+    if let Some(rounds) = section.rounds {
+        if wrote {
+            out.push_str(" · ");
         }
+        out.push_str("rounds ");
+        out.push_str(&rounds.to_string());
+        wrote = true;
+    }
+    if let Some(verdict) = section.verdict.as_deref() {
+        if wrote {
+            out.push_str(" · ");
+        }
+        out.push_str("verdict <strong>");
+        out.push_str(&esc(verdict));
+        out.push_str("</strong>");
+    }
+    out.push_str("</p>");
+    if !section.notes.is_empty() {
+        out.push_str("<ul>");
+        for note in section.notes.iter().take(10) {
+            out.push_str("<li>");
+            out.push_str(&esc(note));
+            out.push_str("</li>");
+        }
+        out.push_str("</ul>");
     }
     out.push_str("</div>\n");
 }
@@ -987,7 +1007,19 @@ mod tests {
     fn html_says_why_llm_was_skipped_and_shows_notes_when_it_ran() {
         let mut card = card();
         let off = to_html(&card);
-        assert!(off.contains("--llm on --intent TEXT"));
+        assert!(!off.contains("<h2>llm</h2>"));
+        card.llm = Some(LlmSection {
+            status: "ran".into(),
+            backend: Some("ollama".into()),
+            model: Some("qwen2.5-coder".into()),
+            rounds: None,
+            verdict: None,
+            notes: vec!["checked src/lib.rs against the intent".into()],
+            reason: None,
+        });
+        let missing = to_html(&card);
+        assert!(!missing.contains("no gaps"));
+        assert!(!missing.contains("rounds"));
         card.llm = Some(LlmSection::ran(
             "ollama",
             "qwen2.5-coder",

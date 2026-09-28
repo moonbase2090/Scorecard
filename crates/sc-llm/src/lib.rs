@@ -19,6 +19,10 @@ const DEFAULT_TOOL_ROUNDS: u32 = 36;
 const MAX_TOKENS: u32 = 2000;
 const MAX_SPEC_CHARS: usize = 24_000;
 
+fn bounded(text: &str) -> String {
+    text.trim().chars().take(MAX_SPEC_CHARS).collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LlmGap {
     pub item: String,
@@ -144,8 +148,8 @@ fn review_cursor_with(
 }
 
 fn cursor_prompt(spec: &str, intent: Option<&str>) -> String {
-    let spec: String = spec.chars().take(MAX_SPEC_CHARS).collect();
-    let intent = intent.unwrap_or("").trim();
+    let spec = bounded(spec);
+    let intent = bounded(intent.unwrap_or(""));
     let goal = if intent.is_empty() {
         String::new()
     } else {
@@ -244,8 +248,8 @@ fn review_with(
     if endpoint.contains("api.x.ai") && key.is_none() {
         return skipped("XAI_API_KEY is not set", 0);
     }
-    let spec: String = request.spec.chars().take(MAX_SPEC_CHARS).collect();
-    let intent = request.intent.unwrap_or("").trim();
+    let spec = bounded(request.spec);
+    let intent = bounded(request.intent.unwrap_or(""));
     let spec_is_empty = spec.trim().is_empty();
     let user = if spec_is_empty {
         format!("Intent:\n{intent}")
@@ -751,6 +755,30 @@ mod tests {
     fn a_closing_brace_before_an_opening_brace_is_not_json() {
         assert!(parse_gaps("} not json {").is_none());
         assert!(parse_gaps("}").is_none());
+    }
+
+    #[test]
+    fn a_long_intent_is_capped_like_the_spec() {
+        let dir = test_tree();
+        let huge = "x".repeat(MAX_SPEC_CHARS + 80);
+        let seen = std::cell::RefCell::new(String::new());
+        let _ = review_with(
+            LlmRequest {
+                intent: Some(&huge),
+                spec: "",
+                ..request(&dir, "ignored", "http://127.0.0.1:1/v1")
+            },
+            |_, _, body| {
+                let text = body["messages"][1]["content"].as_str().unwrap_or("");
+                *seen.borrow_mut() = text.to_string();
+                Ok(json!({"choices":[{"message":{"content":"{\"gaps\":[]}"}}]}))
+            },
+        );
+        let text = seen.borrow();
+        assert!(text.contains("Intent:\n"));
+        assert!(!text.contains(&"x".repeat(MAX_SPEC_CHARS + 1)));
+        assert!(text.chars().filter(|c| *c == 'x').count() == MAX_SPEC_CHARS);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

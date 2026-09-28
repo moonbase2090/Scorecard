@@ -72,7 +72,7 @@ pub fn to_pretty(card: &Scorecard, opts: &PrettyOpts) -> String {
     push_scores(&mut out, card, opts, width);
     push_crap(&mut out, card, opts, width);
     push_findings(&mut out, card, opts, width);
-    push_llm(&mut out, card);
+    push_llm(&mut out, card, opts, width);
     push_footer(&mut out, card, opts);
     out
 }
@@ -247,37 +247,45 @@ fn finding_block(finding: &Finding, opts: &PrettyOpts, width: usize) -> String {
     block
 }
 
-fn push_llm(out: &mut String, card: &Scorecard) {
-    let skipped = card.engines_skipped.iter().any(|engine| engine == "llm");
-    if card.llm.is_none() && !skipped {
+fn push_llm(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize) {
+    let Some(section) = card.llm.as_ref() else {
+        return;
+    };
+    out.push_str("llm\n");
+    if section.status == "skipped" {
+        out.push_str("  skipped: ");
+        out.push_str(section.reason.as_deref().unwrap_or("llm did not run"));
+        out.push_str("\n\n");
         return;
     }
-    out.push_str("llm\n");
-    match card.llm.as_ref() {
-        None => {
-            out.push_str("  skipped: llm is off. Turn it on with --llm on --intent TEXT, or set enabled = true under [llm] in analyzer.toml.\n\n");
-        }
-        Some(section) if section.status == "skipped" => {
-            out.push_str("  skipped: ");
-            out.push_str(section.reason.as_deref().unwrap_or("llm did not run"));
-            out.push_str("\n\n");
-        }
-        Some(section) => {
-            out.push_str(&format!(
-                "  backend {}  model {}  rounds {}\n  verdict: {}\n",
-                section.backend.as_deref().unwrap_or("unknown"),
-                section.model.as_deref().unwrap_or("unknown"),
-                section.rounds.unwrap_or(0),
-                section.verdict.as_deref().unwrap_or("no gaps")
-            ));
-            for note in section.notes.iter().take(10) {
-                out.push_str("  - ");
-                out.push_str(note);
-                out.push('\n');
-            }
-            out.push('\n');
-        }
+    let mut facts = String::new();
+    if let Some(backend) = section.backend.as_deref() {
+        facts.push_str("  backend ");
+        facts.push_str(backend);
     }
+    if let Some(model) = section.model.as_deref() {
+        if !facts.is_empty() {
+            facts.push_str("  ");
+        }
+        facts.push_str("model ");
+        facts.push_str(model);
+    }
+    if let Some(rounds) = section.rounds {
+        facts.push_str(&format!("  rounds {rounds}"));
+    }
+    if !facts.is_empty() {
+        out.push_str(&fit(&facts, width, opts.color));
+        out.push('\n');
+    }
+    if let Some(verdict) = section.verdict.as_deref() {
+        out.push_str(&fit(&format!("  verdict: {verdict}"), width, opts.color));
+        out.push('\n');
+    }
+    for note in section.notes.iter().take(10) {
+        out.push_str(&fit(&format!("  - {note}"), width, opts.color));
+        out.push('\n');
+    }
+    out.push('\n');
 }
 
 fn push_footer(out: &mut String, card: &Scorecard, opts: &PrettyOpts) {
@@ -472,7 +480,21 @@ mod tests {
         };
         let mut card = Scorecard::skeleton("demo", 30);
         let off = to_pretty(&card, &opts);
-        assert!(off.contains("Turn it on with --llm on --intent TEXT"));
+        assert!(!off.contains("\nllm\n"));
+        card.llm = Some(LlmSection {
+            status: "ran".into(),
+            backend: Some("ollama".into()),
+            model: Some("qwen2.5-coder".into()),
+            rounds: None,
+            verdict: None,
+            notes: vec!["n".repeat(80)],
+            reason: None,
+        });
+        let narrow = PrettyOpts { width: 40, ..opts };
+        let missing = to_pretty(&card, &narrow);
+        assert!(!missing.contains("no gaps"));
+        assert!(!missing.contains("rounds"));
+        assert!(missing.contains('~'));
         card.llm = Some(LlmSection::ran(
             "ollama",
             "qwen2.5-coder",
@@ -482,7 +504,14 @@ mod tests {
         ));
         card.engines_skipped.retain(|engine| engine != "llm");
         card.engines_run.push("llm".into());
-        let ran = to_pretty(&card, &opts);
+        let wide = PrettyOpts {
+            color: false,
+            width: 80,
+            version: "0.1.0".into(),
+            report: None,
+            exit_code: 0,
+        };
+        let ran = to_pretty(&card, &wide);
         assert!(ran.contains("verdict: no gaps"));
         assert!(ran.contains("checked the intent against src/lib.rs"));
         assert!(ran.contains("backend ollama"));
