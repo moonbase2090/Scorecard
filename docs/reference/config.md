@@ -41,7 +41,7 @@ Only the first file found is read. Command-line flags override the matching keys
 
 | Key | Default | Meaning |
 |---|---|---|
-| `commands.lint` | `cargo clippy -- -D warnings` | Lint command for the Rust and `command` packs. Empty skips lint. Other packs use their own linter; see [packs](../packs.md). |
+| `commands.lint` | `cargo clippy` | Lint command for the Rust and `command` packs. Empty skips lint. Other packs use their own linter; see [packs](../packs.md). Add `-- -D warnings` to fail on warnings. |
 
 ### `[mutation]`
 
@@ -57,7 +57,7 @@ See [LLM providers](../how-to/llm.md) for setups.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `llm.enabled` | `false` | Run the LLM review without `--llm on`. It still needs `--spec`. |
+| `llm.enabled` | `false` | Run the LLM review without `--llm on`. With no `--spec`, `--intent` is enough. |
 | `llm.backend` | `"ollama"` | `ollama`, `openai-compatible`, or `cursor`. |
 | `llm.endpoint` | `"http://127.0.0.1:11434/v1"` | Endpoint for the `ollama` backend. |
 | `llm.model` | `"qwen2.5-coder"` | Model name for the chosen backend. |

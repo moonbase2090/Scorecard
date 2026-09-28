@@ -35,7 +35,7 @@ RULE_PREFIXES = (
     "compile|complexity|config|coverage|crap|engine|html|links|lint|mutation|perf|sca|secrets|spec|test"
 )
 RULE_LITERAL = re.compile(rf'"((?:{RULE_PREFIXES})\.[a-z_]+)"')
-NOT_RULES = {"mutation.diff"}
+NOT_RULES = {"mutation.diff", "config.env"}
 FILE_SUFFIXES = {
     "rs", "toml", "json", "md", "html", "htm", "txt", "py", "js", "xml", "out", "info",
     "sh", "diff", "lock", "yml", "yaml", "sarif", "go", "cs", "php", "java", "cpp", "lcov",
@@ -122,7 +122,10 @@ def run_blocks(sc: Path, network: bool) -> list[str]:
 
 
 def sc_options(sc: Path) -> dict[str, set[str]]:
-    """Options of `sc` (key "") and of each subcommand, from their --help."""
+    """Options of `sc` (key "") and of each subcommand, from their --help.
+
+    Nested commands are keyed by the full path, such as `config init`.
+    """
 
     def help_text(*args: str) -> str:
         return subprocess.run([str(sc), *args, "--help"], capture_output=True, text=True, check=True).stdout
@@ -130,12 +133,32 @@ def sc_options(sc: Path) -> dict[str, set[str]]:
     def options(text: str) -> set[str]:
         return set(re.findall(r"(?<![\w-])(--[a-z][a-z-]+|-[a-zA-Z])\b", text))
 
-    top = help_text()
-    listed = top.split("Commands:", 1)[1].split("Options:", 1)[0]
-    result = {"": options(top)}
-    for command in re.findall(r"^  ([a-z][a-z-]*) ", listed, re.M):
+    def commands(text: str) -> list[str]:
+        if "Commands:" not in text:
+            return []
+        listed = text.split("Commands:", 1)[1].split("Options:", 1)[0]
+        return re.findall(r"^  ([a-z][a-z-]*) ", listed, re.M)
+
+    result: dict[str, set[str]] = {}
+
+    def walk(prefix: list[str]) -> None:
+        text = help_text(*prefix)
+        key = " ".join(prefix)
         # clap's own `help` subcommand has no --help of its own.
-        result[command] = set() if command == "help" else options(help_text(command))
+        result[key] = set() if prefix[-1:] == ["help"] else options(text)
+        for command in commands(text):
+            if command == "help":
+                result[" ".join(prefix + [command])] = set()
+            else:
+                walk(prefix + [command])
+
+    top = help_text()
+    result[""] = options(top)
+    for command in commands(top):
+        if command == "help":
+            result[command] = set()
+        else:
+            walk([command])
     return result
 
 
@@ -167,13 +190,22 @@ def check_invocations(options: dict[str, set[str]]) -> list[str]:
                 words = match.group(1).split()
                 if not words or words[0][0].isdigit():
                     continue  # bare `sc`, or a version line such as `sc 0.1.3`
-                command = "" if words[0].startswith("-") else words[0]
+                parts: list[str] = []
+                index = 0
+                if not words[0].startswith("-"):
+                    while index < len(words) and not words[index].startswith("-"):
+                        candidate = " ".join(parts + [words[index]])
+                        if candidate not in options:
+                            break
+                        parts.append(words[index])
+                        index += 1
+                command = " ".join(parts)
                 label = f"sc {command}".strip()
                 where = f"{rel}:{number}: `sc{match.group(1)}`"
                 if command not in options:
                     errors.append(f"{where}: `{label}` is not an sc command. Check `sc --help` and update this line.")
                     continue
-                for word in words:
+                for word in words[index:]:
                     flag = word.split("=", 1)[0]
                     if flag.startswith("-") and flag not in options[command] | {"--help", "-h"}:
                         errors.append(
