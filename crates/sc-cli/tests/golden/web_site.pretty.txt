@@ -25,6 +25,9 @@ warning
   .
   Run tests with coverage enabled and verify function names and source paths ma~
 
+llm
+  skipped: llm is off. Turn it on with --llm on --intent TEXT, or set enabled = true under [llm] in analyzer.toml.
+
 engines run: complexity, crap, html, a11y, links, secrets
 engines skipped: compile, tests, coverage, sca, lint, mutation, llm
 duration: DURs

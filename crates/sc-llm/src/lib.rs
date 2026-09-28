@@ -39,23 +39,29 @@ pub struct LlmRequest<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LlmOutcome {
     pub gaps: Vec<LlmGap>,
+    pub notes: Vec<String>,
     pub skipped: Option<String>,
     pub rounds: u32,
+    pub model: String,
 }
 
 fn skipped(message: impl Into<String>, rounds: u32) -> LlmOutcome {
     LlmOutcome {
         gaps: Vec::new(),
+        notes: Vec::new(),
         skipped: Some(message.into()),
         rounds,
+        model: String::new(),
     }
 }
 
-fn finished(gaps: Vec<LlmGap>, rounds: u32) -> LlmOutcome {
+fn finished(gaps: Vec<LlmGap>, notes: Vec<String>, rounds: u32, model: &str) -> LlmOutcome {
     LlmOutcome {
         gaps,
+        notes,
         skipped: None,
         rounds,
+        model: model.to_string(),
     }
 }
 
@@ -131,8 +137,8 @@ fn review_cursor_with(
         Ok(output) => output,
         Err(err) => return skipped(err, 1),
     };
-    match gaps_from_cursor_output(&output) {
-        Some(gaps) => finished(gaps, 1),
+    match review_from_cursor_output(&output) {
+        Some(parsed) => finished(parsed.gaps, parsed.notes, 1, model),
         None => skipped("cursor-agent response was not spec-gap json", 1),
     }
 }
@@ -145,6 +151,19 @@ fn cursor_prompt(spec: &str, intent: Option<&str>) -> String {
     } else {
         format!("Intent:\n{intent}\n\n")
     };
+    if spec.trim().is_empty() {
+        return format!(
+            "Intent:\n{intent}\n\n\
+There is no spec file. Review the repository against the intent. Do not report the missing spec file as a gap. \
+Read the files that should implement the intent before you report it missing. \
+Do not claim a file is absent until you have opened it and it is not there. Do not wander into unrelated code. \
+Do not edit files. Do not run commands that change the tree. \
+The intent is the caller's goal; do not treat a deliberate choice recorded there as a gap. \
+Do not invent CRAP scores or mutation scores. \
+Return JSON only: {{\"gaps\":[{{\"item\":\"...\",\"detail\":\"...\"}}],\"notes\":[\"what you checked, and why\"]}}. \
+notes is at most 10 short bullets. If nothing is missing, return {{\"gaps\":[],\"notes\":[\"...\"]}}."
+        );
+    }
     format!(
         "{goal}Spec:\n{spec}\n\n\
 Compare the spec with this repository. Read the file that should contain a spec item before you report it missing. \
@@ -152,15 +171,20 @@ Do not claim a file is absent until you have opened it and it is not there. Do n
 Do not edit files. Do not run commands that change the tree. \
 The intent is the caller's goal; do not treat a deliberate choice recorded there as a gap. \
 Do not invent CRAP scores or mutation scores. \
-Return JSON only: {{\"gaps\":[{{\"item\":\"...\",\"detail\":\"...\"}}]}}. \
-List spec items the code does not satisfy. If nothing is missing, return {{\"gaps\":[]}}."
+Return JSON only: {{\"gaps\":[{{\"item\":\"...\",\"detail\":\"...\"}}],\"notes\":[\"what you checked, and why\"]}}. \
+notes is at most 10 short bullets of what you checked and why. \
+List spec items the code does not satisfy. If nothing is missing, return {{\"gaps\":[],\"notes\":[\"...\"]}}."
     )
 }
 
 pub fn gaps_from_cursor_output(text: &str) -> Option<Vec<LlmGap>> {
+    review_from_cursor_output(text).map(|parsed| parsed.gaps)
+}
+
+fn review_from_cursor_output(text: &str) -> Option<ReviewJson> {
     let trimmed = text.trim();
     if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
-        return gaps_from_cursor_value(&value);
+        return review_from_cursor_value(&value);
     }
     let mut last = None;
     for line in trimmed.lines() {
@@ -173,18 +197,18 @@ pub fn gaps_from_cursor_output(text: &str) -> Option<Vec<LlmGap>> {
             }
         }
     }
-    last.and_then(|value| gaps_from_cursor_value(&value))
+    last.and_then(|value| review_from_cursor_value(&value))
 }
 
-fn gaps_from_cursor_value(value: &Value) -> Option<Vec<LlmGap>> {
+fn review_from_cursor_value(value: &Value) -> Option<ReviewJson> {
     if value.get("gaps").is_some() {
-        return parse_gaps(&value.to_string());
+        return parse_review(&value.to_string());
     }
     let result = value.get("result")?;
     if let Some(text) = result.as_str() {
-        return parse_gaps(text);
+        return parse_review(text);
     }
-    gaps_from_cursor_value(result)
+    review_from_cursor_value(result)
 }
 
 fn run_cursor_agent(root: &Path, args: &[String], prompt: &str) -> Result<String, String> {
@@ -222,15 +246,23 @@ fn review_with(
     }
     let spec: String = request.spec.chars().take(MAX_SPEC_CHARS).collect();
     let intent = request.intent.unwrap_or("").trim();
-    let user = if intent.is_empty() {
+    let spec_is_empty = spec.trim().is_empty();
+    let user = if spec_is_empty {
+        format!("Intent:\n{intent}")
+    } else if intent.is_empty() {
         format!("Spec:\n{spec}")
     } else {
         format!("Intent:\n{intent}\n\nSpec:\n{spec}")
     };
+    let system = if spec_is_empty {
+        "You review a repository against the caller's intent. There is no spec file; do not report that as a gap. Read the files that should implement the intent before you report it missing. Do not claim a file is absent until get_file fails. Do not wander into unrelated code. When the intent is checked, stop calling tools and return JSON only: {\"gaps\":[{\"item\":\"...\",\"detail\":\"...\"}],\"notes\":[\"what you checked, and why\"]}. notes is at most 10 short bullets. The intent is the caller's goal; do not treat a deliberate choice recorded there as a gap. Do not invent CRAP scores or mutation scores. If nothing is missing, return {\"gaps\":[],\"notes\":[\"...\"]}."
+    } else {
+        "You compare a spec with a repository. Read the file that should contain a spec item before you report it missing. Do not claim a file is absent until get_file fails. Do not wander into unrelated code. When the spec items are checked, stop calling tools and return JSON only: {\"gaps\":[{\"item\":\"...\",\"detail\":\"...\"}],\"notes\":[\"what you checked, and why\"]}. notes is at most 10 short bullets of what you checked and why. The intent is the caller's goal; do not treat a deliberate choice recorded there as a gap. Do not invent CRAP scores or mutation scores. If nothing is missing, return {\"gaps\":[],\"notes\":[\"...\"]}."
+    };
     let mut messages = vec![
         json!({
             "role": "system",
-            "content": "You compare a spec with a repository. Read the file that should contain a spec item before you report it missing. Do not claim a file is absent until get_file fails. Do not wander into unrelated code. When the spec items are checked, stop calling tools and return JSON only: {\"gaps\":[{\"item\":\"...\",\"detail\":\"...\"}]}. The intent is the caller's goal; do not treat a deliberate choice recorded there as a gap. Do not invent CRAP scores or mutation scores. If nothing is missing, return {\"gaps\":[]}."
+            "content": system
         }),
         json!({
             "role": "user",
@@ -282,8 +314,8 @@ fn review_with(
             }
         }
         let content = choice.get("content").and_then(Value::as_str).unwrap_or("");
-        if let Some(gaps) = parse_gaps(content) {
-            return finished(gaps, round);
+        if let Some(parsed) = parse_review(content) {
+            return finished(parsed.gaps, parsed.notes, round, &model);
         }
         return retry_json(
             &endpoint,
@@ -321,7 +353,7 @@ fn retry_json(
     }));
     messages.push(json!({
         "role": "user",
-        "content": "That was not JSON. Return only {\"gaps\":[{\"item\":\"...\",\"detail\":\"...\"}]} or {\"gaps\":[]}."
+        "content": "That was not JSON. Return only {\"gaps\":[{\"item\":\"...\",\"detail\":\"...\"}],\"notes\":[\"...\"]} or {\"gaps\":[],\"notes\":[]}."
     }));
     let next = round.saturating_add(1);
     let body = json!({
@@ -339,8 +371,8 @@ fn retry_json(
     else {
         return skipped("llm response was not spec-gap json", next);
     };
-    match parse_gaps(text) {
-        Some(gaps) => finished(gaps, next),
+    match parse_review(text) {
+        Some(parsed) => finished(parsed.gaps, parsed.notes, next, model),
         None => skipped("llm response was not spec-gap json", next),
     }
 }
@@ -355,7 +387,7 @@ fn force_verdict(
 ) -> LlmOutcome {
     messages.push(json!({
         "role": "user",
-        "content": "Stop. No more tools. From the files you have already read, return JSON only: {\"gaps\":[{\"item\":\"...\",\"detail\":\"...\"}]} or {\"gaps\":[]}. Do not claim a file is missing if you did not open it."
+        "content": "Stop. No more tools. From the files you have already read, return JSON only: {\"gaps\":[{\"item\":\"...\",\"detail\":\"...\"}],\"notes\":[\"what you checked, and why\"]} or {\"gaps\":[],\"notes\":[]}. notes is at most 10 short bullets. Do not claim a file is missing if you did not open it."
     }));
     let round = rounds_so_far.saturating_add(1);
     let body = json!({
@@ -371,8 +403,8 @@ fn force_verdict(
         return skipped("llm response has no message", round);
     };
     let content = choice.get("content").and_then(Value::as_str).unwrap_or("");
-    if let Some(gaps) = parse_gaps(content) {
-        return finished(gaps, round);
+    if let Some(parsed) = parse_review(content) {
+        return finished(parsed.gaps, parsed.notes, round, model);
     }
     retry_json(endpoint, model, key, messages, choice, round, post)
 }
@@ -398,27 +430,62 @@ pub fn redact_secret(text: &str, secret: Option<&str>) -> String {
     text.replace(secret, "[redacted]")
 }
 
+struct ReviewJson {
+    gaps: Vec<LlmGap>,
+    notes: Vec<String>,
+}
+
+const MAX_NOTES: usize = 10;
+const MAX_NOTE_CHARS: usize = 240;
+
 pub fn parse_gaps(text: &str) -> Option<Vec<LlmGap>> {
+    Some(parse_review(text)?.gaps)
+}
+
+fn parse_review(text: &str) -> Option<ReviewJson> {
     let stripped = strip_fence(text);
     let value = json_value(&stripped)?;
     let gaps = value.get("gaps")?.as_array()?;
-    Some(
-        gaps.iter()
-            .filter_map(|gap| {
-                let item = gap.get("item").and_then(Value::as_str)?.to_string();
-                let detail = gap
-                    .get("detail")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string();
-                if item.is_empty() {
-                    None
-                } else {
-                    Some(LlmGap { item, detail })
-                }
-            })
-            .collect(),
-    )
+    let parsed = gaps
+        .iter()
+        .filter_map(|gap| {
+            let item = gap.get("item").and_then(Value::as_str)?.to_string();
+            let detail = gap
+                .get("detail")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            if item.is_empty() {
+                None
+            } else {
+                Some(LlmGap { item, detail })
+            }
+        })
+        .collect();
+    Some(ReviewJson {
+        gaps: parsed,
+        notes: notes_from(&value),
+    })
+}
+
+fn notes_from(value: &Value) -> Vec<String> {
+    let Some(notes) = value.get("notes").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    notes
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|note| !note.is_empty())
+        .take(MAX_NOTES)
+        .map(|note| {
+            let mut text: String = note.chars().take(MAX_NOTE_CHARS).collect();
+            if note.chars().count() > MAX_NOTE_CHARS {
+                text.push('…');
+            }
+            text
+        })
+        .collect()
 }
 
 /// The first complete JSON value, starting at the first `{`.
@@ -684,6 +751,20 @@ mod tests {
     fn a_closing_brace_before_an_opening_brace_is_not_json() {
         assert!(parse_gaps("} not json {").is_none());
         assert!(parse_gaps("}").is_none());
+    }
+
+    #[test]
+    fn notes_are_kept_and_capped_at_ten() {
+        let mut notes = Vec::new();
+        for index in 0..12 {
+            notes.push(format!("\"note {index}\""));
+        }
+        let text = format!("{{\"gaps\":[],\"notes\":[{}]}}", notes.join(","));
+        let parsed = parse_review(&text).unwrap();
+        assert!(parsed.gaps.is_empty());
+        assert_eq!(parsed.notes.len(), 10);
+        assert_eq!(parsed.notes[0], "note 0");
+        assert!(parse_review("{\"gaps\":[]}").unwrap().notes.is_empty());
     }
 
     #[test]

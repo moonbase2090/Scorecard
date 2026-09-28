@@ -72,6 +72,7 @@ pub fn to_pretty(card: &Scorecard, opts: &PrettyOpts) -> String {
     push_scores(&mut out, card, opts, width);
     push_crap(&mut out, card, opts, width);
     push_findings(&mut out, card, opts, width);
+    push_llm(&mut out, card);
     push_footer(&mut out, card, opts);
     out
 }
@@ -244,6 +245,39 @@ fn finding_block(finding: &Finding, opts: &PrettyOpts, width: usize) -> String {
         }
     }
     block
+}
+
+fn push_llm(out: &mut String, card: &Scorecard) {
+    let skipped = card.engines_skipped.iter().any(|engine| engine == "llm");
+    if card.llm.is_none() && !skipped {
+        return;
+    }
+    out.push_str("llm\n");
+    match card.llm.as_ref() {
+        None => {
+            out.push_str("  skipped: llm is off. Turn it on with --llm on --intent TEXT, or set enabled = true under [llm] in analyzer.toml.\n\n");
+        }
+        Some(section) if section.status == "skipped" => {
+            out.push_str("  skipped: ");
+            out.push_str(section.reason.as_deref().unwrap_or("llm did not run"));
+            out.push_str("\n\n");
+        }
+        Some(section) => {
+            out.push_str(&format!(
+                "  backend {}  model {}  rounds {}\n  verdict: {}\n",
+                section.backend.as_deref().unwrap_or("unknown"),
+                section.model.as_deref().unwrap_or("unknown"),
+                section.rounds.unwrap_or(0),
+                section.verdict.as_deref().unwrap_or("no gaps")
+            ));
+            for note in section.notes.iter().take(10) {
+                out.push_str("  - ");
+                out.push_str(note);
+                out.push('\n');
+            }
+            out.push('\n');
+        }
+    }
 }
 
 fn push_footer(out: &mut String, card: &Scorecard, opts: &PrettyOpts) {
@@ -425,6 +459,34 @@ fn unix_cols() -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sc_core::LlmSection;
+
+    #[test]
+    fn pretty_shows_llm_notes_and_a_plain_skip_reason() {
+        let opts = PrettyOpts {
+            color: false,
+            width: 80,
+            version: "0.1.0".into(),
+            report: None,
+            exit_code: 0,
+        };
+        let mut card = Scorecard::skeleton("demo", 30);
+        let off = to_pretty(&card, &opts);
+        assert!(off.contains("Turn it on with --llm on --intent TEXT"));
+        card.llm = Some(LlmSection::ran(
+            "ollama",
+            "qwen2.5-coder",
+            3,
+            0,
+            vec!["checked the intent against src/lib.rs".into()],
+        ));
+        card.engines_skipped.retain(|engine| engine != "llm");
+        card.engines_run.push("llm".into());
+        let ran = to_pretty(&card, &opts);
+        assert!(ran.contains("verdict: no gaps"));
+        assert!(ran.contains("checked the intent against src/lib.rs"));
+        assert!(ran.contains("backend ollama"));
+    }
 
     #[test]
     fn omitted_format_is_pretty_on_a_tty_and_json_otherwise() {

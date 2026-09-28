@@ -57,7 +57,7 @@ To configure it, copy `analyzer.toml.example` to `analyzer.toml` at the repo roo
 
 ## Sample
 
-`sc analyze testdata/good_crate --format pretty` on a terminal. Color is off in this copy. The same run and `testdata/failing_test` are in [examples/terminal](examples/terminal/).
+`sc analyze testdata/good_crate --format pretty` on a terminal. Color is off in this copy. The same run and `testdata/failing_test` are in [examples/terminal](examples/terminal/). The `llm` lines say why the review did not run and the command that turns it on. `--llm on --intent TEXT` reviews that goal when there is no spec file.
 
 ```text
 sc 0.1.3  testdata/good_crate  rust  5ac851c clean  scope tree
@@ -84,6 +84,9 @@ worst crap  threshold 30
 
 findings
   (none)
+
+llm
+  skipped: llm is off. Turn it on with --llm on --intent TEXT, or set enabled = true under [llm] in analyzer.toml.
 
 engines run: compile, tests, coverage, complexity, crap, sca, secrets, perf, lint
 engines skipped: spec, mutation, llm

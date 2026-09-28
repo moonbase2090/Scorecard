@@ -9,7 +9,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use sc_core::{
-    apply_disposition, compute_scores, CrapSection, Finding, Gate, GitInfo, Metrics,
+    apply_disposition, compute_scores, CrapSection, Finding, Gate, GitInfo, LlmSection, Metrics,
     MutationSection, RunRecord, Scope, Scorecard, SpecSection, SCORECARD_VERSION,
 };
 use sc_graph::FunctionInfo;
@@ -147,7 +147,8 @@ fn analyze_blocked(
         worst: Vec::new(),
         mutation: MutationSection::skipped(),
         spec: SpecSection::empty(),
-        intent: request.intent,
+        intent: request.intent.clone(),
+        llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),
         runs: Vec::new(),
         analyzer_error: true,
     })
@@ -326,7 +327,8 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         worst: crap.worst,
         mutation: MutationSection::skipped(),
         spec: SpecSection::empty(),
-        intent: request.intent,
+        intent: request.intent.clone(),
+        llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),
         runs: Vec::new(),
         analyzer_error: false,
     })
@@ -589,7 +591,8 @@ fn analyze_unsupported(
         worst: crap.worst,
         mutation: MutationSection::skipped(),
         spec: SpecSection::empty(),
-        intent: request.intent,
+        intent: request.intent.clone(),
+        llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),
         runs,
         analyzer_error: false,
     })
@@ -658,7 +661,8 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         worst: outcome.crap_worst,
         mutation: MutationSection::skipped(),
         spec: SpecSection::empty(),
-        intent: request.intent,
+        intent: request.intent.clone(),
+        llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),
         runs: outcome.runs,
         analyzer_error: false,
     })
@@ -1105,12 +1109,13 @@ fn assemble_rust_report(
         &mut state.skipped,
         &mut state.findings,
     );
-    llm_engine(
+    let llm = llm_engine(
         request,
         &mut spec,
         &mut state.ran,
         &mut state.skipped,
         &mut state.findings,
+        &selection.paths,
     );
 
     let coverage_changed = if selection.mode == "tree" {
@@ -1166,6 +1171,7 @@ fn assemble_rust_report(
         mutation: mutation.section,
         spec: spec.section,
         intent: request.intent.clone(),
+        llm,
         runs: state.runs,
         analyzer_error: state.analyzer_error,
     })
@@ -1191,6 +1197,7 @@ struct Draft {
     mutation: MutationSection,
     spec: SpecSection,
     intent: Option<String>,
+    llm: Option<LlmSection>,
     runs: Vec<RunRecord>,
     analyzer_error: bool,
 }
@@ -1229,6 +1236,7 @@ fn finish(mut draft: Draft) -> AnalyzeOutput {
         mutation: draft.mutation,
         findings: draft.findings,
         spec: draft.spec,
+        llm: draft.llm,
         runs: draft.runs,
     };
     write_last_scorecard(&draft.root, &scorecard);
@@ -1891,29 +1899,117 @@ fn mutation_engine(
     }
 }
 
+fn explain_llm_failure(reason: &str) -> String {
+    let lower = reason.to_ascii_lowercase();
+    if lower.contains("connection")
+        || lower.contains("timed out")
+        || lower.contains("tcp")
+        || lower.contains("refused")
+    {
+        return format!(
+            "{reason}. The model endpoint did not answer. Start Ollama, or set endpoint under [llm] in analyzer.toml. The default is http://127.0.0.1:11434/v1."
+        );
+    }
+    if reason.contains("--") || reason.contains("analyzer.toml") || reason.contains("[llm]") {
+        return reason.to_string();
+    }
+    format!("{reason}. Check [llm] in analyzer.toml, or re-run with --llm off.")
+}
+
+fn other_pack_llm(enabled: bool) -> Option<LlmSection> {
+    if enabled {
+        Some(LlmSection::skipped(
+            "llm is on, but this pack does not run the model review. It runs on a Rust tree. Re-run there, or leave --llm off.",
+        ))
+    } else {
+        None
+    }
+}
+
+#[derive(Debug)]
+enum LlmStart {
+    Off,
+    Skip(String),
+    Run { spec: String, intent: String },
+}
+
+fn llm_start(
+    enabled: bool,
+    spec_path: Option<&Path>,
+    intent: Option<&str>,
+    paths: &[String],
+) -> LlmStart {
+    if !enabled {
+        return LlmStart::Off;
+    }
+    let intent = intent.unwrap_or("").trim();
+    if let Some(path) = spec_path {
+        return match std::fs::read_to_string(path) {
+            Ok(text) => LlmStart::Run {
+                spec: text,
+                intent: intent.to_string(),
+            },
+            Err(_) => LlmStart::Skip(
+                "llm is on, but the --spec file could not be read. Pass a readable file: --spec PATH."
+                    .into(),
+            ),
+        };
+    }
+    if intent.is_empty() {
+        return LlmStart::Skip(
+            "llm is on, but neither --spec nor --intent was given. Re-run with --spec PATH or --intent TEXT."
+                .into(),
+        );
+    }
+    let mut text = intent.to_string();
+    if !paths.is_empty() {
+        text.push_str("\n\nPaths in scope:\n");
+        for path in paths {
+            text.push_str(path);
+            text.push('\n');
+        }
+    }
+    LlmStart::Run {
+        spec: String::new(),
+        intent: text,
+    }
+}
+
 fn llm_engine(
     request: &AnalyzeRequest,
     spec: &mut SpecRun,
     ran: &mut Vec<String>,
     skipped: &mut Vec<String>,
     findings: &mut Vec<Finding>,
-) {
+    paths: &[String],
+) -> Option<LlmSection> {
     let enabled = request.llm_override.unwrap_or(request.config.llm.enabled);
-    if !enabled {
-        skipped.push("llm".into());
-        return;
-    }
-    let Some(spec_text) = request
-        .spec_path
-        .as_ref()
-        .and_then(|path| std::fs::read_to_string(path).ok())
-    else {
-        skipped.push("llm".into());
-        findings.push(unavailable(
-            "llm",
-            "llm is on, and no readable --spec file was given",
-        ));
-        return;
+    let start = llm_start(
+        enabled,
+        request.spec_path.as_deref(),
+        request.intent.as_deref(),
+        paths,
+    );
+    let (spec_text, prompt_intent) = match start {
+        LlmStart::Off => {
+            skipped.push("llm".into());
+            return None;
+        }
+        LlmStart::Skip(reason) => {
+            skipped.push("llm".into());
+            findings.push(unavailable("llm", &reason));
+            return Some(LlmSection::skipped(reason));
+        }
+        LlmStart::Run { spec, intent } => (spec, intent),
+    };
+    let prompt_intent = if prompt_intent.trim().is_empty() {
+        None
+    } else {
+        Some(prompt_intent.as_str())
+    };
+    let backend = match request.config.llm.backend.trim() {
+        "" | "ollama" => "ollama",
+        other => other,
     };
     let llm_request = sc_llm::LlmRequest {
         endpoint: &request.config.llm.endpoint,
@@ -1921,7 +2017,7 @@ fn llm_engine(
         api_key: None,
         spec: &spec_text,
         root: &request.root,
-        intent: request.intent.as_deref(),
+        intent: prompt_intent,
         max_tool_rounds: request.config.llm.max_tool_rounds,
     };
     let outcome = match request.config.llm.backend.trim() {
@@ -1934,28 +2030,41 @@ fn llm_engine(
                 api_key: Some(&key),
                 spec: &spec_text,
                 root: &request.root,
-                intent: request.intent.as_deref(),
+                intent: prompt_intent,
                 max_tool_rounds: request.config.llm.max_tool_rounds,
             }),
             Err(message) => sc_llm::LlmOutcome {
                 gaps: Vec::new(),
+                notes: Vec::new(),
                 skipped: Some(message),
                 rounds: 0,
+                model: String::new(),
             },
         },
         other => sc_llm::LlmOutcome {
             gaps: Vec::new(),
+            notes: Vec::new(),
             skipped: Some(format!("unknown llm backend {other}")),
             rounds: 0,
+            model: String::new(),
         },
     };
     spec.section.llm_rounds = Some(outcome.rounds);
     if let Some(reason) = outcome.skipped {
         skipped.push("llm".into());
+        let reason = explain_llm_failure(&reason);
         findings.push(unavailable("llm", &reason));
-        return;
+        return Some(LlmSection::skipped(reason));
     }
     ran.push("llm".into());
+    let gap_count = outcome.gaps.len();
+    let model = if outcome.model.is_empty() {
+        request.config.llm.model.clone()
+    } else {
+        outcome.model.clone()
+    };
+    let notes = outcome.notes.clone();
+    let rounds = outcome.rounds;
     for gap in outcome.gaps {
         let message = if gap.detail.is_empty() {
             gap.item.clone()
@@ -1981,6 +2090,7 @@ fn llm_engine(
             disposition: String::new(),
         });
     }
+    Some(LlmSection::ran(backend, model, rounds, gap_count, notes))
 }
 
 fn mean_coverage(
@@ -2111,6 +2221,26 @@ fn unique_ids(findings: &mut [Finding]) {
 mod tests {
     use super::*;
     use sc_core::Config;
+
+    #[test]
+    fn intent_alone_is_enough_to_run_the_llm_review() {
+        let start = llm_start(true, None, Some("keep the SHA in its own cell"), &[]);
+        match start {
+            LlmStart::Run { spec, intent } => {
+                assert!(spec.is_empty());
+                assert!(intent.contains("SHA"));
+            }
+            other => panic!("expected a run, got {other:?}"),
+        }
+        match llm_start(true, None, None, &[]) {
+            LlmStart::Skip(reason) => assert!(reason.contains("--intent")),
+            other => panic!("expected a skip, got {other:?}"),
+        }
+        assert!(matches!(
+            llm_start(false, None, Some("goal"), &[]),
+            LlmStart::Off
+        ));
+    }
 
     #[test]
     fn missing_manifest_is_an_analyzer_error() {
