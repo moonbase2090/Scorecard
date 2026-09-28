@@ -409,7 +409,9 @@ fn apply(root: &Path, deadline: Instant, step: Step, report: &mut ToolReport) {
                 } else {
                     format!("{} failed: {detail}", step.engine)
                 };
-                if step.enforce {
+                let include_only = !step.enforce
+                    && only_unknown_include(&format!("{}\n{}", captured.stdout, captured.stderr));
+                if step.enforce || !include_only {
                     let rule = match step.engine {
                         "tests" => "test.failed",
                         "lint" => "lint.failed",
@@ -549,9 +551,32 @@ fn cpp_types_absent(compiler_present: bool, sources_empty: bool) -> &'static str
 }
 
 /// A syntax check cannot see include paths or generated headers unless the
-/// project has `CMakeLists.txt` or `compile_commands.json`.
+/// project has `CMakeLists.txt` or `compile_commands.json`. A real compile
+/// error is still enforced; only an unknown include is reported.
 fn types_enforced(root: &Path) -> bool {
     root.join("CMakeLists.txt").is_file() || root.join("compile_commands.json").is_file()
+}
+
+/// True when every compiler error is a missing header or an include name the
+/// build would have supplied. Any other error, including an undeclared
+/// identifier, is a real failure.
+fn only_unknown_include(output: &str) -> bool {
+    let mut saw_error = false;
+    for line in output.lines() {
+        let lower = line.to_ascii_lowercase();
+        if !lower.contains("error:") {
+            continue;
+        }
+        saw_error = true;
+        let unknown_include = lower.contains("file not found")
+            || lower.contains("no such file or directory")
+            || lower.contains("expected \"filename\" or <filename>")
+            || lower.contains("#include expects \"filename\" or <filename>");
+        if !unknown_include {
+            return false;
+        }
+    }
+    saw_error
 }
 
 fn split_c_family(files: &[String]) -> (Vec<String>, Vec<String>) {
@@ -1126,6 +1151,48 @@ mod tests {
         assert!(reason.contains("not enforced"), "{reason}");
         assert!(reason.contains("Include paths"), "{reason}");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn undeclared_identifier_on_a_makefile_fails_the_types_gate() {
+        if !which("cc") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-undeclared-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("Makefile"), "all:\n\tcc -o demo demo.c\n").unwrap();
+        std::fs::write(root.join("bad.c"), "int main(void) { return x; }\n").unwrap();
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(!gate.pass, "{gate:?}");
+        assert!(gate.enforced, "{gate:?} {:?}", report.findings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn only_a_missing_header_is_an_unknown_include() {
+        assert!(only_unknown_include(
+            "bad.c:1:10: fatal error: 'missing.h' file not found\n"
+        ));
+        assert!(only_unknown_include(
+            "bad.c:1:10: fatal error: missing.h: No such file or directory\n"
+        ));
+        assert!(only_unknown_include(
+            "bad.c:1:10: error: expected \"FILENAME\" or <FILENAME>\n"
+        ));
+        assert!(!only_unknown_include(
+            "bad.c:1:25: error: use of undeclared identifier 'x'\n"
+        ));
+        assert!(!only_unknown_include(
+            "bad.c:1:10: fatal error: 'missing.h' file not found\nbad.c:2:12: error: use of undeclared identifier 'x'\n"
+        ));
+        assert!(!only_unknown_include(""));
     }
 
     #[test]
