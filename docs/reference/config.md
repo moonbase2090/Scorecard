@@ -41,7 +41,7 @@ Only the first file found is read. Command-line flags override the matching keys
 
 | Key | Default | Meaning |
 |---|---|---|
-| `commands.lint` | `cargo clippy` | Lint command for the Rust and `command` packs. Empty skips lint. Other packs use their own linter; see [packs](../packs.md). Add `-- -D warnings` to fail on warnings. |
+| `commands.lint` | `cargo clippy --workspace` | Lint command for the Rust and `command` packs. Empty skips lint. Other packs use their own linter; see [packs](../packs.md). Add `-- -D warnings` to fail on warnings: `cargo clippy --workspace -- -D warnings`. |
 
 ### `[mutation]`
 

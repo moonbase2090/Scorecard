@@ -777,7 +777,7 @@ fn compile_phase(root: &Path, manifest: &Path, deadline: Instant, state: &mut Ru
             note_run(
                 &mut state.runs,
                 "compile",
-                "cargo check --message-format=json",
+                "cargo check --workspace --message-format=json",
                 captured.status.code(),
                 captured.elapsed,
             );
@@ -799,7 +799,7 @@ fn compile_phase(root: &Path, manifest: &Path, deadline: Instant, state: &mut Ru
             note_run(
                 &mut state.runs,
                 "compile",
-                "cargo check --message-format=json",
+                "cargo check --workspace --message-format=json",
                 None,
                 Duration::ZERO,
             );
@@ -1308,11 +1308,17 @@ fn run_test_set(
             Ok(captured) => note_run(
                 runs,
                 "tests",
-                "cargo test",
+                "cargo test --workspace",
                 captured.status.code(),
                 captured.elapsed,
             ),
-            Err(_) => note_run(runs, "tests", "cargo test", None, started.elapsed()),
+            Err(_) => note_run(
+                runs,
+                "tests",
+                "cargo test --workspace",
+                None,
+                started.elapsed(),
+            ),
         }
         let captured = result?;
         return Ok(TestCapture {
@@ -1326,7 +1332,7 @@ fn run_test_set(
     let mut success = true;
     for name in names {
         let started = Instant::now();
-        let command = format!("cargo test {name}");
+        let command = format!("cargo test --workspace {name}");
         let result = run_one_test(root, manifest, deadline, name);
         match &result {
             Ok(captured) => note_run(
@@ -1361,6 +1367,7 @@ fn run_one_test(
         root,
         &[
             "test",
+            "--workspace",
             name,
             "--manifest-path",
             &manifest,
@@ -1378,6 +1385,18 @@ struct LintSink<'a> {
     runs: &'a mut Vec<RunRecord>,
 }
 
+/// `cargo clippy` without `--workspace` misses members that are not default packages.
+fn clippy_workspace(script: &str) -> String {
+    if !script.starts_with("cargo clippy") {
+        return script.to_string();
+    }
+    if script.split_whitespace().any(|part| part == "--workspace") {
+        return script.to_string();
+    }
+    let rest = script.trim_start_matches("cargo clippy");
+    format!("cargo clippy --workspace{rest}")
+}
+
 fn run_lint_engine(
     root: &Path,
     lint: &str,
@@ -1389,11 +1408,12 @@ fn run_lint_engine(
         sink.skipped.push("lint".into());
         return false;
     }
-    let script = lint.trim();
+    let script = clippy_workspace(lint.trim());
     if script.is_empty() {
         sink.skipped.push("lint".into());
         return false;
     }
+    let script = script.as_str();
     let started = Instant::now();
     match run_shell(root, script, deadline) {
         Ok(captured) => {
@@ -1488,6 +1508,7 @@ fn run_check(
         root,
         &[
             "check",
+            "--workspace",
             "--manifest-path",
             &manifest,
             "--message-format=json",
@@ -1506,7 +1527,14 @@ fn run_tests(
     let manifest = manifest.to_string_lossy().to_string();
     run_cargo(
         root,
-        &["test", "--manifest-path", &manifest, "--color", "never"],
+        &[
+            "test",
+            "--workspace",
+            "--manifest-path",
+            &manifest,
+            "--color",
+            "never",
+        ],
         deadline,
     )
 }
@@ -1529,6 +1557,7 @@ fn run_coverage(
         root,
         &[
             "llvm-cov",
+            "--workspace",
             "--json",
             "--output-path",
             &out_s,
@@ -1541,7 +1570,7 @@ fn run_coverage(
         Ok(captured) => note_run_with_budget(
             runs,
             "coverage",
-            "cargo llvm-cov --json",
+            "cargo llvm-cov --workspace --json",
             captured.status.code(),
             captured.elapsed,
             budget,
@@ -1549,7 +1578,7 @@ fn run_coverage(
         Err(_) => note_run_with_budget(
             runs,
             "coverage",
-            "cargo llvm-cov --json",
+            "cargo llvm-cov --workspace --json",
             None,
             started.elapsed(),
             budget,
@@ -2339,6 +2368,115 @@ mod tests {
         assert!(!reason.contains("not provided"));
         let pack = tests_gate(false, true, "");
         assert_eq!(pack.reason.as_deref(), Some("not provided by this pack"));
+    }
+
+    #[test]
+    fn clippy_without_workspace_gains_the_flag() {
+        assert_eq!(clippy_workspace("cargo clippy"), "cargo clippy --workspace");
+        assert_eq!(
+            clippy_workspace("cargo clippy -- -D warnings"),
+            "cargo clippy --workspace -- -D warnings"
+        );
+        assert_eq!(
+            clippy_workspace("cargo clippy --workspace"),
+            "cargo clippy --workspace"
+        );
+        assert_eq!(clippy_workspace("npm test"), "npm test");
+    }
+
+    #[test]
+    fn a_workspace_member_that_does_not_compile_fails_the_types_gate() {
+        let root = std::env::temp_dir().join(format!("sc-ws-broken-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("crates/broken/src")).unwrap();
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[workspace]\nmembers = [\".\", \"crates/broken\"]\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("src/lib.rs"), "pub fn ok() -> i32 { 1 }\n").unwrap();
+        std::fs::write(
+            root.join("crates/broken/Cargo.toml"),
+            "[package]\nname = \"broken\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("crates/broken/src/lib.rs"), "pub fn bad( {\n").unwrap();
+        let mut config = Config::default();
+        config.engines.coverage = false;
+        config.commands.lint.clear();
+        let output = analyze(AnalyzeRequest {
+            root: root.clone(),
+            repo: "ws".into(),
+            fail_on: vec!["types".into(), "tests".into()],
+            budget: Duration::from_secs(120),
+            config,
+            diff_base: None,
+            diff_head: None,
+            path_list: Vec::new(),
+            spec_path: None,
+            mutation_override: Some("off".into()),
+            llm_override: Some(false),
+            intent: None,
+        });
+        let types = output
+            .scorecard
+            .gates
+            .iter()
+            .find(|gate| gate.id == "types")
+            .unwrap();
+        assert!(!types.pass, "{:?}", output.scorecard.findings);
+        assert!(types.enforced);
+        assert!(output.scorecard.runs.iter().any(|run| {
+            run.command.contains("cargo check") && run.command.contains("--workspace")
+        }));
+        let _ = std::fs::remove_dir_all(&root);
+
+        let lone = std::env::temp_dir().join(format!("sc-lone-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&lone);
+        std::fs::create_dir_all(lone.join("src")).unwrap();
+        std::fs::write(
+            lone.join("Cargo.toml"),
+            "[package]\nname = \"lone\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            lone.join("src/lib.rs"),
+            "pub fn ok() -> i32 { 1 }\n#[test]\nfn passes() { assert_eq!(ok(), 1); }\n",
+        )
+        .unwrap();
+        let mut config = Config::default();
+        config.engines.coverage = false;
+        config.commands.lint.clear();
+        let output = analyze(AnalyzeRequest {
+            root: lone.clone(),
+            repo: "lone".into(),
+            fail_on: vec!["types".into(), "tests".into()],
+            budget: Duration::from_secs(120),
+            config,
+            diff_base: None,
+            diff_head: None,
+            path_list: Vec::new(),
+            spec_path: None,
+            mutation_override: Some("off".into()),
+            llm_override: Some(false),
+            intent: None,
+        });
+        let types = output
+            .scorecard
+            .gates
+            .iter()
+            .find(|gate| gate.id == "types")
+            .unwrap();
+        assert!(types.pass, "{:?}", output.scorecard.findings);
+        let tests = output
+            .scorecard
+            .gates
+            .iter()
+            .find(|gate| gate.id == "tests")
+            .unwrap();
+        assert!(tests.pass, "{:?}", output.scorecard.findings);
+        let _ = std::fs::remove_dir_all(&lone);
     }
 
     #[test]

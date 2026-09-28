@@ -20,7 +20,7 @@ exclude = ["target/**", "generated/**", "vendor/**"]
 
 [commands]
 # Lint command for the Rust and command packs. Empty skips lint.
-lint = "cargo clippy --all-targets -- -D warnings"
+lint = "cargo clippy --workspace --all-targets -- -D warnings"
 ```
 
 Check that a config is read:
