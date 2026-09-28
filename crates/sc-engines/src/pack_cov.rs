@@ -12,21 +12,20 @@ use sc_graph::FunctionInfo;
 use crate::coverage::{CovFunction, CoverageData};
 
 pub fn load(pack: &str, root: &Path, functions: &[FunctionInfo]) -> Option<CoverageData> {
+    let extra = crate::poly_cc::coverage_paths(root, pack);
     let dir = root.join(".sc").join("coverage");
     match pack {
-        "node" => {
-            read(&dir.join("coverage-final.json")).and_then(|text| istanbul(&text, functions))
-        }
+        "node" => read(&dir.join("coverage-final.json"))
+            .and_then(|text| istanbul(&text, functions, &extra)),
         "java" => read(&root.join("target/site/jacoco/jacoco.xml"))
             .or_else(|| read(&root.join("build/reports/jacoco/test/jacocoTestReport.xml")))
-            .and_then(|text| jacoco(&text, functions)),
-        "csharp" => {
-            read(&dir.join("csharp.cobertura.xml")).and_then(|text| cobertura(&text, functions))
-        }
-        "php" => read(&dir.join("clover.xml")).and_then(|text| clover(&text, functions)),
+            .and_then(|text| jacoco(&text, functions, &extra)),
+        "csharp" => read(&dir.join("csharp.cobertura.xml"))
+            .and_then(|text| cobertura(&text, functions, &extra)),
+        "php" => read(&dir.join("clover.xml")).and_then(|text| clover(&text, functions, &extra)),
         "bash" => find_named(&dir, &["cobertura.xml", "cov.xml", "kcov.xml"], 0)
-            .and_then(|text| cobertura(&text, functions)),
-        "cpp" => read(&dir.join("cpp.info")).and_then(|text| lcov(&text, functions)),
+            .and_then(|text| cobertura(&text, functions, &extra)),
+        "cpp" => read(&dir.join("cpp.info")).and_then(|text| lcov(&text, functions, &extra)),
         "go" => None,
         _ => None,
     }
@@ -65,10 +64,10 @@ fn find_named(dir: &Path, names: &[&str], depth: u32) -> Option<String> {
     None
 }
 
-pub fn istanbul(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
+pub fn istanbul(text: &str, functions: &[FunctionInfo], extra: &[String]) -> Option<CoverageData> {
     let value: serde_json::Value = serde_json::from_str(text).ok()?;
     let files = value.as_object()?;
-    let owners = owners(files.keys().map(|name| name.as_str()), functions);
+    let owners = owners(files.keys().map(|name| name.as_str()), functions, extra);
     Some(from_hits(functions, |function| {
         let mut hit = 0u32;
         let mut total = 0u32;
@@ -95,7 +94,7 @@ pub fn istanbul(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> 
     }))
 }
 
-pub fn jacoco(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
+pub fn jacoco(text: &str, functions: &[FunctionInfo], extra: &[String]) -> Option<CoverageData> {
     let text = xml_lines(text);
     let mut package = String::new();
     let mut source = String::new();
@@ -128,7 +127,11 @@ pub fn jacoco(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
     if rows.is_empty() {
         return None;
     }
-    let owners = owners(rows.iter().map(|(file, _, _, _)| file.as_str()), functions);
+    let owners = owners(
+        rows.iter().map(|(file, _, _, _)| file.as_str()),
+        functions,
+        extra,
+    );
     Some(from_hits(functions, |function| {
         rows.iter()
             .find(|(file, name, _, _)| {
@@ -139,7 +142,7 @@ pub fn jacoco(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
     }))
 }
 
-pub fn cobertura(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
+pub fn cobertura(text: &str, functions: &[FunctionInfo], extra: &[String]) -> Option<CoverageData> {
     let text = xml_lines(text);
     let mut file = String::new();
     let mut lines: Vec<(String, u32, u32)> = Vec::new();
@@ -165,7 +168,11 @@ pub fn cobertura(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData>
     if lines.is_empty() {
         return None;
     }
-    let owners = owners(lines.iter().map(|(name, _, _)| name.as_str()), functions);
+    let owners = owners(
+        lines.iter().map(|(name, _, _)| name.as_str()),
+        functions,
+        extra,
+    );
     Some(from_hits(functions, |function| {
         sum_owned(
             &owners,
@@ -177,8 +184,8 @@ pub fn cobertura(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData>
     }))
 }
 
-pub fn clover(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
-    cobertura(text, functions).or_else(|| {
+pub fn clover(text: &str, functions: &[FunctionInfo], extra: &[String]) -> Option<CoverageData> {
+    cobertura(text, functions, extra).or_else(|| {
         let text = xml_lines(text);
         let mut file = String::new();
         let mut lines: Vec<(String, u32, u32)> = Vec::new();
@@ -202,7 +209,11 @@ pub fn clover(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
         if lines.is_empty() {
             return None;
         }
-        let owners = owners(lines.iter().map(|(name, _, _)| name.as_str()), functions);
+        let owners = owners(
+            lines.iter().map(|(name, _, _)| name.as_str()),
+            functions,
+            extra,
+        );
         Some(from_hits(functions, |function| {
             sum_owned(
                 &owners,
@@ -215,7 +226,7 @@ pub fn clover(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
     })
 }
 
-pub fn lcov(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
+pub fn lcov(text: &str, functions: &[FunctionInfo], extra: &[String]) -> Option<CoverageData> {
     let mut file = String::new();
     let mut lines: Vec<(String, u32, u32)> = Vec::new();
     for raw in text.lines() {
@@ -233,7 +244,11 @@ pub fn lcov(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
     if lines.is_empty() {
         return None;
     }
-    let owners = owners(lines.iter().map(|(name, _, _)| name.as_str()), functions);
+    let owners = owners(
+        lines.iter().map(|(name, _, _)| name.as_str()),
+        functions,
+        extra,
+    );
     Some(from_hits(functions, |function| {
         sum_owned(
             &owners,
@@ -280,8 +295,10 @@ fn from_hits(
 fn owners<'a>(
     reports: impl IntoIterator<Item = &'a str>,
     functions: &'a [FunctionInfo],
+    extra: &'a [String],
 ) -> std::collections::HashMap<String, String> {
-    let known: Vec<&str> = functions.iter().map(|item| item.file.as_str()).collect();
+    let known =
+        crate::coverage::merge_known(functions.iter().map(|item| item.file.as_str()), extra);
     crate::coverage::file_owners(reports, &known)
 }
 
@@ -370,8 +387,10 @@ mod tests {
     #[test]
     fn istanbul_counts_a_hit_and_a_miss() {
         let text = r#"{"src/app.js":{"statementMap":{"0":{"start":{"line":2}},"1":{"start":{"line":3}}},"s":{"0":1,"1":0}}}"#;
-        let data = istanbul(text, &[sample()]).unwrap();
-        let cov = data.for_function("src/app.js", "choose").unwrap();
+        let data = istanbul(text, &[sample()], &[]).unwrap();
+        let cov = data
+            .for_function_known("src/app.js", "choose", &[])
+            .unwrap();
         assert!((cov - 0.5).abs() < 1e-9, "{cov}");
     }
 
@@ -386,9 +405,13 @@ mod tests {
             ..sample()
         };
         let text = r#"{"pkg/index.js":{"statementMap":{"0":{"start":{"line":2}},"1":{"start":{"line":3}}},"s":{"0":1,"1":1}}}"#;
-        let data = istanbul(text, &[pkg, other]).unwrap();
-        assert!(data.for_function("pkg/index.js", "choose").is_some());
-        assert!(data.for_function("other/index.js", "choose").is_none());
+        let data = istanbul(text, &[pkg, other], &[]).unwrap();
+        assert!(data
+            .for_function_known("pkg/index.js", "choose", &[])
+            .is_some());
+        assert!(data
+            .for_function_known("other/index.js", "choose", &[])
+            .is_none());
     }
 
     #[test]
@@ -415,12 +438,12 @@ mod tests {
             file: "src/main/java/com/b/Util.java".into(),
             ..sample_java()
         };
-        let data = jacoco(text, &[a, b]).unwrap();
+        let data = jacoco(text, &[a, b], &[]).unwrap();
         let covered = data
-            .for_function("src/main/java/com/a/Util.java", "choose")
+            .for_function_known("src/main/java/com/a/Util.java", "choose", &[])
             .unwrap();
         let missed = data
-            .for_function("src/main/java/com/b/Util.java", "choose")
+            .for_function_known("src/main/java/com/b/Util.java", "choose", &[])
             .unwrap();
         assert!((covered - 1.0).abs() < 1e-9, "{covered}");
         assert!(missed.abs() < 1e-9, "{missed}");
@@ -438,9 +461,13 @@ mod tests {
             file: "helper/src/lib.rs".into(),
             ..sample()
         };
-        let data = lcov(text, &[short, long]).unwrap();
-        let short_cov = data.for_function("src/lib.rs", "choose").unwrap();
-        let long_cov = data.for_function("helper/src/lib.rs", "choose").unwrap();
+        let data = lcov(text, &[short, long], &[]).unwrap();
+        let short_cov = data
+            .for_function_known("src/lib.rs", "choose", &[])
+            .unwrap();
+        let long_cov = data
+            .for_function_known("helper/src/lib.rs", "choose", &[])
+            .unwrap();
         assert!(short_cov.abs() < 1e-9, "{short_cov}");
         assert!((long_cov - 1.0).abs() < 1e-9, "{long_cov}");
     }
@@ -456,9 +483,11 @@ mod tests {
             file: "vendor/index.js".into(),
             ..sample()
         };
-        let data = istanbul(text, &[root, vendor]).unwrap();
-        let root_cov = data.for_function("index.js", "choose").unwrap();
-        let vendor_cov = data.for_function("vendor/index.js", "choose").unwrap();
+        let data = istanbul(text, &[root, vendor], &[]).unwrap();
+        let root_cov = data.for_function_known("index.js", "choose", &[]).unwrap();
+        let vendor_cov = data
+            .for_function_known("vendor/index.js", "choose", &[])
+            .unwrap();
         assert!(root_cov.abs() < 1e-9, "{root_cov}");
         assert!((vendor_cov - 1.0).abs() < 1e-9, "{vendor_cov}");
     }
@@ -472,17 +501,19 @@ mod tests {
               </method>
             </class>
         "#;
-        let data = jacoco(text, &[sample()]).unwrap();
-        let cov = data.for_function("src/app.js", "choose").unwrap();
+        let data = jacoco(text, &[sample()], &[]).unwrap();
+        let cov = data
+            .for_function_known("src/app.js", "choose", &[])
+            .unwrap();
         assert!((cov - 0.5).abs() < 1e-9, "{cov}");
     }
 
     #[test]
     fn jacoco_reads_a_single_line_report() {
         let text = r#"<?xml version="1.0"?><report name="cov-java"><class name="App" sourcefilename="App.java"><method name="&lt;init&gt;" desc="()V" line="1"><counter type="LINE" missed="1" covered="0"/></method><method name="choose" desc="(I)Ljava/lang/String;" line="3"><counter type="LINE" missed="1" covered="2"/></method></class></report>"#;
-        let data = jacoco(text, &[sample_java()]).unwrap();
+        let data = jacoco(text, &[sample_java()], &[]).unwrap();
         let cov = data
-            .for_function("src/main/java/App.java", "choose")
+            .for_function_known("src/main/java/App.java", "choose", &[])
             .unwrap();
         assert!((cov - (2.0 / 3.0)).abs() < 1e-9, "{cov}");
     }
@@ -495,8 +526,10 @@ mod tests {
               <line number="3" hits="0"/>
             </class>
         "#;
-        let data = cobertura(text, &[sample()]).unwrap();
-        let cov = data.for_function("src/app.js", "choose").unwrap();
+        let data = cobertura(text, &[sample()], &[]).unwrap();
+        let cov = data
+            .for_function_known("src/app.js", "choose", &[])
+            .unwrap();
         assert!((cov - 0.5).abs() < 1e-9, "{cov}");
     }
 
@@ -508,16 +541,20 @@ mod tests {
               <line num="3" count="0"/>
             </file>
         "#;
-        let data = clover(text, &[sample()]).unwrap();
-        let cov = data.for_function("src/app.js", "choose").unwrap();
+        let data = clover(text, &[sample()], &[]).unwrap();
+        let cov = data
+            .for_function_known("src/app.js", "choose", &[])
+            .unwrap();
         assert!((cov - 0.5).abs() < 1e-9, "{cov}");
     }
 
     #[test]
     fn lcov_uses_da_records() {
         let text = "SF:/src/src/app.js\nDA:2,1\nDA:3,0\nend_of_record\n";
-        let data = lcov(text, &[sample()]).unwrap();
-        let cov = data.for_function("src/app.js", "choose").unwrap();
+        let data = lcov(text, &[sample()], &[]).unwrap();
+        let cov = data
+            .for_function_known("src/app.js", "choose", &[])
+            .unwrap();
         assert!((cov - 0.5).abs() < 1e-9, "{cov}");
     }
 }

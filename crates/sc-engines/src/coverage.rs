@@ -46,14 +46,9 @@ pub struct CoverageData {
 }
 
 impl CoverageData {
-    pub fn for_function(&self, file: &str, symbol: &str) -> Option<f64> {
-        self.for_function_known(file, symbol, &[])
-    }
-
-    /// Like `for_function`, but a coverage path is not shared with a shorter
-    /// path when a longer known file is the real suffix. Among remaining
-    /// matches, the tightest path wins. A higher number from another file
-    /// does not replace it.
+    /// A coverage path is not shared with a shorter path when a longer known
+    /// file is the real suffix. Among remaining matches, the tightest path
+    /// wins. A higher number from another file does not replace it.
     pub fn for_function_known(&self, file: &str, symbol: &str, known: &[&str]) -> Option<f64> {
         let mut best: Option<(usize, f64)> = None;
         for function in &self.functions {
@@ -238,6 +233,20 @@ pub fn symbol_matches(demangled: &str, symbol: &str) -> bool {
     path_after_crate(demangled) == symbol
 }
 
+/// Scored files plus paths that exist only so a longer report path can own its hits.
+pub fn merge_known<'a>(
+    files: impl IntoIterator<Item = &'a str>,
+    extra: &'a [String],
+) -> Vec<&'a str> {
+    let mut known: Vec<&str> = files.into_iter().collect();
+    for path in extra {
+        if !known.contains(&path.as_str()) {
+            known.push(path.as_str());
+        }
+    }
+    known
+}
+
 /// True when `cov_file` is `rel`, or ends at a path boundary with `rel`,
 /// and no longer known file is a better suffix of `cov_file`.
 /// One report path maps to one project file. Built once per report.
@@ -265,12 +274,12 @@ pub fn report_owns(
 }
 
 fn owner_of<'a>(report: &str, known: &[&'a str]) -> Option<&'a str> {
+    // Longest suffix wins. One pass: `path_owned` would rescan `known` per file.
     let mut best: Option<(usize, &'a str)> = None;
     for file in known {
-        if !path_owned(report, file, known.iter().copied()) {
+        let Some(prefix) = path_prefix_len(report, file) else {
             continue;
-        }
-        let prefix = path_prefix_len(report, file)?;
+        };
         best = Some(match best {
             None => (prefix, *file),
             Some((best_prefix, _)) if prefix < best_prefix => (prefix, *file),
@@ -376,7 +385,9 @@ mod tests {
         }
         "#;
         let data = parse_coverage_json(json).unwrap();
-        let cov = data.for_function("src/lib.rs", "classify").unwrap();
+        let cov = data
+            .for_function_known("src/lib.rs", "classify", &[])
+            .unwrap();
         assert!((cov - (2.0 / 3.0)).abs() < 1e-9);
         assert!((data.line_rate - 0.5).abs() < 1e-9);
     }

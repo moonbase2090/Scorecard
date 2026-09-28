@@ -512,10 +512,11 @@ fn analyze_unsupported(
     let mut skipped = tools.skipped;
     let runs = tools.runs;
     let functions = crate::poly_cc::functions_for_pack(&request.root, pack.as_str());
+    let known = crate::poly_cc::coverage_paths(&request.root, pack.as_str());
     let coverage = if pack == crate::pack::PackId::Go {
         std::fs::read_to_string(crate::toolchain::go_cover_path(&request.root))
             .ok()
-            .map(|text| crate::poly_cc::go_coverage(&text, &functions))
+            .map(|text| crate::poly_cc::go_coverage(&text, &functions, &known))
     } else {
         crate::pack_cov::load(pack.as_str(), &request.root, &functions)
     };
@@ -531,9 +532,11 @@ fn analyze_unsupported(
             .as_ref()
             .map(|data| crate::crap::unmatched_count(&functions, data))
             .unwrap_or(functions.len() as u64);
-        findings.push(crate::coverage::missing_finding(&format!(
-            "coverage data is missing for {unmatched} analyzed function(s)"
-        )));
+        if unmatched > 0 {
+            findings.push(crate::coverage::missing_finding(&format!(
+                "coverage data is missing for {unmatched} analyzed function(s)"
+            )));
+        }
     }
     findings.extend(crap.findings.clone());
     gates.push(crap_gate(
@@ -932,7 +935,7 @@ fn coverage_phase(
     match run_coverage(root, manifest, deadline, &mut state.runs) {
         Ok(data) => {
             state.ran.push("coverage".into());
-            let unmatched: Vec<_> = unmatched_functions(&selection.crap_functions, &data).collect();
+            let unmatched = unmatched_functions(&selection.crap_functions, &data);
             if !unmatched.is_empty() {
                 let mut finding = Finding {
                     id: "coverage:unmatched".into(),

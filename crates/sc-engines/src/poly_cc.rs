@@ -10,18 +10,20 @@ use std::process::Command;
 use sc_core::Span;
 use sc_graph::FunctionInfo;
 
-pub fn go_coverage(profile: &str, functions: &[FunctionInfo]) -> crate::coverage::CoverageData {
+pub fn go_coverage(
+    profile: &str,
+    functions: &[FunctionInfo],
+    extra: &[String],
+) -> crate::coverage::CoverageData {
+    let known =
+        crate::coverage::merge_known(functions.iter().map(|item| item.file.as_str()), extra);
     let mut covered = Vec::new();
     let stmts = parse_go_cover(profile);
     for function in functions {
         let mut hit = 0u32;
         let mut total = 0u32;
         for stmt in &stmts {
-            if !crate::coverage::path_owned(
-                &stmt.file,
-                &function.file,
-                functions.iter().map(|item| item.file.as_str()),
-            ) {
+            if !crate::coverage::path_owned(&stmt.file, &function.file, known.iter().copied()) {
                 continue;
             }
             if stmt.start_line < function.span.start_line
@@ -136,6 +138,34 @@ pub fn functions_for_pack(root: &Path, pack: &str) -> Vec<FunctionInfo> {
     }
 }
 
+/// Paths a coverage report may name, including `vendor/`, `dist/`, and
+/// dot-directories. Those files own their hits. They are not scored.
+pub fn coverage_paths(root: &Path, pack: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let exts: &[&str] = match pack {
+        "python" => &["py"],
+        "node" => &["js", "jsx", "mjs", "cjs", "ts", "tsx"],
+        "go" => &["go"],
+        "java" => &["java"],
+        "csharp" => &["cs"],
+        "php" => &["php"],
+        "cpp" => &["c", "cc", "cpp", "cxx", "h", "hh", "hpp", "hxx"],
+        "bash" => &["sh", "bash"],
+        "command" => {
+            let mut all = Vec::new();
+            for name in [
+                "python", "node", "go", "java", "csharp", "php", "cpp", "bash",
+            ] {
+                all.extend(coverage_paths(root, name));
+            }
+            return all;
+        }
+        _ => return Vec::new(),
+    };
+    collect(root, root, 0, exts, &mut out);
+    out
+}
+
 enum Lang {
     C,
     Go,
@@ -159,6 +189,7 @@ fn python_functions(root: &Path) -> Vec<FunctionInfo> {
         return Vec::new();
     };
     rows.into_iter()
+        .filter(|row| product_file(&row.file))
         .map(|row| FunctionInfo {
             file: row.file,
             symbol: row.symbol,
@@ -225,12 +256,24 @@ fn files_with(root: &Path, exts: &[&str], lang: Lang) -> Vec<FunctionInfo> {
     collect(root, root, 0, exts, &mut paths);
     let mut functions = Vec::new();
     for rel in paths {
+        if !product_file(&rel) {
+            continue;
+        }
         let Ok(text) = std::fs::read_to_string(root.join(&rel)) else {
             continue;
         };
         functions.extend(scan_text(&rel, &text, &lang));
     }
     functions
+}
+
+/// `vendor/`, `dist/`, and dot-directories are third-party trees. Scoring
+/// them makes one missing coverage record turn a measured CRAP failure advisory.
+fn product_file(rel: &str) -> bool {
+    !rel.split('/')
+        .rev()
+        .skip(1)
+        .any(|part| part == "vendor" || part == "dist" || part.starts_with('.'))
 }
 
 fn collect(root: &Path, dir: &Path, depth: u32, exts: &[&str], out: &mut Vec<String>) {
@@ -621,6 +664,68 @@ mod tests {
     }
 
     #[test]
+    fn vendor_dist_and_dot_dirs_are_walked_but_not_scored() {
+        let dir = std::env::temp_dir().join(format!("sc-score-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let six = "function pick(v) {\n  if (v === 1) return 1;\n  if (v === 2) return 2;\n  if (v === 3) return 3;\n  if (v === 4) return 4;\n  if (v === 5) return 5;\n  return 0;\n}\n";
+        for rel in [
+            "index.js",
+            "vendor/index.js",
+            "dist/bundle.js",
+            ".yarn/releases/yarn.js",
+        ] {
+            let path = dir.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, six).unwrap();
+        }
+        let functions = functions_for_pack(&dir, "node");
+        let mut files: Vec<&str> = functions.iter().map(|item| item.file.as_str()).collect();
+        files.sort();
+        assert_eq!(files, ["index.js"]);
+
+        let known = coverage_paths(&dir, "node");
+        for rel in [
+            "vendor/index.js",
+            "dist/bundle.js",
+            ".yarn/releases/yarn.js",
+            "index.js",
+        ] {
+            assert!(known.iter().any(|path| path == rel), "{known:?}");
+        }
+        let refs: Vec<&str> = known.iter().map(|path| path.as_str()).collect();
+        let owners = crate::coverage::file_owners(["vendor/index.js", "index.js"], &refs);
+        assert!(crate::coverage::report_owns(
+            &owners,
+            "vendor/index.js",
+            "vendor/index.js"
+        ));
+        assert!(!crate::coverage::report_owns(
+            &owners,
+            "vendor/index.js",
+            "index.js"
+        ));
+
+        let coverage = crate::coverage::CoverageData {
+            functions: vec![crate::coverage::CovFunction {
+                file: "index.js".into(),
+                demangled: "pick".into(),
+                coverage: 0.0,
+            }],
+            line_rate: 0.0,
+        };
+        let outcome = crate::crap::evaluate(&functions, Some(&coverage), 30, 15, |_| true);
+        assert!(
+            outcome.coverage_complete,
+            "an unscored vendor file made coverage incomplete"
+        );
+        assert!(
+            outcome.over >= 1,
+            "measured 0% coverage was not over threshold"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn function_walk_includes_vendor_and_a_deep_file() {
         let dir = std::env::temp_dir().join(format!("sc-walk-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -723,8 +828,8 @@ mod tests {
         };
         let profile =
             "mode: set\nexample.com/p/main.go:4.2,5.3 1 1\nexample.com/p/main.go:5.3,6.2 1 0\n";
-        let data = go_coverage(profile, &[function]);
-        let cov = data.for_function("main.go", "main").unwrap();
+        let data = go_coverage(profile, &[function], &[]);
+        let cov = data.for_function_known("main.go", "main", &[]).unwrap();
         assert!((cov - 0.5).abs() < 1e-9, "{cov}");
     }
 

@@ -132,18 +132,22 @@ pub fn evaluate(
 }
 
 pub fn unmatched_count(functions: &[FunctionInfo], coverage: &CoverageData) -> u64 {
-    unmatched_functions(functions, coverage).count() as u64
+    unmatched_functions(functions, coverage).len() as u64
 }
 
 pub fn unmatched_functions<'a>(
     functions: &'a [FunctionInfo],
     coverage: &'a CoverageData,
-) -> impl Iterator<Item = &'a FunctionInfo> + 'a {
-    functions.iter().filter(move |function| {
-        coverage
-            .for_function(&function.file, &function.symbol)
-            .is_none()
-    })
+) -> Vec<&'a FunctionInfo> {
+    let files: Vec<&str> = functions.iter().map(|item| item.file.as_str()).collect();
+    functions
+        .iter()
+        .filter(|function| {
+            coverage
+                .for_function_known(&function.file, &function.symbol, &files)
+                .is_none()
+        })
+        .collect()
 }
 
 fn pct(coverage: f64) -> i64 {

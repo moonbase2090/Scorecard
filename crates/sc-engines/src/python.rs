@@ -97,9 +97,11 @@ pub fn run(root: &Path, deadline: Instant, threshold: u32, untested_cc: u32) -> 
             .as_ref()
             .map(|data| crate::crap::unmatched_count(&functions, data))
             .unwrap_or(functions.len() as u64);
-        findings.push(crate::coverage::missing_finding(&format!(
-            "coverage data is missing for {unmatched} analyzed function(s)"
-        )));
+        if unmatched > 0 {
+            findings.push(crate::coverage::missing_finding(&format!(
+                "coverage data is missing for {unmatched} analyzed function(s)"
+            )));
+        }
         if coverage.is_none() {
             skipped.push("coverage".into());
         }
@@ -1234,7 +1236,9 @@ fn read_coverage(
     let text = std::fs::read_to_string(&path).ok()?;
     let value: serde_json::Value = serde_json::from_str(&text).ok()?;
     let files = value.get("files")?.as_object()?;
-    let known: Vec<&str> = functions.iter().map(|item| item.file.as_str()).collect();
+    let extra = crate::poly_cc::coverage_paths(root, "python");
+    let known =
+        crate::coverage::merge_known(functions.iter().map(|item| item.file.as_str()), &extra);
     let owners = crate::coverage::file_owners(files.keys().map(|name| name.as_str()), &known);
     let mut covered = Vec::new();
     for function in functions {
