@@ -35,6 +35,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The secrets gate reports temporary AWS access key ids (`ASIA`) the same way as long-lived ones (`AKIA`).
 - The secrets gate reports GitHub OAuth and app tokens (`gho_`, `ghu_`, `ghs_`, `ghr_`) and an AWS secret access key. The documented example secret is ignored, and a low-entropy string is not a key.
 - The secrets gate ignores documentation placeholders and test tokens: AWS access key ids ending in `EXAMPLE`, PEM labels without key material, low-entropy or sequential `ghp_` / Slack / Stripe bodies, and tokens whose only content is the filler word `placeholder` or `example` (a mixed body that embeds those words is still reported).
+- The secrets gate flags a normal multi-line PEM private key (BEGIN header, base64 body, END). A line that only names the PEM label, with no key material, is not a finding.
 - A pytest suite under `test/`, a root `test_*.py` or `*_test.py` file, or a pytest config (`pytest.ini`, `[tool:pytest]` in `setup.cfg`, `[pytest]` in `tox.ini`) runs. A tree with no suite says so, instead of claiming the pack does not provide tests.
 - A spec-gap reply that is valid JSON followed by a stray `}` still parses. The reader takes the first complete JSON value.
 - A spec-gap reply with a `}` before its first `{` no longer aborts the run. An empty `tool_calls` array is treated as no tool call, and a JSON retry does not resend tool calls without their results.

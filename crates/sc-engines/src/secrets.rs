@@ -6,7 +6,34 @@ const AWS_DOCUMENTED_SECRET: &str = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
 
 pub fn secrets_in_text(text: &str, rel: &str) -> Vec<Finding> {
     let mut out = Vec::new();
-    for (index, line) in text.lines().enumerate() {
+    let lines: Vec<&str> = text.lines().collect();
+    for (index, at) in pem_private_key_hits(&lines) {
+        let line_no = index as u32 + 1;
+        let col = at as u32 + 1;
+        out.push(Finding {
+            id: format!("secrets:{rel}:{line_no}"),
+            rule: "secrets.private_key".into(),
+            engine: "secrets".into(),
+            severity: "error".into(),
+            file: rel.to_string(),
+            span: Some(Span {
+                start_line: line_no,
+                start_col: col,
+                end_line: line_no,
+                end_col: col.saturating_add(1),
+            }),
+            symbol: None,
+            message: format!(
+                "private key block on line {line_no}. Remove it from the tree and rotate it if it was used."
+            ),
+            evidence: serde_json::json!({"rule": "secrets.private_key"}),
+            suggested_action: Some(
+                "Remove the secret from source and rotate it if it is real".into(),
+            ),
+            disposition: String::new(),
+        });
+    }
+    for (index, line) in lines.iter().enumerate() {
         let line_no = index as u32 + 1;
         let Some((rule, at)) = match_line(line) else {
             continue;
@@ -67,31 +94,34 @@ fn match_line(line: &str) -> Option<(&'static str, usize)> {
     if let Some(at) = stripe_at(line) {
         return Some(("secrets.stripe_key", at));
     }
-    if let Some(at) = private_key_at(line) {
-        return Some(("secrets.private_key", at));
-    }
     None
 }
 
-/// The two PEM markers live on separate lines so this file does not match itself.
-/// A line that only names the label is not a key; require base64 material too.
-fn private_key_at(line: &str) -> Option<usize> {
+/// A PEM private key is a BEGIN header that names `PRIVATE KEY`, plus key
+/// material — either on the same line or on following base64 lines before END.
+/// A line that only names the label is not a key.
+fn pem_private_key_hits(lines: &[&str]) -> Vec<(usize, usize)> {
     let begin = pem_begin();
-    if !(line.contains(begin) && line.contains(pem_end())) {
-        return None;
+    let mut hits = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        let Some(at) = line.find(begin) else {
+            continue;
+        };
+        if !line.contains(pem_end()) {
+            continue;
+        }
+        if has_inline_pem_material(line) || pem_block_has_body(lines, index) {
+            hits.push((index, at));
+        }
     }
-    if !has_pem_material(line) {
-        return None;
-    }
-    line.find(begin)
+    hits
 }
 
-fn has_pem_material(line: &str) -> bool {
+fn has_inline_pem_material(line: &str) -> bool {
     let material: String = line
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '+' || *c == '/' || *c == '=')
         .collect();
-    // Strip the short ASCII from the PEM markers themselves.
     let without_markers = material
         .replace("BEGIN", "")
         .replace("PRIVATE", "")
@@ -103,6 +133,28 @@ fn has_pem_material(line: &str) -> bool {
     without_markers.len() >= 32 && shannon(&without_markers) >= 3.0
 }
 
+fn pem_block_has_body(lines: &[&str], header_idx: usize) -> bool {
+    let mut material = String::new();
+    for line in lines.iter().skip(header_idx + 1).take(64) {
+        let trimmed = line.trim();
+        if trimmed.starts_with("-----END ") && trimmed.contains(pem_end()) {
+            break;
+        }
+        if trimmed.starts_with("-----") {
+            break;
+        }
+        if trimmed.len() >= 16
+            && trimmed
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
+        {
+            material.push_str(trimmed);
+        }
+    }
+    material.len() >= 32 && shannon(&material) >= 3.0
+}
+
+/// The two PEM markers live on separate lines so this file does not match itself.
 fn pem_begin() -> &'static str {
     "-----BEGIN "
 }
@@ -437,24 +489,57 @@ mod tests {
     #[test]
     fn flags_a_private_key_and_ignores_the_detector_source() {
         let material = mixed_tail(64);
-        let text = format!(
+        let inline = format!(
             "{}RSA {} {material}\n",
             super::pem_begin(),
             super::pem_end()
         );
-        let findings = secrets_in_text(&text, "src/lib.rs");
+        let findings = secrets_in_text(&inline, "src/lib.rs");
         assert_eq!(findings.len(), 1, "{findings:?}");
         assert_eq!(findings[0].rule, "secrets.private_key");
+
+        let body = [
+            "MIIE", "owIB", "AAKC", "AQEA", "0Z3V", "S5J4", "Ab3k", "Qm9Z",
+        ]
+        .concat();
+        let multiline = format!(
+            "{}RSA {}\n{body}\n-----END RSA {}\n",
+            super::pem_begin(),
+            super::pem_end(),
+            super::pem_end()
+        );
+        let findings = secrets_in_text(&multiline, "key.pem");
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].rule, "secrets.private_key");
+        assert_eq!(findings[0].span.as_ref().unwrap().start_line, 1);
+
         let label_only = format!("{}RSA {}\n", super::pem_begin(), super::pem_end());
         assert!(
             secrets_in_text(&label_only, "src/lib.rs").is_empty(),
             "PEM label without key material must not fail"
         );
+
         let own = include_str!("secrets.rs");
         assert!(
             secrets_in_text(own, "crates/sc-engines/src/secrets.rs").is_empty(),
             "{:?}",
             secrets_in_text(own, "crates/sc-engines/src/secrets.rs")
         );
+    }
+
+    #[test]
+    fn flags_a_normal_multiline_pem_private_key() {
+        let body = ["MIIEowIBAAKCAQEA0Z3VS5J4", "Ab3kQm9ZnR4pLx7wKq9ZmN4p"].concat();
+        assert!(body.len() >= 32);
+        let text = format!(
+            "{}RSA {}\n{body}\n-----END RSA {}\n",
+            super::pem_begin(),
+            super::pem_end(),
+            super::pem_end()
+        );
+        let findings = secrets_in_text(&text, "id_rsa");
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].rule, "secrets.private_key");
+        assert_eq!(findings[0].span.as_ref().unwrap().start_line, 1);
     }
 }
