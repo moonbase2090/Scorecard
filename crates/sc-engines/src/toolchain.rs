@@ -327,7 +327,7 @@ fn cpp_plan(root: &Path) -> Vec<Step> {
             gate: "types",
             engine: "compile",
             command: cpp_compile(root, &files),
-            absent: "g++ or cmake is not installed".into(),
+            absent: cpp_types_absent(which("g++") || image_present(), files.is_empty()).into(),
         },
         Step {
             gate: "tests",
@@ -484,6 +484,14 @@ fn php_test(bin: &str) -> String {
     format!(
         "mkdir -p .sc/coverage && {covered} --coverage-clover .sc/coverage/clover.xml; status=$?; if [ \"$status\" -ne 0 ] && [ ! -f .sc/coverage/clover.xml ]; then {plain}; exit $?; fi; exit $status"
     )
+}
+
+fn cpp_types_absent(compiler_present: bool, sources_empty: bool) -> &'static str {
+    if compiler_present && sources_empty {
+        "no .c, .cc, .cpp, or .cxx file to compile"
+    } else {
+        "g++ or cmake is not installed"
+    }
 }
 
 fn cpp_compile(root: &Path, files: &[String]) -> Option<String> {
@@ -890,6 +898,22 @@ mod tests {
         let stderr = "The operation couldn’t be completed. Unable to locate a Java Runtime.\nPlease visit http://www.java.com for information on installing Java.\n";
         assert!(tool_missing(stderr, ""));
         assert!(!tool_missing("error: cannot find symbol", ""));
+    }
+
+    #[test]
+    fn gxx_present_with_no_translation_unit_is_not_a_missing_compiler() {
+        assert_eq!(
+            cpp_types_absent(true, true),
+            "no .c, .cc, .cpp, or .cxx file to compile"
+        );
+        assert_eq!(
+            cpp_types_absent(false, true),
+            "g++ or cmake is not installed"
+        );
+        assert_eq!(
+            cpp_types_absent(true, false),
+            "g++ or cmake is not installed"
+        );
     }
 
     #[test]

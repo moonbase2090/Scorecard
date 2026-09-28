@@ -74,9 +74,12 @@ pub fn analyze(request: AnalyzeRequest) -> AnalyzeOutput {
         }
         Ok(crate::pack::Detected::Pack(crate::pack::PackId::Web)) => analyze_web(request, git),
         Ok(crate::pack::Detected::Pack(pack)) => analyze_unsupported(request, pack, git),
-        Ok(crate::pack::Detected::Unknown) => {
-            analyze_blocked(request, "unknown", "no language pack detected", git)
-        }
+        Ok(crate::pack::Detected::Unknown) => analyze_blocked(
+            request,
+            "unknown",
+            "no language pack detected; set pack in analyzer.toml or pass --pack",
+            git,
+        ),
         Ok(crate::pack::Detected::Ambiguous(packs)) => {
             let names: Vec<_> = packs.iter().map(|pack| pack.as_str()).collect();
             analyze_blocked(
@@ -2379,7 +2382,11 @@ mod tests {
             .scorecard
             .findings
             .iter()
-            .any(|finding| finding.rule == "engine.unavailable"));
+            .any(|finding| {
+                finding.rule == "engine.unavailable"
+                    && finding.message.contains("--pack")
+                    && finding.message.contains("analyzer.toml")
+            }));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

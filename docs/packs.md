@@ -5,17 +5,17 @@
 | Marker | Pack |
 |---|---|
 | `Cargo.toml` | Rust |
-| `package.json` | Node |
-| a Python manifest | Python |
+| `package.json` with JavaScript or TypeScript in the tree | Node |
+| a Python manifest (`pyproject.toml`, `requirements.txt`, `setup.py`, or `Pipfile`) | Python |
 | a top-level, `scripts/`, or `bin/` shell file, and no other marker | Bash |
 | `go.mod` | Go |
 | `pom.xml` or Gradle | Java |
-| a root `.csproj` or `.sln` | C# |
+| a `.csproj` or `.sln` anywhere in the tree | C# |
 | `composer.json` | PHP |
-| `CMakeLists.txt` | C++ |
+| `CMakeLists.txt`, or a `Makefile` / `configure` / `configure.ac` together with a `.c`, `.cc`, `.cpp`, or `.cxx` file. Headers do not select C++ | C++ |
 | `index.html` or another root `.html` file, and no manifest | Web |
 
-Two markers and no override is an error. Set `pack` in `analyzer.toml`, or pass `--pack`, to name the pack. `command` is only an override: it runs secrets plus a lint command you set yourself. A root HTML file does not override a manifest such as `package.json`. Pass `--pack web` when a manifest is present and the tree is still a static site.
+When several markers match, the language with more source files is used. A tie is an error: set `pack` in `analyzer.toml`, or pass `--pack`. A `package.json` beside only shell scripts is Bash, not Node. A shell script does not hide C or C++ sources. Headers do not select C++ and do not outvote another language. `command` is only an override: it runs secrets plus a lint command you set yourself. A root HTML file does not override a manifest such as `package.json`. Pass `--pack web` when a manifest is present and the tree is still a static site.
 
 The web pack needs no external tools. It parses HTML with `html5ever`, checks internal `href` and `src` paths against the tree, and scores CRAP on `.js` files and inline scripts. Secrets use the same patterns as the other packs. The `html` gate is enforced when `fail_on` is the built-in list or names `html`. Set `[html] enforce = "off"` to report markup without failing the process, or `"on"` to enforce it on a custom `fail_on` list. The `links` gate is advisory unless `fail_on` names `links` or `[links] enforce = true`. Accessibility checks are the `a11y` engine. See `docs/a11y.md`. The gate is advisory unless `fail_on` names `a11y` or `[a11y] enforce = true`.
 
