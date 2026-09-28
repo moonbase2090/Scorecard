@@ -58,6 +58,7 @@ pub fn run(
     threshold: u32,
     untested_cc: u32,
     started: std::time::SystemTime,
+    exclude: &[String],
 ) -> PythonOutcome {
     let mut findings = Vec::new();
     let mut runs = Vec::new();
@@ -120,7 +121,7 @@ pub fn run(
     let crap_untested = crap.untested;
     let crap_coverage_complete = crap.coverage_complete;
     let crap_worst = crap.worst;
-    let secrets = crate::pack::text_secrets(root);
+    let secrets = crate::pack::text_secrets(root, exclude);
     let secret_errors = secrets
         .iter()
         .filter(|finding| finding.severity == "error")

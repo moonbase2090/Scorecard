@@ -18,6 +18,8 @@ Every finding has a rule id. Severity `error` counts against the gate; `warning`
 | `secrets.slack_token` | error | fix | A Slack token is in the tree. | Remove it and revoke the token. |
 | `secrets.stripe_key` | error | fix | A Stripe live key is in the tree. | Remove it and roll the key. |
 | `secrets.private_key` | error | fix | A private-key block is in the tree. | Remove it and replace the key. |
+| `secrets.unreadable` | error | fix | A file the secrets scan should read could not be opened, so the gate does not pass. | Restore read access, or exclude the path with `exclude = ["path"]` under `[scope]` in `analyzer.toml`. |
+| `secrets.partial` | error | fix | A text file over 64 MiB was not read, so the scan was partial and the gate does not pass. A lockfile over 1 MiB is still scanned. A NUL or a gitignore entry skips a larger build output instead. | Exclude that path with `exclude = ["path"]` under `[scope]` in `analyzer.toml`, or move the secret out of the large file. |
 | `sca.hallucinated_import` | warning | ask | An import is not a local module, not installed, and not on the package index. | Remove the import or correct the module name. |
 | `sca.undeclared_dependency` | warning | ask | An installed or published package is imported and is not declared. | Add it to the manifest (`Cargo.toml`, `pyproject.toml`, and so on). |
 | `sca.import_unresolved` | warning | ask | An import is not local and not installed, and the package index was not checked. | Add the package to the manifest or remove the import. |

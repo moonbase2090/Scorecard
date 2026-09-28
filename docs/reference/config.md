@@ -28,7 +28,7 @@ Only the first file found is read. Command-line flags override the matching keys
 
 | Key | Default | Meaning |
 |---|---|---|
-| `scope.exclude` | `["target/**", "generated/**"]` | Globs, relative to the project root, left out of complexity and CRAP. |
+| `scope.exclude` | `["target/**", "generated/**"]` | Globs left out of complexity, CRAP, and the secrets walk. Complexity and CRAP match `target/**` and `generated/**` at any depth, so `src/generated` is not scored. The secrets walk anchors a pattern that does not start with `**/` to the project root, so `src/target/keys.py` is still scanned. `**/target/**` skips that path in the secrets walk too. |
 
 ### `[engines]`
 

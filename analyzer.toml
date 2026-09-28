@@ -2,6 +2,8 @@
 # develop CI job, which does not pass `--config`.
 # Fixture trees under testdata/ are real projects in other languages, so an
 # unset pack is ambiguous. This repository is Rust.
+# Those fixtures contain placeholder tokens on purpose. They are not secrets
+# of this tree.
 pack = "rust"
 
 # Fail fixtures under testdata/ intentionally contain credentials so pack

@@ -165,73 +165,306 @@ pub enum Detected {
     Ambiguous(Vec<PackId>),
 }
 
-pub fn text_secrets(root: &Path) -> Vec<sc_core::Finding> {
+/// Above this size, a NUL prefix is build output and is not scanned.
+const MAX_SECRET_BYTES: u64 = 1024 * 1024;
+/// A text file larger than this is not read, and the gate says the scan was partial.
+const MAX_TEXT_BYTES: u64 = 64 * 1024 * 1024;
+/// More than one NUL in this prefix means a large file is binary. One NUL can
+/// sit in text and must not hide a secret.
+const BINARY_PROBE: usize = 8192;
+
+pub fn text_secrets(root: &Path, exclude: &[String]) -> Vec<sc_core::Finding> {
     let mut files = Vec::new();
-    collect_text(root, root, 0, &mut files);
+    let mut seen_dirs = std::collections::HashSet::new();
+    let mut seen_files = std::collections::HashSet::new();
     let mut findings = Vec::new();
+    collect_text(
+        root,
+        root,
+        exclude,
+        &mut files,
+        &mut seen_dirs,
+        &mut seen_files,
+        &mut findings,
+    );
+    let mut big_text = Vec::new();
     for path in files {
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            continue;
-        };
         let rel = path
             .strip_prefix(root)
             .unwrap_or(&path)
             .to_string_lossy()
             .replace('\\', "/");
-        findings.extend(crate::secrets::secrets_in_text(&text, &rel));
+        match path.metadata() {
+            Ok(meta) if meta.len() > MAX_SECRET_BYTES => {
+                // A Go build writes a binary named after the package. A NUL in
+                // the first bytes marks that output. Text over the limit, such
+                // as a lockfile, is still scanned unless git ignores it.
+                match binary_prefix(&path) {
+                    Ok(true) => continue,
+                    Ok(false) => big_text.push((path, rel, meta.len())),
+                    Err(err) => findings.push(unreadable(&rel, &err)),
+                }
+                continue;
+            }
+            Ok(_) => {}
+            Err(err) => {
+                findings.push(unreadable(&rel, &err));
+                continue;
+            }
+        }
+        scan_file(&path, &rel, &mut findings);
+    }
+    let ignored = git_ignored(
+        root,
+        &big_text
+            .iter()
+            .map(|(_, rel, _)| rel.clone())
+            .collect::<Vec<_>>(),
+    );
+    let mut oversized = Vec::new();
+    for (path, rel, len) in big_text {
+        if ignored.contains(&rel) {
+            continue;
+        }
+        if len > MAX_TEXT_BYTES {
+            oversized.push(rel);
+            continue;
+        }
+        scan_file(&path, &rel, &mut findings);
+    }
+    if !oversized.is_empty() {
+        findings.push(partial_scan(&oversized));
     }
     findings
 }
 
-fn collect_text(_root: &Path, dir: &Path, depth: u32, out: &mut Vec<std::path::PathBuf>) {
-    if depth > 4 || out.len() >= 200 {
+fn scan_file(path: &Path, rel: &str, findings: &mut Vec<sc_core::Finding>) {
+    // `read_to_string` skips the whole file on one non-UTF-8 byte, which
+    // hides every secret in it. Scan the bytes we can read.
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            findings.push(unreadable(rel, &err));
+            return;
+        }
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    findings.extend(crate::secrets::secrets_in_text(&text, rel));
+}
+
+fn unreadable(rel: &str, err: &std::io::Error) -> sc_core::Finding {
+    sc_core::Finding {
+        id: format!("secrets:unreadable:{rel}"),
+        rule: "secrets.unreadable".into(),
+        engine: "secrets".into(),
+        severity: "error".into(),
+        file: rel.to_string(),
+        span: None,
+        symbol: None,
+        message: format!(
+            "could not read {rel} ({err}), so the secrets scan does not pass. Restore read access, or exclude it with `exclude = [\"{rel}\"]` under `[scope]` in analyzer.toml."
+        ),
+        evidence: serde_json::json!({ "error": err.to_string() }),
+        suggested_action: Some(
+            "Restore read access, or add the path to scope.exclude in analyzer.toml".into(),
+        ),
+        disposition: String::new(),
+    }
+}
+
+fn binary_prefix(path: &std::path::Path) -> std::io::Result<bool> {
+    let mut file = std::fs::File::open(path)?;
+    let mut buf = [0u8; BINARY_PROBE];
+    let n = std::io::Read::read(&mut file, &mut buf)?;
+    let nuls = buf[..n].iter().filter(|byte| **byte == 0).count();
+    Ok(nuls > 1)
+}
+
+fn partial_scan(paths: &[String]) -> sc_core::Finding {
+    let first = &paths[0];
+    let message = if paths.len() == 1 {
+        format!(
+            "skipped {first} because it is over 64 MiB, so the secrets scan was partial and does not pass. Exclude it with `exclude = [\"{first}\"]` under `[scope]` in analyzer.toml."
+        )
+    } else {
+        format!(
+            "skipped {} files over 64 MiB, including {first}, so the secrets scan was partial and does not pass. Exclude them with `exclude = [\"{first}\"]` under `[scope]` in analyzer.toml.",
+            paths.len()
+        )
+    };
+    sc_core::Finding {
+        id: format!("secrets:partial:{first}"),
+        rule: "secrets.partial".into(),
+        engine: "secrets".into(),
+        severity: "error".into(),
+        file: first.clone(),
+        span: None,
+        symbol: None,
+        message,
+        evidence: serde_json::json!({ "files": paths, "limit_bytes": MAX_TEXT_BYTES }),
+        suggested_action: Some(
+            "Exclude the large file under [scope] in analyzer.toml, or move the secret out of it"
+                .into(),
+        ),
+        disposition: String::new(),
+    }
+}
+
+fn collect_text(
+    root: &Path,
+    dir: &Path,
+    exclude: &[String],
+    out: &mut Vec<std::path::PathBuf>,
+    seen_dirs: &mut std::collections::HashSet<std::path::PathBuf>,
+    seen_files: &mut std::collections::HashSet<std::path::PathBuf>,
+    findings: &mut Vec<sc_core::Finding>,
+) {
+    let dir_key = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    if !seen_dirs.insert(dir_key) {
         return;
     }
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(err) => {
+            findings.push(unreadable(&rel_path(root, dir), &err));
+            return;
+        }
     };
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(err) => {
+                findings.push(unreadable(&rel_path(root, dir), &err));
+                continue;
+            }
+        };
         let path = entry.path();
         let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-        if name.starts_with('.') || name == "node_modules" || name == "target" || name == "dist" {
+        let meta = match path.symlink_metadata() {
+            Ok(meta) => meta,
+            Err(err) => {
+                findings.push(unreadable(&rel_path(root, &path), &err));
+                continue;
+            }
+        };
+        // A directory symlink can loop, or walk the same tree twice, once the
+        // depth cap is gone.
+        if meta.file_type().is_symlink() && path.is_dir() {
             continue;
         }
         if path.is_dir() {
-            collect_text(_root, &path, depth + 1, out);
-        } else if matches!(
-            path.extension().and_then(|ext| ext.to_str()),
-            Some(
-                "rs" | "js"
-                    | "jsx"
-                    | "mjs"
-                    | "cjs"
-                    | "ts"
-                    | "tsx"
-                    | "py"
-                    | "go"
-                    | "toml"
-                    | "json"
-                    | "sh"
-                    | "bash"
-                    | "java"
-                    | "cs"
-                    | "php"
-                    | "c"
-                    | "cc"
-                    | "cpp"
-                    | "cxx"
-                    | "h"
-                    | "hh"
-                    | "hpp"
-                    | "hxx"
-                    | "html"
-                    | "htm"
-                    | "css",
-            )
-        ) {
+            if name == "cache" && dir.file_name().and_then(|part| part.to_str()) == Some(".yarn") {
+                continue;
+            }
+            if skip_dir(name, dir == root) {
+                continue;
+            }
+            let rel = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            if secrets_excluded(&rel, exclude) {
+                continue;
+            }
+            collect_text(root, &path, exclude, out, seen_dirs, seen_files, findings);
+        } else {
+            let rel = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            if secrets_excluded(&rel, exclude) {
+                continue;
+            }
+            let file_key = path.canonicalize().unwrap_or_else(|_| path.clone());
+            if !seen_files.insert(file_key) {
+                continue;
+            }
             out.push(path);
         }
     }
+}
+
+fn rel_path(root: &Path, path: &Path) -> String {
+    let rel = path
+        .strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/");
+    if rel.is_empty() {
+        ".".to_string()
+    } else {
+        rel
+    }
+}
+
+/// `target/**` matches only the root `target/` directory in the secrets walk.
+/// Complexity and CRAP keep the shared glob, which also matches `src/generated/`.
+fn secrets_excluded(rel: &str, patterns: &[String]) -> bool {
+    patterns.iter().any(|pattern| {
+        let pattern = pattern.trim().trim_start_matches("./");
+        if let Some(body) = pattern.strip_suffix("/**") {
+            if !body.starts_with("**/") {
+                let body = body.trim_matches('/');
+                return body.is_empty() || rel == body || rel.starts_with(&format!("{body}/"));
+            }
+        }
+        sc_graph::is_excluded(rel, &[pattern.to_string()])
+    })
+}
+
+fn git_ignored(root: &Path, rels: &[String]) -> std::collections::HashSet<String> {
+    if rels.is_empty() {
+        return std::collections::HashSet::new();
+    }
+    let mut child = match std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .arg("check-ignore")
+        .arg("-z")
+        .arg("--stdin")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => return std::collections::HashSet::new(),
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        for rel in rels {
+            let _ = std::io::Write::write_all(&mut stdin, rel.as_bytes());
+            let _ = std::io::Write::write_all(&mut stdin, b"\0");
+        }
+    }
+    let Ok(output) = child.wait_with_output() else {
+        return std::collections::HashSet::new();
+    };
+    output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|item| !item.is_empty())
+        .filter_map(|item| String::from_utf8(item.to_vec()).ok())
+        .collect()
+}
+
+fn skip_dir(name: &str, at_root: bool) -> bool {
+    matches!(
+        name,
+        ".git"
+            | ".sc"
+            | ".venv"
+            | "venv"
+            | "node_modules"
+            | ".tox"
+            | ".mypy_cache"
+            | ".pytest_cache"
+            | ".next"
+            | ".nuxt"
+            | ".cache"
+            | ".gradle"
+    ) || (at_root && matches!(name, "target" | "dist"))
 }
 
 pub fn detect(root: &Path, override_pack: &str) -> Result<Detected, String> {
@@ -397,7 +630,7 @@ fn visit(dir: &Path, depth: u32, seen: &mut usize, on_file: &mut dyn FnMut(&Path
             .file_name()
             .and_then(|item| item.to_str())
             .unwrap_or("");
-        if skip_dir(name) {
+        if detect_skip_dir(name) {
             continue;
         }
         if path.is_dir() {
@@ -418,7 +651,7 @@ fn visit(dir: &Path, depth: u32, seen: &mut usize, on_file: &mut dyn FnMut(&Path
     }
 }
 
-fn skip_dir(name: &str) -> bool {
+fn detect_skip_dir(name: &str) -> bool {
     matches!(
         name,
         ".git"
@@ -467,6 +700,325 @@ fn has_shell(root: &Path) -> bool {
 mod tests {
     use super::*;
     use std::fs;
+
+    /// Not the AWS documentation id. That id ends in `EXAMPLE` and is ignored.
+    fn planted_access_key() -> String {
+        format!("AKIA{}{}", "0Z3VS5J4", "AB3KQM9Z")
+    }
+
+    fn planted_pem(kind: &str) -> String {
+        let begin = "-----BEGIN ";
+        let end = "PRIVATE KEY-----";
+        let body = format!("{}{}", "MIIEowIBAAKCAQEA0Z3V", "S5J4Ab3kQm9ZnR4pLx7w");
+        format!("{begin}{kind} {end} {body}\n")
+    }
+
+    #[test]
+    fn secrets_walk_reaches_deep_files_dotenv_and_honors_exclude() {
+        let key = planted_access_key();
+        let root = temp("secrets-walk");
+        let deep = root.join("n/n/n/n/n");
+        fs::create_dir_all(&deep).unwrap();
+        fs::write(deep.join("leak.py"), format!("KEY = \"{key}\"\n")).unwrap();
+        fs::write(root.join(".env"), format!("AWS_ACCESS_KEY_ID={key}\n")).unwrap();
+        fs::write(root.join("README.md"), format!("key {key}\n")).unwrap();
+        fs::write(root.join("secrets.yaml"), format!("key: \"{key}\"\n")).unwrap();
+        fs::write(root.join("key.pem"), planted_pem("RSA")).unwrap();
+        fs::create_dir_all(root.join("tests")).unwrap();
+        fs::write(
+            root.join("tests/leak.rs"),
+            format!("const K: &str = \"{key}\";\n"),
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("a")).unwrap();
+        for index in 0..200 {
+            fs::write(root.join(format!("a/f{index:03}.json")), "{}\n").unwrap();
+        }
+        fs::create_dir_all(root.join("b")).unwrap();
+        fs::write(root.join("b/leak.py"), format!("KEY = \"{key}\"\n")).unwrap();
+        fs::create_dir_all(root.join("vendor")).unwrap();
+        fs::write(root.join("vendor/leak.py"), format!("KEY = \"{key}\"\n")).unwrap();
+
+        let findings = text_secrets(&root, &["vendor/**".into()]);
+        let files: Vec<&str> = findings
+            .iter()
+            .map(|finding| finding.file.as_str())
+            .collect();
+        assert!(
+            files.iter().any(|file| file.ends_with("n/n/n/n/n/leak.py")),
+            "{files:?}"
+        );
+        assert!(files.iter().any(|file| file.ends_with(".env")), "{files:?}");
+        assert!(
+            files.iter().any(|file| file.ends_with("README.md")),
+            "{files:?}"
+        );
+        assert!(
+            files.iter().any(|file| file.ends_with("secrets.yaml")),
+            "{files:?}"
+        );
+        assert!(
+            files.iter().any(|file| file.ends_with("key.pem")),
+            "{files:?}"
+        );
+        assert!(
+            files.iter().any(|file| file.ends_with("tests/leak.rs")),
+            "{files:?}"
+        );
+        assert!(
+            files.iter().any(|file| file.ends_with("b/leak.py")),
+            "{files:?}"
+        );
+        assert!(
+            !files.iter().any(|file| file.contains("vendor/")),
+            "{files:?}"
+        );
+
+        fs::create_dir_all(root.join(".venv/botocore")).unwrap();
+        fs::write(
+            root.join(".venv/botocore/example.json"),
+            format!("\"{key}\"\n"),
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("venv")).unwrap();
+        fs::write(root.join("venv/leak.py"), format!("KEY = \"{key}\"\n")).unwrap();
+        fs::create_dir_all(root.join(".hidden")).unwrap();
+        fs::write(root.join(".hidden/leak.py"), format!("KEY = \"{key}\"\n")).unwrap();
+        fs::create_dir_all(root.join(".github/workflows")).unwrap();
+        fs::write(
+            root.join(".github/workflows/ci.yml"),
+            format!("KEY: \"{key}\"\n"),
+        )
+        .unwrap();
+        let outside = temp("secrets-link-target");
+        fs::write(outside.join("leak.py"), format!("KEY = \"{key}\"\n")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("linked")).unwrap();
+
+        let findings = text_secrets(&root, &["vendor/**".into()]);
+        let files: Vec<&str> = findings
+            .iter()
+            .map(|finding| finding.file.as_str())
+            .collect();
+        assert!(files.iter().any(|file| file.ends_with(".env")), "{files:?}");
+        assert!(
+            files
+                .iter()
+                .any(|file| file.ends_with(".github/workflows/ci.yml")),
+            "{files:?}"
+        );
+        assert!(
+            !files.iter().any(|file| file.contains(".venv/")),
+            "{files:?}"
+        );
+        assert!(
+            !files.iter().any(|file| file.contains("venv/")),
+            "{files:?}"
+        );
+        assert!(
+            files.iter().any(|file| file.contains(".hidden/")),
+            "{files:?}"
+        );
+        assert!(
+            !files.iter().any(|file| file.contains("linked/")),
+            "{files:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn a_non_utf8_byte_does_not_hide_a_secret() {
+        let key = planted_access_key();
+        let root = temp("secrets-utf8");
+        let mut bytes = key.into_bytes();
+        bytes.push(0xff);
+        bytes.extend(b"\n");
+        fs::write(root.join("leak.py"), bytes).unwrap();
+        let findings = text_secrets(&root, &[]);
+        assert!(
+            findings.iter().any(
+                |finding| finding.file == "leak.py" && finding.rule == "secrets.aws_access_key"
+            ),
+            "{findings:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn common_secret_locations_are_read_and_a_large_file_is_partial() {
+        let key = planted_access_key();
+        let root = temp("secrets-places");
+        fs::write(root.join("id_rsa"), planted_pem("OPENSSH")).unwrap();
+        fs::create_dir_all(root.join(".circleci")).unwrap();
+        fs::write(root.join(".circleci/config.yml"), format!("aws: {key}\n")).unwrap();
+        fs::create_dir_all(root.join("src/target")).unwrap();
+        fs::write(
+            root.join("src/target/keys.py"),
+            format!("KEY = \"{key}\"\n"),
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("target")).unwrap();
+        fs::write(root.join("target/keys.py"), format!("KEY = \"{key}\"\n")).unwrap();
+        fs::write(root.join(".npmrc"), format!("token={key}\n")).unwrap();
+        fs::write(
+            root.join("Cargo.lock"),
+            vec![b'a'; MAX_SECRET_BYTES as usize + 1],
+        )
+        .unwrap();
+        let mut lock = vec![b'{'; MAX_SECRET_BYTES as usize];
+        lock.extend(format!("\"{key}\"").into_bytes());
+        fs::write(root.join("package-lock.json"), lock).unwrap();
+        fs::write(root.join(".gitignore"), "build/\n").unwrap();
+        fs::create_dir_all(root.join("build/static/js")).unwrap();
+        fs::write(
+            root.join("build/static/js/main.js.map"),
+            vec![b'a'; MAX_SECRET_BYTES as usize + 1],
+        )
+        .unwrap();
+        let _ = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .arg("init")
+            .status();
+        let mut large_binary = vec![0u8; MAX_SECRET_BYTES as usize + 1];
+        large_binary[1] = b'A';
+        fs::write(root.join("go_pack"), large_binary).unwrap();
+        let mut hidden = format!("{key}\n").into_bytes();
+        hidden.insert(0, 0);
+        fs::write(root.join("blob.dat"), hidden).unwrap();
+        let mut js = format!("// note\nconst k = \"{key}\";\n").into_bytes();
+        js.insert(3, 0);
+        fs::write(root.join("app.js"), js).unwrap();
+        fs::create_dir_all(root.join("testdata")).unwrap();
+        fs::write(root.join("testdata/leak.py"), format!("KEY = \"{key}\"\n")).unwrap();
+
+        let findings = text_secrets(
+            &root,
+            &[
+                "target/**".into(),
+                "generated/**".into(),
+                "testdata/**".into(),
+            ],
+        );
+        let files: Vec<&str> = findings
+            .iter()
+            .map(|finding| finding.file.as_str())
+            .collect();
+        assert!(files.contains(&"id_rsa"), "{files:?}");
+        assert!(files.contains(&".circleci/config.yml"), "{files:?}");
+        assert!(files.contains(&"src/target/keys.py"), "{files:?}");
+        assert!(files.contains(&".npmrc"), "{files:?}");
+        assert!(!files.contains(&"target/keys.py"), "{files:?}");
+        assert!(files.contains(&"blob.dat"), "{files:?}");
+        assert!(files.contains(&"app.js"), "{files:?}");
+        assert!(
+            !files.iter().any(|file| file.contains("testdata/")),
+            "{files:?}"
+        );
+        assert!(
+            findings.iter().any(|finding| {
+                finding.file == "package-lock.json" && finding.rule == "secrets.aws_access_key"
+            }),
+            "{findings:?}"
+        );
+        assert!(
+            !findings.iter().any(|finding| {
+                finding.file == "Cargo.lock" || finding.file.starts_with("build/")
+            }),
+            "{findings:?}"
+        );
+        assert!(
+            !findings.iter().any(|finding| finding.file == "go_pack"),
+            "{findings:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn one_nul_in_a_large_file_does_not_hide_a_key() {
+        let key = planted_access_key();
+        let root = temp("secrets-one-nul");
+        let mut bytes = vec![0u8];
+        bytes.extend(format!("const AWS_KEY = \"{key}\";\n").into_bytes());
+        bytes.resize(MAX_SECRET_BYTES as usize + 8, b' ');
+        fs::write(root.join("config.js"), &bytes).unwrap();
+        let findings = text_secrets(&root, &[]);
+        assert!(
+            findings.iter().any(|finding| {
+                finding.file == "config.js" && finding.rule == "secrets.aws_access_key"
+            }),
+            "{findings:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_unreadable_directory_fails_the_secrets_gate() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = temp("secrets-unreadable");
+        let hidden = root.join("private");
+        fs::create_dir_all(hidden.join("nested")).unwrap();
+        fs::write(hidden.join("nested/leak.py"), "x = 1\n").unwrap();
+        let mut blocked = fs::metadata(&hidden).unwrap().permissions();
+        blocked.set_mode(0o0);
+        fs::set_permissions(&hidden, blocked).unwrap();
+        let findings = text_secrets(&root, &[]);
+        assert!(
+            findings.iter().any(|finding| {
+                finding.rule == "secrets.unreadable" && finding.file == "private"
+            }),
+            "{findings:?}"
+        );
+        let mut open = fs::metadata(&hidden).unwrap().permissions();
+        open.set_mode(0o755);
+        fs::set_permissions(&hidden, open).unwrap();
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn partial_scan_records_the_text_limit() {
+        let finding = partial_scan(&["big.bin".into()]);
+        assert_eq!(finding.evidence["limit_bytes"], MAX_TEXT_BYTES);
+        assert!(finding.message.contains("64 MiB"), "{}", finding.message);
+    }
+
+    #[test]
+    fn symlinks_are_not_followed_and_testdata_exclude_hides_fixtures() {
+        let key = planted_access_key();
+        let root = temp("secrets-cycle");
+        fs::create_dir_all(root.join("real")).unwrap();
+        fs::write(root.join("real/leak.py"), format!("KEY = \"{key}\"\n")).unwrap();
+        std::os::unix::fs::symlink(root.join("real"), root.join("link-a")).unwrap();
+        std::os::unix::fs::symlink(root.join("link-a"), root.join("link-b")).unwrap();
+        std::os::unix::fs::symlink(root.join("real/leak.py"), root.join("again.py")).unwrap();
+        fs::create_dir_all(root.join("cycle")).unwrap();
+        std::os::unix::fs::symlink(root.join("cycle"), root.join("cycle/loop")).unwrap();
+        fs::create_dir_all(root.join("testdata")).unwrap();
+        fs::write(root.join("testdata/leak.py"), format!("KEY = \"{key}\"\n")).unwrap();
+
+        let findings = text_secrets(&root, &["testdata/**".into()]);
+        let files: Vec<&str> = findings
+            .iter()
+            .map(|finding| finding.file.as_str())
+            .collect();
+        assert_eq!(
+            files
+                .iter()
+                .filter(|file| file.ends_with("leak.py") || file.ends_with("again.py"))
+                .count(),
+            1,
+            "{files:?}"
+        );
+        assert!(
+            !files.iter().any(|file| file.contains("link-")),
+            "{files:?}"
+        );
+        assert!(
+            !files.iter().any(|file| file.contains("testdata/")),
+            "{files:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
 
     fn temp(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("sc-pack-{name}-{}", std::process::id()));

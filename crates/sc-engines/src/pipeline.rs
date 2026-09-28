@@ -185,7 +185,7 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
             ));
         }
     }
-    let secrets = crate::pack::text_secrets(&request.root);
+    let secrets = crate::pack::text_secrets(&request.root, &request.config.scope.exclude);
     let secret_errors = secrets
         .iter()
         .filter(|finding| finding.severity == "error")
@@ -472,7 +472,7 @@ fn analyze_unsupported(
         "sca",
         "dependency check is not implemented for this pack",
     ));
-    let secrets = crate::pack::text_secrets(&request.root);
+    let secrets = crate::pack::text_secrets(&request.root, &request.config.scope.exclude);
     let secret_errors = secrets
         .iter()
         .filter(|finding| finding.severity == "error")
@@ -621,6 +621,7 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         request.config.gates.crap_threshold,
         request.config.gates.new_fn_untested_cc,
         started,
+        &request.config.scope.exclude,
     );
     let gates = vec![
         if outcome.types_pass {
@@ -1137,7 +1138,13 @@ fn assemble_rust_report(
         &mut state.skipped,
         &mut state.findings,
     );
-    secret_and_perf(selection, &mut state.ran, &mut state.findings);
+    secret_and_perf(
+        selection,
+        root,
+        &request.config.scope.exclude,
+        &mut state.ran,
+        &mut state.findings,
+    );
     let mut spec = spec_engine(
         request,
         selection,
@@ -2025,11 +2032,17 @@ fn file_module(rel: &str) -> Option<String> {
     Some(stem.to_string())
 }
 
-fn secret_and_perf(selection: &Selection, ran: &mut Vec<String>, findings: &mut Vec<Finding>) {
+fn secret_and_perf(
+    selection: &Selection,
+    root: &Path,
+    exclude: &[String],
+    ran: &mut Vec<String>,
+    findings: &mut Vec<Finding>,
+) {
     ran.push("secrets".into());
     ran.push("perf".into());
+    findings.extend(crate::pack::text_secrets(root, exclude));
     for file in &selection.files {
-        findings.extend(file.secrets.clone());
         for hit in &file.perf {
             findings.push(Finding {
                 id: format!("perf:{}:{}:{}", hit.file, hit.symbol, hit.rule),
