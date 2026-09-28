@@ -1,17 +1,18 @@
-# Scorecard configuration.
-# pack = "rust"   # rust, node, python, bash, go, java, csharp, php, cpp, web, or command
-# Set this when the repo contains more than one manifest. Same as --pack.
+# Scorecard configuration. Every key below is optional and shows its default.
 # Copy to analyzer.toml at the root of the project you analyze (the path given to
 # `sc analyze`, usually the repo root), or to ~/.config/sc/analyzer.toml. Parent and
 # sub-directories are not searched. --config PATH overrides both.
-# CLI flags override the matching settings.
+# CLI flags override the matching settings. Reference: docs/reference/config.md
+
+# Set this when the repo contains more than one manifest. Same as --pack.
+# pack = "rust"   # rust, node, python, bash, go, java, csharp, php, cpp, web, or command
 
 [gates]
 # `spec` and `mutation` run only when `--spec` or `--mutation` asks for them.
 fail_on = ["types", "tests", "crap", "secrets", "lint"]
 crap_threshold = 30
-# Every src function at or above this CC with 0% coverage fails the crap
-# gate (`complexity.untested`). This is the whole src tree until --diff exists.
+# Every function in scope at or above this CC with 0% coverage fails the crap
+# gate (`complexity.untested`). With --diff, only new functions count.
 new_fn_untested_cc = 15
 
 [scope]
