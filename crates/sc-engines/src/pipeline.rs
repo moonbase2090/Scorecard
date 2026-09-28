@@ -1800,6 +1800,7 @@ fn spec_engine(
                 section: SpecSection {
                     path: Some(path.display().to_string()),
                     gaps: Vec::new(),
+                    llm_rounds: None,
                 },
                 ran_gate: true,
                 pass: false,
@@ -1820,6 +1821,7 @@ fn spec_engine(
         section: SpecSection {
             path: Some(path.display().to_string()),
             gaps: gaps.iter().map(gap_value).collect(),
+            llm_rounds: None,
         },
         ran_gate: true,
         pass,
@@ -1920,6 +1922,7 @@ fn llm_engine(
         spec: &spec_text,
         root: &request.root,
         intent: request.intent.as_deref(),
+        max_tool_rounds: request.config.llm.max_tool_rounds,
     };
     let outcome = match request.config.llm.backend.trim() {
         "" | "ollama" => sc_llm::review(llm_request),
@@ -1932,17 +1935,21 @@ fn llm_engine(
                 spec: &spec_text,
                 root: &request.root,
                 intent: request.intent.as_deref(),
+                max_tool_rounds: request.config.llm.max_tool_rounds,
             }),
             Err(message) => sc_llm::LlmOutcome {
                 gaps: Vec::new(),
                 skipped: Some(message),
+                rounds: 0,
             },
         },
         other => sc_llm::LlmOutcome {
             gaps: Vec::new(),
             skipped: Some(format!("unknown llm backend {other}")),
+            rounds: 0,
         },
     };
+    spec.section.llm_rounds = Some(outcome.rounds);
     if let Some(reason) = outcome.skipped {
         skipped.push("llm".into());
         findings.push(unavailable("llm", &reason));

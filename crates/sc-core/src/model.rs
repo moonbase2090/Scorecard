@@ -174,6 +174,9 @@ impl MutationSection {
 pub struct SpecSection {
     pub path: Option<String>,
     pub gaps: Vec<Value>,
+    /// Chat rounds the spec-gap model used, when `--llm` ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llm_rounds: Option<u32>,
 }
 
 impl SpecSection {
@@ -181,6 +184,7 @@ impl SpecSection {
         Self {
             path: None,
             gaps: Vec::new(),
+            llm_rounds: None,
         }
     }
 }
@@ -371,6 +375,7 @@ mod tests {
             spec: SpecSection {
                 path: Some("TASK.md".into()),
                 gaps: vec![],
+                llm_rounds: None,
             },
             runs: vec![RunRecord {
                 engine: "tests".into(),
