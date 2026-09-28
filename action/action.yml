@@ -28,6 +28,10 @@ inputs:
     description: Release to install, such as 0.1.3. Empty uses the action ref when it is a v* tag, otherwise the latest release.
     required: false
     default: ""
+  build-from-source:
+    description: Build sc from this checkout instead of installing a release
+    required: false
+    default: "false"
 runs:
   using: composite
   steps:
@@ -36,8 +40,25 @@ runs:
       env:
         SC_VERSION: ${{ inputs.version }}
         SC_ACTION_REF: ${{ github.action_ref }}
+        SC_BUILD_FROM_SOURCE: ${{ inputs.build-from-source }}
       run: |
         set -eu
+        install_from_source() {
+          echo "building sc from source"
+          cargo install --path "${{ github.action_path }}/../crates/sc-cli" --locked --force
+        }
+        case "$SC_BUILD_FROM_SOURCE" in
+          true)
+            install_from_source
+            exit 0
+            ;;
+          false|"")
+            ;;
+          *)
+            echo "build-from-source must be true or false" >&2
+            exit 2
+            ;;
+        esac
         curl_gh() {
           if [ -n "${GITHUB_TOKEN:-}" ]; then
             curl -fsSL -H "Authorization: Bearer ${GITHUB_TOKEN}" "$@"
@@ -62,10 +83,6 @@ runs:
           macOS-ARM64) triple=aarch64-apple-darwin ;;
           *) triple="" ;;
         esac
-        install_from_source() {
-          echo "building sc from source"
-          cargo install --path "${{ github.action_path }}/../crates/sc-cli" --locked --force
-        }
         asset="sc-v${ver}-${triple}.tar.gz"
         base="https://github.com/moonbase2090/Scorecard/releases/download/v${ver}"
         tmp=$(mktemp -d)
