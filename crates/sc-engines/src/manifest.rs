@@ -70,6 +70,9 @@ pub fn dependency_names(text: &str) -> BTreeSet<String> {
         let trimmed = strip_comment(line).trim();
         if trimmed.starts_with('[') {
             in_deps = is_dep_table(trimmed);
+            if let Some(name) = dep_table_name(trimmed) {
+                names.insert(normalize(&name));
+            }
             continue;
         }
         if !in_deps || trimmed.is_empty() {
@@ -92,6 +95,39 @@ fn is_dep_table(header: &str) -> bool {
         || header.ends_with(".dependencies")
         || header.ends_with(".dev-dependencies")
         || header.ends_with(".build-dependencies")
+}
+
+/// `NAME` from a header such as `[dependencies.NAME]` or
+/// `[target.'cfg(windows)'.dependencies.NAME]`, which declares one crate.
+fn dep_table_name(header: &str) -> Option<String> {
+    let header = header.trim_matches(|c| c == '[' || c == ']');
+    let parts = header_segments(header);
+    let [.., table, name] = parts.as_slice() else {
+        return None;
+    };
+    matches!(
+        table.as_str(),
+        "dependencies" | "dev-dependencies" | "build-dependencies"
+    )
+    .then(|| name.clone())
+}
+
+/// Dotted header segments, with quotes removed. A dot inside quotes does not
+/// split, so `'cfg(target_os = "a.b")'` stays one segment.
+fn header_segments(header: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    for c in header.chars() {
+        match (quote, c) {
+            (None, '\'' | '"') => quote = Some(c),
+            (Some(open), _) if c == open => quote = None,
+            (None, '.') => parts.push(std::mem::take(&mut current).trim().to_string()),
+            _ => current.push(c),
+        }
+    }
+    parts.push(current.trim().to_string());
+    parts
 }
 
 fn table_string(line: &str, key: &str) -> Option<String> {
@@ -121,6 +157,33 @@ pub fn normalize(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_dependency_named_in_a_table_header_is_declared() {
+        let text = r#"
+[package]
+name = "tokio"
+
+[target.'cfg(windows)'.dependencies.windows-sys]
+version = "0.52"
+features = ["Win32_Foundation"]
+
+[dependencies.bytes]
+version = "1"
+
+[dev-dependencies.tokio-test]
+version = "0.4"
+
+[target."cfg(target_os = \"a.b\")".build-dependencies.cc]
+version = "1"
+"#;
+        let names = dependency_names(text);
+        for name in ["windows_sys", "bytes", "tokio_test", "cc"] {
+            assert!(names.contains(name), "{name} missing from {names:?}");
+        }
+        assert!(!names.contains("version"), "{names:?}");
+        assert!(!names.contains("features"), "{names:?}");
+    }
 
     #[test]
     fn member_manifests_count_as_declared_crates() {
