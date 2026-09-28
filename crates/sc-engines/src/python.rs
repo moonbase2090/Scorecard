@@ -496,7 +496,7 @@ impl PackageIndex for LiveIndex {
         if let Some(hit) = self.cache.borrow().get(module) {
             return hit.clone();
         }
-        let hit = lookup_pypi(&self.agent, module);
+        let hit = lookup_pypi(&self.agent, "https://pypi.org", module);
         self.cache
             .borrow_mut()
             .insert(module.to_string(), hit.clone());
@@ -504,10 +504,10 @@ impl PackageIndex for LiveIndex {
     }
 }
 
-fn lookup_pypi(agent: &ureq::Agent, module: &str) -> IndexHit {
+fn lookup_pypi(agent: &ureq::Agent, origin: &str, module: &str) -> IndexHit {
     let mut absent = false;
     for candidate in index_names(module) {
-        match fetch_pypi(agent, &candidate) {
+        match fetch_pypi(agent, origin, &candidate) {
             IndexHit::Present(name) => return IndexHit::Present(name),
             IndexHit::Absent => absent = true,
             IndexHit::Unchecked(reason) => return IndexHit::Unchecked(reason),
@@ -520,7 +520,7 @@ fn lookup_pypi(agent: &ureq::Agent, module: &str) -> IndexHit {
     }
 }
 
-fn fetch_pypi(agent: &ureq::Agent, name: &str) -> IndexHit {
+fn fetch_pypi(agent: &ureq::Agent, origin: &str, name: &str) -> IndexHit {
     if name.is_empty()
         || !name
             .chars()
@@ -528,7 +528,7 @@ fn fetch_pypi(agent: &ureq::Agent, name: &str) -> IndexHit {
     {
         return IndexHit::Absent;
     }
-    let url = format!("https://pypi.org/pypi/{name}/json");
+    let url = format!("{origin}/pypi/{name}/json");
     match agent.get(&url).call() {
         Ok(response) => {
             let _ = response.into_string();
@@ -1526,6 +1526,86 @@ dev = ["pytest>=8"]
     fn pep503_normalizes_underscores() {
         assert_eq!(pep503("langchain_core"), "langchain-core");
         assert_eq!(pep503("anyio"), "anyio");
+    }
+
+    fn pypi_agent() -> ureq::Agent {
+        ureq::AgentBuilder::new()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+    }
+
+    fn pypi_origin(routes: &[(&str, u16)]) -> String {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let routes: Vec<(String, u16)> = routes
+            .iter()
+            .map(|(path, status)| ((*path).to_string(), *status))
+            .collect();
+        std::thread::spawn(move || {
+            for _ in 0..routes.len().max(1) {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    break;
+                };
+                let mut buf = [0u8; 2048];
+                let n = stream.read(&mut buf).unwrap_or(0);
+                let request = String::from_utf8_lossy(&buf[..n]);
+                let path = request.split(' ').nth(1).unwrap_or("");
+                let status = routes
+                    .iter()
+                    .find(|(route, _)| path.contains(route.as_str()))
+                    .map(|(_, status)| *status)
+                    .unwrap_or(404);
+                let reason = match status {
+                    200 => "OK",
+                    404 => "Not Found",
+                    _ => "Error",
+                };
+                let body = "{}";
+                let response = format!(
+                    "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    #[test]
+    fn pypi_lookup_uses_the_normalized_name_then_the_import_name() {
+        let agent = pypi_agent();
+        assert!(matches!(
+            fetch_pypi(&agent, "http://127.0.0.1:1", "not a name"),
+            IndexHit::Absent
+        ));
+        assert!(matches!(
+            lookup_pypi(&agent, "http://127.0.0.1:1", "..."),
+            IndexHit::Unchecked(_)
+        ));
+        match lookup_pypi(&agent, "http://127.0.0.1:1", "requests") {
+            IndexHit::Unchecked(reason) => {
+                assert!(reason.contains("could not be reached"), "{reason}")
+            }
+            other => panic!("expected an unreachable index, got {other:?}"),
+        }
+
+        let origin = pypi_origin(&[("/pypi/foo-bar/json", 404), ("/pypi/Foo_Bar/json", 200)]);
+        match lookup_pypi(&agent, &origin, "Foo_Bar") {
+            IndexHit::Present(name) => assert_eq!(name, "Foo_Bar"),
+            other => panic!("expected the import name, got {other:?}"),
+        }
+        let missing = pypi_origin(&[("/pypi/nope/json", 404)]);
+        assert!(matches!(
+            lookup_pypi(&agent, &missing, "nope"),
+            IndexHit::Absent
+        ));
+        let broken = pypi_origin(&[("/pypi/gone/json", 500)]);
+        match fetch_pypi(&agent, &broken, "gone") {
+            IndexHit::Unchecked(reason) => assert!(reason.contains("HTTP 500"), "{reason}"),
+            other => panic!("expected HTTP 500, got {other:?}"),
+        }
     }
 
     #[test]

@@ -688,6 +688,58 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     #[test]
+    fn cursor_review_reports_gaps_and_names_a_failed_agent() {
+        let root = Path::new(".");
+        let empty = LlmRequest {
+            endpoint: "",
+            model: "  ",
+            api_key: None,
+            spec: "",
+            root,
+            intent: Some("check contrast"),
+            max_tool_rounds: 1,
+        };
+        let skipped = review_cursor_with(empty, |_, _, _| Ok("{}".into()));
+        assert!(skipped
+            .skipped
+            .unwrap()
+            .contains("cursor backend needs [llm] model"));
+
+        let request = LlmRequest {
+            endpoint: "",
+            model: "gpt",
+            api_key: None,
+            spec: "The header wraps.",
+            root,
+            intent: Some("check contrast"),
+            max_tool_rounds: 1,
+        };
+        let failed = review_cursor_with(request.clone(), |_, args, prompt| {
+            assert!(args.windows(2).any(|pair| pair == ["--mode", "ask"]));
+            assert!(prompt.contains("The header wraps."));
+            assert!(prompt.contains("check contrast"));
+            Err("cursor-agent is not available: missing".into())
+        });
+        assert!(failed.skipped.unwrap().contains("not available"));
+
+        let unparsed = review_cursor_with(request.clone(), |_, _, _| Ok("not json".into()));
+        assert!(unparsed.skipped.unwrap().contains("not spec-gap json"));
+
+        let ran = review_cursor_with(request, |_, _, _| {
+            Ok(
+                "{\"gaps\":[{\"item\":\"contrast\",\"detail\":\"too low\"}],\"notes\":[\"opened the css\"]}"
+                    .into(),
+            )
+        });
+        assert!(ran.skipped.is_none());
+        assert_eq!(ran.gaps[0].item, "contrast");
+        assert_eq!(ran.gaps[0].detail, "too low");
+        assert_eq!(ran.notes, vec!["opened the css".to_string()]);
+        assert_eq!(ran.model, "gpt");
+        assert_eq!(ran.rounds, 1);
+    }
+
+    #[test]
     fn cursor_args_are_read_only_ask_mode() {
         let args = cursor_agent_args(Path::new("/repo"), "gpt-5.3-codex-high");
         assert!(args.windows(2).any(|pair| pair == ["--mode", "ask"]));

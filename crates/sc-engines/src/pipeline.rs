@@ -2094,48 +2094,81 @@ fn llm_engine(
             model: String::new(),
         },
     };
-    spec.section.llm_rounds = Some(outcome.rounds);
-    if let Some(reason) = outcome.skipped {
+    let finished = finish_llm(backend, &request.config.llm.model, outcome);
+    spec.section.llm_rounds = Some(finished.rounds);
+    spec.section.gaps.extend(finished.gaps);
+    if finished.ran {
+        ran.push("llm".into());
+    } else {
         skipped.push("llm".into());
-        let reason = explain_llm_failure(&reason);
-        findings.push(unavailable("llm", &reason));
-        return Some(LlmSection::skipped(reason));
     }
-    ran.push("llm".into());
+    findings.extend(finished.findings);
+    Some(finished.section)
+}
+
+struct FinishedLlm {
+    section: LlmSection,
+    findings: Vec<Finding>,
+    gaps: Vec<serde_json::Value>,
+    ran: bool,
+    rounds: u32,
+}
+
+fn finish_llm(backend: &str, configured_model: &str, outcome: sc_llm::LlmOutcome) -> FinishedLlm {
+    let rounds = outcome.rounds;
+    if let Some(reason) = outcome.skipped {
+        let reason = explain_llm_failure(&reason);
+        return FinishedLlm {
+            section: LlmSection::skipped(reason.clone()),
+            findings: vec![unavailable("llm", &reason)],
+            gaps: Vec::new(),
+            ran: false,
+            rounds,
+        };
+    }
     let gap_count = outcome.gaps.len();
     let model = if outcome.model.is_empty() {
-        request.config.llm.model.clone()
+        configured_model.to_string()
     } else {
         outcome.model.clone()
     };
-    let notes = outcome.notes.clone();
-    let rounds = outcome.rounds;
+    let notes = outcome.notes;
+    let mut gaps = Vec::new();
+    let mut findings = Vec::new();
     for gap in outcome.gaps {
         let message = if gap.detail.is_empty() {
             gap.item.clone()
         } else {
             format!("{}: {}", gap.item, gap.detail)
         };
-        spec.section.gaps.push(serde_json::json!({
+        let item = gap.item;
+        let detail = gap.detail;
+        gaps.push(serde_json::json!({
             "kind": "llm",
-            "name": gap.item,
+            "name": item,
             "message": message.clone(),
         }));
         findings.push(Finding {
-            id: format!("spec:llm:{}", gap.item.replace(' ', "_")),
+            id: format!("spec:llm:{}", item.replace(' ', "_")),
             rule: "spec.llm_gap".into(),
             engine: "llm".into(),
             severity: "warning".into(),
             file: ".".into(),
             span: None,
-            symbol: Some(gap.item.clone()),
+            symbol: Some(item.clone()),
             message,
-            evidence: serde_json::json!({"item": gap.item, "detail": gap.detail}),
+            evidence: serde_json::json!({"item": item, "detail": detail}),
             suggested_action: Some("Update the code or the spec".into()),
             disposition: String::new(),
         });
     }
-    Some(LlmSection::ran(backend, model, rounds, gap_count, notes))
+    FinishedLlm {
+        section: LlmSection::ran(backend, model, rounds, gap_count, notes),
+        findings,
+        gaps,
+        ran: true,
+        rounds,
+    }
 }
 
 fn mean_coverage(
@@ -2342,6 +2375,145 @@ mod tests {
             }
             other => panic!("expected a capped run, got {other:?}"),
         }
+    }
+
+    fn llm_case(backend: &str) -> (AnalyzeRequest, SpecRun) {
+        let mut config = Config::default();
+        config.llm.backend = backend.into();
+        config.llm.endpoint = "http://127.0.0.1:1".into();
+        config.llm.api_key_env = "SC_LLM_CRAP_KEY_UNSET".into();
+        let request = AnalyzeRequest {
+            root: std::env::temp_dir(),
+            repo: "demo".into(),
+            fail_on: Vec::new(),
+            budget: Duration::from_secs(5),
+            config,
+            diff_base: None,
+            diff_head: None,
+            path_list: Vec::new(),
+            spec_path: None,
+            mutation_override: None,
+            llm_override: Some(true),
+            intent: Some("keep the header contrast".into()),
+        };
+        let spec = SpecRun {
+            section: sc_core::SpecSection::empty(),
+            ran_gate: false,
+            pass: true,
+            reason: String::new(),
+        };
+        (request, spec)
+    }
+
+    fn run_llm(request: &AnalyzeRequest, spec: &mut SpecRun) -> Option<LlmSection> {
+        let mut ran = Vec::new();
+        let mut skipped = Vec::new();
+        let mut findings = Vec::new();
+        llm_engine(request, spec, &mut ran, &mut skipped, &mut findings, &[])
+    }
+
+    #[test]
+    fn explain_llm_failure_names_the_fix_for_each_cause() {
+        let down = explain_llm_failure("connection refused");
+        assert!(down.contains("connection refused"));
+        assert!(down.contains("http://127.0.0.1:11434/v1"));
+        assert!(explain_llm_failure("timed out").contains("did not answer"));
+        assert!(explain_llm_failure("tcp connect").contains("did not answer"));
+        let kept = explain_llm_failure("set endpoint under [llm] in analyzer.toml");
+        assert_eq!(kept, "set endpoint under [llm] in analyzer.toml");
+        let other = explain_llm_failure("model returned an empty body");
+        assert!(other.contains("model returned an empty body"));
+        assert!(other.contains("--llm off"));
+    }
+
+    #[test]
+    fn finish_llm_records_gaps_and_a_skipped_review() {
+        let skipped = finish_llm(
+            "ollama",
+            "qwen2.5-coder",
+            sc_llm::LlmOutcome {
+                gaps: Vec::new(),
+                notes: Vec::new(),
+                skipped: Some("connection refused".into()),
+                rounds: 1,
+                model: String::new(),
+            },
+        );
+        assert!(!skipped.ran);
+        assert_eq!(skipped.rounds, 1);
+        assert_eq!(skipped.section.status, "skipped");
+        assert!(skipped.findings[0].message.contains("did not answer"));
+
+        let recorded = finish_llm(
+            "ollama",
+            "configured-model",
+            sc_llm::LlmOutcome {
+                gaps: vec![
+                    sc_llm::LlmGap {
+                        item: "header contrast".into(),
+                        detail: "fails at 320px".into(),
+                    },
+                    sc_llm::LlmGap {
+                        item: "empty detail".into(),
+                        detail: String::new(),
+                    },
+                ],
+                notes: vec!["opened report.rs".into()],
+                skipped: None,
+                rounds: 2,
+                model: String::new(),
+            },
+        );
+        assert!(recorded.ran);
+        assert_eq!(recorded.section.model.as_deref(), Some("configured-model"));
+        assert_eq!(recorded.section.verdict.as_deref(), Some("gaps found"));
+        assert_eq!(recorded.gaps.len(), 2);
+        assert_eq!(recorded.findings[0].rule, "spec.llm_gap");
+        assert!(recorded.findings[0].message.contains("fails at 320px"));
+        assert_eq!(recorded.findings[1].message, "empty detail");
+        assert!(recorded.findings[0].id.contains("header_contrast"));
+    }
+
+    #[test]
+    fn llm_engine_skips_without_calling_a_model_when_the_request_is_incomplete() {
+        let (mut request, mut spec) = llm_case("ollama");
+        request.llm_override = Some(false);
+        assert!(run_llm(&request, &mut spec).is_none());
+
+        request.llm_override = Some(true);
+        request.intent = None;
+        let section = run_llm(&request, &mut spec).unwrap();
+        assert_eq!(section.status, "skipped");
+        assert!(section.reason.unwrap().contains("--intent"));
+
+        let dir = std::env::temp_dir().join(format!("sc-llm-spec-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        request.spec_path = Some(dir.join("missing.md"));
+        request.intent = Some("keep the header contrast".into());
+        let section = run_llm(&request, &mut spec).unwrap();
+        assert!(section.reason.unwrap().contains("--spec"));
+
+        std::fs::write(dir.join("spec.md"), "The header wraps.\n").unwrap();
+        request.spec_path = Some(dir.join("spec.md"));
+        request.config.llm.backend = "nope".into();
+        let section = run_llm(&request, &mut spec).unwrap();
+        assert!(section.reason.unwrap().contains("unknown llm backend nope"));
+
+        request.config.llm.backend = "openai-compatible".into();
+        std::env::remove_var("SC_LLM_CRAP_KEY_UNSET");
+        let section = run_llm(&request, &mut spec).unwrap();
+        assert!(section
+            .reason
+            .unwrap()
+            .contains("SC_LLM_CRAP_KEY_UNSET is not set"));
+
+        request.config.llm.backend = "ollama".into();
+        request.config.llm.endpoint = "http://127.0.0.1:1".into();
+        let section = run_llm(&request, &mut spec).unwrap();
+        let reason = section.reason.unwrap();
+        assert!(reason.contains("did not answer"), "{reason}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
