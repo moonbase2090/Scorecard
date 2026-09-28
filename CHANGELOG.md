@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Java pack Gradle projects now run `gradle test` even when the build file does not mention Jacoco. When Jacoco is configured, Scorecard still runs `jacocoTestReport` after tests.
 - `--budget-seconds` is one wall clock for the run. A pack command that is still running at the deadline is killed with its child processes, and the report records the timeout instead of waiting until those children close the output pipes.
 - The secrets gate reports GitHub OAuth and app tokens (`gho_`, `ghu_`, `ghs_`, `ghr_`) and an AWS secret access key. The documented example secret is ignored, and a low-entropy string is not a key.
 - A pytest suite under `test/`, a root `test_*.py` or `*_test.py` file, or a pytest config (`pytest.ini`, `[tool:pytest]` in `setup.cfg`, `[pytest]` in `tox.ini`) runs. A tree with no suite says so, instead of claiming the pack does not provide tests.
