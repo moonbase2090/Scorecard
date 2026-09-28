@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 pub const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:11434/v1";
 pub const SPACEXAI_ENDPOINT: &str = "https://api.x.ai/v1";
 pub const SPACEXAI_MODEL: &str = "grok-4.5";
-const MAX_TOOL_ROUNDS: usize = 12;
+const DEFAULT_TOOL_ROUNDS: u32 = 36;
 const MAX_TOKENS: u32 = 2000;
 const MAX_SPEC_CHARS: usize = 24_000;
 
@@ -32,12 +32,30 @@ pub struct LlmRequest<'a> {
     pub spec: &'a str,
     pub root: &'a Path,
     pub intent: Option<&'a str>,
+    pub max_tool_rounds: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LlmOutcome {
     pub gaps: Vec<LlmGap>,
     pub skipped: Option<String>,
+    pub rounds: u32,
+}
+
+fn skipped(message: impl Into<String>, rounds: u32) -> LlmOutcome {
+    LlmOutcome {
+        gaps: Vec::new(),
+        skipped: Some(message.into()),
+        rounds,
+    }
+}
+
+fn finished(gaps: Vec<LlmGap>, rounds: u32) -> LlmOutcome {
+    LlmOutcome {
+        gaps,
+        skipped: None,
+        rounds,
+    }
 }
 
 pub fn resolve_target(endpoint: &str, model: &str) -> (String, String, Option<String>) {
@@ -101,31 +119,20 @@ fn review_cursor_with(
 ) -> LlmOutcome {
     let model = request.model.trim();
     if model.is_empty() {
-        return LlmOutcome {
-            gaps: Vec::new(),
-            skipped: Some("cursor backend needs [llm] model set to a cursor-agent model".into()),
-        };
+        return skipped(
+            "cursor backend needs [llm] model set to a cursor-agent model",
+            0,
+        );
     }
     let prompt = cursor_prompt(request.spec, request.intent);
     let args = cursor_agent_args(request.root, model);
     let output = match run(request.root, &args, &prompt) {
         Ok(output) => output,
-        Err(err) => {
-            return LlmOutcome {
-                gaps: Vec::new(),
-                skipped: Some(err),
-            };
-        }
+        Err(err) => return skipped(err, 1),
     };
     match gaps_from_cursor_output(&output) {
-        Some(gaps) => LlmOutcome {
-            gaps,
-            skipped: None,
-        },
-        None => LlmOutcome {
-            gaps: Vec::new(),
-            skipped: Some("cursor-agent response was not spec-gap json".into()),
-        },
+        Some(gaps) => finished(gaps, 1),
+        None => skipped("cursor-agent response was not spec-gap json", 1),
     }
 }
 
@@ -139,8 +146,11 @@ fn cursor_prompt(spec: &str, intent: Option<&str>) -> String {
     };
     format!(
         "{goal}Spec:\n{spec}\n\n\
-Compare the spec with this repository. Read the files before you claim anything is missing. \
+Compare the spec with this repository. Read the file that should contain a spec item before you report it missing. \
+Do not claim a file is absent until you have opened it and it is not there. Do not wander into unrelated code. \
 Do not edit files. Do not run commands that change the tree. \
+The intent is the caller's goal; do not treat a deliberate choice recorded there as a gap. \
+Do not invent CRAP scores or mutation scores. \
 Return JSON only: {{\"gaps\":[{{\"item\":\"...\",\"detail\":\"...\"}}]}}. \
 List spec items the code does not satisfy. If nothing is missing, return {{\"gaps\":[]}}."
     )
@@ -207,10 +217,7 @@ fn review_with(
         resolve_target(request.endpoint, request.model)
     };
     if endpoint.contains("api.x.ai") && key.is_none() {
-        return LlmOutcome {
-            gaps: Vec::new(),
-            skipped: Some("XAI_API_KEY is not set".into()),
-        };
+        return skipped("XAI_API_KEY is not set", 0);
     }
     let spec: String = request.spec.chars().take(MAX_SPEC_CHARS).collect();
     let intent = request.intent.unwrap_or("").trim();
@@ -222,14 +229,21 @@ fn review_with(
     let mut messages = vec![
         json!({
             "role": "system",
-            "content": "You compare a spec with a Rust crate. Return JSON only: {\"gaps\":[{\"item\":\"...\",\"detail\":\"...\"}]}. List spec items the code does not satisfy. The intent is the caller's goal; do not treat a deliberate choice recorded there as a gap. Do not invent CRAP scores or mutation scores. If nothing is missing, return {\"gaps\":[]}."
+            "content": "You compare a spec with a repository. Read the file that should contain a spec item before you report it missing. Do not claim a file is absent until get_file fails. Do not wander into unrelated code. When the spec items are checked, stop calling tools and return JSON only: {\"gaps\":[{\"item\":\"...\",\"detail\":\"...\"}]}. The intent is the caller's goal; do not treat a deliberate choice recorded there as a gap. Do not invent CRAP scores or mutation scores. If nothing is missing, return {\"gaps\":[]}."
         }),
         json!({
             "role": "user",
             "content": user
         }),
     ];
-    for _ in 0..MAX_TOOL_ROUNDS {
+    let limit = if request.max_tool_rounds == 0 {
+        DEFAULT_TOOL_ROUNDS
+    } else {
+        request.max_tool_rounds
+    };
+    let mut rounds_used = 0;
+    for round in 1..=limit {
+        rounds_used = round;
         let body = json!({
             "model": model,
             "messages": messages,
@@ -239,56 +253,127 @@ fn review_with(
         let response = match post(&endpoint, key.as_deref(), &body) {
             Ok(response) => response,
             Err(err) => {
-                return LlmOutcome {
-                    gaps: Vec::new(),
-                    skipped: Some(redact_secret(&err, key.as_deref())),
-                };
+                return skipped(redact_secret(&err, key.as_deref()), round);
             }
         };
         let Some(choice) = response.pointer("/choices/0/message") else {
-            return LlmOutcome {
-                gaps: Vec::new(),
-                skipped: Some("llm response has no message".into()),
-            };
+            return skipped("llm response has no message", round);
         };
         if let Some(calls) = choice.get("tool_calls").and_then(Value::as_array) {
-            if calls.is_empty() {
-                break;
+            if !calls.is_empty() {
+                messages.push(choice.clone());
+                for call in calls {
+                    let id = call.get("id").and_then(Value::as_str).unwrap_or("");
+                    let function = call.get("function").cloned().unwrap_or(json!({}));
+                    let name = function.get("name").and_then(Value::as_str).unwrap_or("");
+                    let arguments = function
+                        .get("arguments")
+                        .and_then(Value::as_str)
+                        .unwrap_or("{}");
+                    let content = run_tool(request.root, &spec, name, arguments);
+                    messages.push(json!({
+                        "role": "tool",
+                        "tool_call_id": id,
+                        "content": content,
+                    }));
+                }
+                continue;
             }
-            messages.push(choice.clone());
-            for call in calls {
-                let id = call.get("id").and_then(Value::as_str).unwrap_or("");
-                let function = call.get("function").cloned().unwrap_or(json!({}));
-                let name = function.get("name").and_then(Value::as_str).unwrap_or("");
-                let arguments = function
-                    .get("arguments")
-                    .and_then(Value::as_str)
-                    .unwrap_or("{}");
-                let content = run_tool(request.root, &spec, name, arguments);
-                messages.push(json!({
-                    "role": "tool",
-                    "tool_call_id": id,
-                    "content": content,
-                }));
-            }
-            continue;
         }
         let content = choice.get("content").and_then(Value::as_str).unwrap_or("");
-        return match parse_gaps(content) {
-            Some(gaps) => LlmOutcome {
-                gaps,
-                skipped: None,
-            },
-            None => LlmOutcome {
-                gaps: Vec::new(),
-                skipped: Some("llm response was not spec-gap json".into()),
-            },
-        };
+        if let Some(gaps) = parse_gaps(content) {
+            return finished(gaps, round);
+        }
+        return retry_json(
+            &endpoint,
+            &model,
+            key.as_deref(),
+            &mut messages,
+            choice,
+            round,
+            &post,
+        );
     }
-    LlmOutcome {
-        gaps: Vec::new(),
-        skipped: Some("llm tool round limit reached".into()),
+    force_verdict(
+        &endpoint,
+        &model,
+        key.as_deref(),
+        &mut messages,
+        rounds_used,
+        &post,
+    )
+}
+
+fn retry_json(
+    endpoint: &str,
+    model: &str,
+    key: Option<&str>,
+    messages: &mut Vec<Value>,
+    choice: &Value,
+    round: u32,
+    post: &impl Fn(&str, Option<&str>, &Value) -> Result<Value, String>,
+) -> LlmOutcome {
+    let prior = choice.get("content").and_then(Value::as_str).unwrap_or("");
+    messages.push(json!({
+        "role": "assistant",
+        "content": prior,
+    }));
+    messages.push(json!({
+        "role": "user",
+        "content": "That was not JSON. Return only {\"gaps\":[{\"item\":\"...\",\"detail\":\"...\"}]} or {\"gaps\":[]}."
+    }));
+    let next = round.saturating_add(1);
+    let body = json!({
+        "model": model,
+        "messages": messages,
+        "max_tokens": MAX_TOKENS,
+    });
+    let response = match post(endpoint, key, &body) {
+        Ok(response) => response,
+        Err(err) => return skipped(redact_secret(&err, key), next),
+    };
+    let Some(text) = response
+        .pointer("/choices/0/message/content")
+        .and_then(Value::as_str)
+    else {
+        return skipped("llm response was not spec-gap json", next);
+    };
+    match parse_gaps(text) {
+        Some(gaps) => finished(gaps, next),
+        None => skipped("llm response was not spec-gap json", next),
     }
+}
+
+fn force_verdict(
+    endpoint: &str,
+    model: &str,
+    key: Option<&str>,
+    messages: &mut Vec<Value>,
+    rounds_so_far: u32,
+    post: &impl Fn(&str, Option<&str>, &Value) -> Result<Value, String>,
+) -> LlmOutcome {
+    messages.push(json!({
+        "role": "user",
+        "content": "Stop. No more tools. From the files you have already read, return JSON only: {\"gaps\":[{\"item\":\"...\",\"detail\":\"...\"}]} or {\"gaps\":[]}. Do not claim a file is missing if you did not open it."
+    }));
+    let round = rounds_so_far.saturating_add(1);
+    let body = json!({
+        "model": model,
+        "messages": messages,
+        "max_tokens": MAX_TOKENS,
+    });
+    let response = match post(endpoint, key, &body) {
+        Ok(response) => response,
+        Err(err) => return skipped(redact_secret(&err, key), round),
+    };
+    let Some(choice) = response.pointer("/choices/0/message") else {
+        return skipped("llm response has no message", round);
+    };
+    let content = choice.get("content").and_then(Value::as_str).unwrap_or("");
+    if let Some(gaps) = parse_gaps(content) {
+        return finished(gaps, round);
+    }
+    retry_json(endpoint, model, key, messages, choice, round, post)
 }
 
 /// Reads `env_name` and returns the key. The error names the variable and
@@ -313,9 +398,16 @@ pub fn redact_secret(text: &str, secret: Option<&str>) -> String {
 }
 
 pub fn parse_gaps(text: &str) -> Option<Vec<LlmGap>> {
-    let start = text.find('{')?;
-    let end = text.rfind('}')?;
-    let value: Value = serde_json::from_str(&text[start..=end]).ok()?;
+    let stripped = strip_fence(text);
+    let start = stripped.find('{')?;
+    let end = stripped.rfind('}')?;
+    if end < start {
+        return None;
+    }
+    let slice = &stripped[start..=end];
+    let value = serde_json::from_str::<Value>(slice)
+        .ok()
+        .or_else(|| serde_json::from_str::<Value>(&repair_json(slice)).ok())?;
     let gaps = value.get("gaps")?.as_array()?;
     Some(
         gaps.iter()
@@ -334,6 +426,36 @@ pub fn parse_gaps(text: &str) -> Option<Vec<LlmGap>> {
             })
             .collect(),
     )
+}
+
+fn strip_fence(text: &str) -> String {
+    let trimmed = text.trim();
+    let Some(rest) = trimmed.strip_prefix("```") else {
+        return trimmed.to_string();
+    };
+    let rest = rest.trim_start_matches("json").trim_start();
+    rest.trim_end_matches('`').trim().to_string()
+}
+
+fn repair_json(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::new();
+    for (index, ch) in chars.iter().enumerate() {
+        if *ch == ','
+            && next_meaningful(&chars, index + 1).is_some_and(|next| next == '}' || next == ']')
+        {
+            continue;
+        }
+        out.push(*ch);
+    }
+    out
+}
+
+fn next_meaningful(chars: &[char], mut index: usize) -> Option<char> {
+    while index < chars.len() && chars[index].is_whitespace() {
+        index += 1;
+    }
+    chars.get(index).copied()
 }
 
 fn post_chat(endpoint: &str, api_key: Option<&str>, body: &Value) -> Result<Value, String> {
@@ -522,6 +644,7 @@ mod tests {
                 spec: "Spec item.",
                 root: &dir,
                 intent: None,
+                max_tool_rounds: 4,
             },
             |endpoint, key, _body| {
                 *seen.borrow_mut() = format!("{endpoint}|{}", key.unwrap_or(""));
@@ -540,6 +663,61 @@ mod tests {
         let gaps = parse_gaps(text).unwrap();
         assert_eq!(gaps[0].item, "fn missing");
         assert!(parse_gaps("CRAP is 10").is_none());
+    }
+
+    #[test]
+    fn a_closing_brace_before_an_opening_brace_is_not_json() {
+        assert!(parse_gaps("} not json {").is_none());
+        assert!(parse_gaps("}").is_none());
+    }
+
+    #[test]
+    fn empty_tool_calls_keep_the_content_verdict() {
+        let dir = test_tree();
+        let outcome = review_with(request(&dir, "spec", "http://127.0.0.1:1/v1"), |_, _, _| {
+            Ok(json!({"choices":[{"message":{
+                "content": "{\"gaps\":[{\"item\":\"first\",\"detail\":\"kept\"}]}",
+                "tool_calls": []
+            }}]}))
+        });
+        assert_eq!(outcome.skipped, None);
+        assert_eq!(outcome.rounds, 1);
+        assert_eq!(outcome.gaps[0].item, "first");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_json_retry_does_not_resend_unanswered_tool_calls() {
+        let dir = test_tree();
+        let calls = std::cell::Cell::new(0);
+        let extra_tool_calls = std::cell::Cell::new(false);
+        let _outcome = review_with(
+            LlmRequest {
+                max_tool_rounds: 1,
+                ..request(&dir, "spec", "http://127.0.0.1:1/v1")
+            },
+            |_, _, body| {
+                calls.set(calls.get() + 1);
+                if calls.get() >= 3 {
+                    let count = body
+                        .get("messages")
+                        .and_then(Value::as_array)
+                        .map(|messages| {
+                            messages
+                                .iter()
+                                .filter(|message| message.get("tool_calls").is_some())
+                                .count()
+                        })
+                        .unwrap_or(0);
+                    extra_tool_calls.set(count > 1);
+                }
+                Ok(tool_response(
+                    json!([{"id": "c1", "function": {"name": "get_file", "arguments": "{\"path\":\"src/a.rs\"}"}}]),
+                ))
+            },
+        );
+        assert!(!extra_tool_calls.get());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -594,6 +772,7 @@ mod tests {
             spec,
             root,
             intent: None,
+            max_tool_rounds: 4,
         }
     }
 
@@ -672,8 +851,40 @@ mod tests {
         });
         assert_eq!(
             outcome.skipped.as_deref(),
-            Some("llm tool round limit reached")
+            Some("llm response was not spec-gap json")
         );
+        assert!(outcome.rounds > 4);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_capped_run_still_returns_a_verdict() {
+        let dir = test_tree();
+        let calls = std::cell::Cell::new(0);
+        let forced = std::cell::Cell::new(false);
+        let outcome = review_with(
+            LlmRequest {
+                max_tool_rounds: 1,
+                ..request(&dir, "spec", "http://127.0.0.1:1/v1")
+            },
+            |_, _, body| {
+                calls.set(calls.get() + 1);
+                if body.get("tools").is_none() {
+                    forced.set(true);
+                    Ok(content_response(
+                        "```json\n{\"gaps\":[{\"item\":\"background images\",\"detail\":\"not implemented\"}],}\n```",
+                    ))
+                } else {
+                    Ok(tool_response(
+                        json!([{"id": "c1", "function": {"name": "get_file", "arguments": "{\"path\":\"src/a.rs\"}"}}]),
+                    ))
+                }
+            },
+        );
+        assert!(forced.get());
+        assert_eq!(outcome.skipped, None);
+        assert_eq!(outcome.gaps[0].item, "background images");
+        assert_eq!(calls.get(), 2);
         std::fs::remove_dir_all(&dir).ok();
     }
 

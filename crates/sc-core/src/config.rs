@@ -65,6 +65,8 @@ pub struct LlmConfig {
     /// Name of the environment variable that holds the API key. The key
     /// itself is never stored here.
     pub api_key_env: String,
+    /// Tool-using turns before the model must return a spec-gap verdict.
+    pub max_tool_rounds: u32,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -124,6 +126,7 @@ impl Default for LlmConfig {
             backend: "ollama".into(),
             base_url: "https://openrouter.ai/api/v1".into(),
             api_key_env: "OPENROUTER_API_KEY".into(),
+            max_tool_rounds: 36,
         }
     }
 }

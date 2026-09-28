@@ -10,9 +10,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - An `a11y` engine with its own gate and score. It checks HTML in the web pack and JSX or TSX in the node pack against WCAG 2.2 criteria. It is advisory unless `--fail-on` names `a11y` or config enforces it. Rules can be disabled by id. See `docs/a11y.md`.
 - `[llm] backend = "cursor"` runs `cursor-agent` in read-only ask mode. It is opt-in. The default remains local Ollama, which does not contact Cursor. The cursor backend sends the spec and the files the agent reads to Cursor.
 - `[llm] backend = "openai-compatible"` sends the spec and tool-read file text to a configurable base URL. The default URL is OpenRouter. The API key is read from the environment variable named by `api_key_env` (default `OPENROUTER_API_KEY`) and is not stored in config. Local Ollama stays the default.
+- `[llm] max_tool_rounds` defaults to 36. When the cap is reached, the model gets one no-tools turn that must return a spec-gap verdict, and a reply that is not JSON is requested once more.
 
 ### Fixed
 
+- A spec-gap reply with a `}` before its first `{` no longer aborts the run. An empty `tool_calls` array is treated as no tool call, and a JSON retry does not resend tool calls without their results.
 - The readme, `docs/config.md`, and `analyzer.toml.example` say where `analyzer.toml` goes: the root of the analyzed directory (usually the repo root), then `~/.config/sc/analyzer.toml`, with no parent or sub-directory search.
 - The HTML report summary grid keeps the git SHA inside its own cell. A long value wraps or clips instead of painting over the tests column.
 - `sca.hallucinated_import` treats workspace member package names and their dependencies as declared. A path dep written with a hyphen matches the underscore name used in source.
