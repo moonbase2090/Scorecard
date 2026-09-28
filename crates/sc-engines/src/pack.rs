@@ -190,28 +190,50 @@ fn collect_text(root: &Path, dir: &Path, exclude: &[String], out: &mut Vec<std::
     for entry in entries.flatten() {
         let path = entry.path();
         let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-        if name == ".git"
-            || name == "target"
-            || name == "node_modules"
-            || name == "dist"
-            || name == ".sc"
-        {
-            continue;
-        }
-        let rel = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .replace('\\', "/");
-        if sc_graph::is_excluded(&rel, exclude) {
+        let meta = match path.symlink_metadata() {
+            Ok(meta) => meta,
+            Err(_) => continue,
+        };
+        // A directory symlink can loop once the depth cap is gone.
+        if meta.file_type().is_symlink() && path.is_dir() {
             continue;
         }
         if path.is_dir() {
+            if skip_dir(name) {
+                continue;
+            }
+            let rel = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            if sc_graph::is_excluded(&rel, exclude) {
+                continue;
+            }
             collect_text(root, &path, exclude, out);
         } else if secret_file(name) {
+            let rel = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            if sc_graph::is_excluded(&rel, exclude) {
+                continue;
+            }
             out.push(path);
         }
     }
+}
+
+fn skip_dir(name: &str) -> bool {
+    name == ".git"
+        || name == "target"
+        || name == "node_modules"
+        || name == "dist"
+        || name == ".sc"
+        || name == ".venv"
+        || name == "venv"
+        || (name.starts_with('.') && name != ".github")
 }
 
 fn secret_file(name: &str) -> bool {
@@ -554,7 +576,57 @@ mod tests {
             !files.iter().any(|file| file.contains("vendor/")),
             "{files:?}"
         );
+
+        fs::create_dir_all(root.join(".venv/botocore")).unwrap();
+        fs::write(
+            root.join(".venv/botocore/example.json"),
+            format!("\"{key}\"\n"),
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("venv")).unwrap();
+        fs::write(root.join("venv/leak.py"), format!("KEY = \"{key}\"\n")).unwrap();
+        fs::create_dir_all(root.join(".hidden")).unwrap();
+        fs::write(root.join(".hidden/leak.py"), format!("KEY = \"{key}\"\n")).unwrap();
+        fs::create_dir_all(root.join(".github/workflows")).unwrap();
+        fs::write(
+            root.join(".github/workflows/ci.yml"),
+            format!("KEY: \"{key}\"\n"),
+        )
+        .unwrap();
+        let outside = temp("secrets-link-target");
+        fs::write(outside.join("leak.py"), format!("KEY = \"{key}\"\n")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("linked")).unwrap();
+
+        let findings = text_secrets(&root, &["vendor/**".into()]);
+        let files: Vec<&str> = findings
+            .iter()
+            .map(|finding| finding.file.as_str())
+            .collect();
+        assert!(files.iter().any(|file| file.ends_with(".env")), "{files:?}");
+        assert!(
+            files
+                .iter()
+                .any(|file| file.ends_with(".github/workflows/ci.yml")),
+            "{files:?}"
+        );
+        assert!(
+            !files.iter().any(|file| file.contains(".venv/")),
+            "{files:?}"
+        );
+        assert!(
+            !files.iter().any(|file| file.contains("venv/")),
+            "{files:?}"
+        );
+        assert!(
+            !files.iter().any(|file| file.contains(".hidden/")),
+            "{files:?}"
+        );
+        assert!(
+            !files.iter().any(|file| file.contains("linked/")),
+            "{files:?}"
+        );
         let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&outside);
     }
 
     fn temp(name: &str) -> std::path::PathBuf {
