@@ -312,10 +312,16 @@ fn run_pytest(
             if captured.status.success() {
                 ran.push("tests".into());
                 (true, true, String::new())
-            } else if tool_missing(&captured.stderr, &captured.stdout) {
+            } else if let Some(message) =
+                missing_runner(&command, &captured.stderr, &captured.stdout)
+            {
                 skipped.push("tests".into());
-                findings.push(unavailable("tests", "pytest is not installed"));
-                (true, false, "pytest is not installed".into())
+                let mut finding = unavailable("tests", message);
+                if message == "uv is not installed" {
+                    finding.suggested_action = Some("Install uv and re-run.".into());
+                }
+                findings.push(finding);
+                (true, false, message.into())
             } else {
                 ran.push("tests".into());
                 let detail = brief(&format!("{}\n{}", captured.stdout, captured.stderr));
@@ -1229,6 +1235,25 @@ fn tool_missing(stderr: &str, stdout: &str) -> bool {
         || text.contains("no module named")
 }
 
+/// The test command was `uv run ...` and the shell could not find `uv`.
+/// A missing pytest inside that command still names pytest.
+fn missing_runner(command: &str, stderr: &str, stdout: &str) -> Option<&'static str> {
+    if !tool_missing(stderr, stdout) {
+        return None;
+    }
+    let text = format!("{stderr}\n{stdout}").to_ascii_lowercase();
+    let uv = command.split_whitespace().next() == Some("uv");
+    let uv_missing = text.contains("uv: command not found")
+        || text.contains("command not found: uv")
+        || text.contains("uv: not found")
+        || text.contains("no such command: uv");
+    if uv && uv_missing {
+        Some("uv is not installed")
+    } else {
+        Some("pytest is not installed")
+    }
+}
+
 fn host_pytest() -> bool {
     Command::new("python3")
         .args(["-c", "import pytest"])
@@ -1509,6 +1534,30 @@ mod tests {
             &mut skipped,
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_missing_uv_is_not_called_a_missing_pytest() {
+        assert_eq!(
+            missing_runner(
+                "uv run --extra dev --with pytest-cov pytest -q",
+                "sh: uv: command not found\n",
+                ""
+            ),
+            Some("uv is not installed")
+        );
+        assert_eq!(
+            missing_runner(
+                "python3 -m pytest -q",
+                "/usr/bin/python3: No module named pytest\n",
+                ""
+            ),
+            Some("pytest is not installed")
+        );
+        assert_eq!(
+            missing_runner("uv run pytest -q", "pytest failed\n", ""),
+            None
+        );
     }
 
     #[test]
