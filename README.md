@@ -58,6 +58,18 @@ exit 0: gates passed
 
 Exit status: `0` the enforced gates passed, `1` an enforced gate failed, `2` `sc` could not run. [Reading the report](docs/report.md) explains every section.
 
+Clippy findings use the first error with a file, line, and lint name. If no such error exists, they use the first warning with those details:
+
+```bash doctest project=lint_diagnostic
+set +e
+output="$(sc analyze . --format pretty 2>&1)"
+status=$?
+set -e
+printf '%s\n' "$output"
+test "$status" -eq 1
+grep -Eq 'src/lib.rs:[0-9]+  clippy::let_and_return' <<<"$output"
+```
+
 Next:
 
 - Put `sc` on your `PATH`: `sudo mv sc /usr/local/bin/`, or see [Install](#install).

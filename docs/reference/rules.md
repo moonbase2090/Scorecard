@@ -11,7 +11,7 @@ Every finding has a rule id. Severity `error` counts against the gate; `warning`
 | `complexity.untested` | error, or warning when coverage was not measured | fix | A function at or above `gates.new_fn_untested_cc` complexity has 0% coverage. | Add tests for it, or split it. |
 | `coverage.missing` | warning | ask | Coverage was not measured for some functions, usually because tests did not run or the coverage tool is missing. | Install the coverage tool for your pack (see [troubleshooting](../troubleshooting.md#coverage-not-measured)). |
 | `coverage.unmatched` | warning | ask | Coverage ran, but some functions have no coverage record. | Check that those functions are built into the test run. `evidence.functions` lists them. |
-| `lint.failed` | error | fix | The linter reported problems. | Run the lint command from the finding and fix what it reports. |
+| `lint.failed` | error | fix | The linter reported problems. A Clippy finding uses the first error with a file, line, and lint name, or the first warning with those details if no such error exists. | Run the lint command from the finding and fix what it reports. |
 | `secrets.aws_access_key` | error | fix | An AWS access key id is in the tree. | Remove it, rotate the key, and rewrite history if it was pushed. |
 | `secrets.aws_secret_key` | error | fix | An AWS secret access key is in the tree. | Remove it, rotate the key, and rewrite history if it was pushed. |
 | `secrets.github_token` | error | fix | A GitHub token is in the tree. | Remove it and revoke the token. |
