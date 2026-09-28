@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Java pack Gradle projects now run `gradle test` even when the build file does not mention Jacoco. When Jacoco is configured, Scorecard still runs `jacocoTestReport` after tests.
 - `--budget-seconds` is one wall clock for the run. A pack command that is still running at the deadline is killed with its child processes, and the report records the timeout instead of waiting until those children close the output pipes.
 - The default Rust lint command is `cargo clippy`. A clippy warning no longer fails the lint gate. A repository that already denies warnings still fails, and `commands.lint = "cargo clippy -- -D warnings"` opts in.
 - The secrets gate reports GitHub OAuth and app tokens (`gho_`, `ghu_`, `ghs_`, `ghr_`) and an AWS secret access key. The documented example secret is ignored, and a low-entropy string is not a key.

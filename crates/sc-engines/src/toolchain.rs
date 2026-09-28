@@ -181,6 +181,8 @@ fn go_plan(root: &Path) -> Vec<Step> {
 
 fn java_plan(root: &Path) -> Vec<Step> {
     let files = list_files(root, &["java"]);
+    let has_pom = root.join("pom.xml").is_file();
+    let has_gradle = root.join("build.gradle").is_file() || root.join("build.gradle.kts").is_file();
     let javac_cmd = if files.is_empty() {
         None
     } else {
@@ -193,19 +195,31 @@ fn java_plan(root: &Path) -> Vec<Step> {
             ),
         )
     };
-    let compile = if root.join("pom.xml").is_file() {
+    let compile = if has_pom {
         via("mvn", java_mvn("compile", true)).or(javac_cmd)
-    } else if root.join("build.gradle").is_file() || root.join("build.gradle.kts").is_file() {
+    } else if has_gradle {
         via("gradle", "gradle compileJava --quiet".into()).or(javac_cmd)
     } else {
         javac_cmd
     };
-    let test = if root.join("pom.xml").is_file() {
+    let test = if has_pom {
         via("mvn", java_mvn("test", false))
-    } else if gradle_uses_jacoco(root) {
-        via("gradle", "gradle test jacocoTestReport --quiet".into())
+    } else if has_gradle {
+        let command = if gradle_uses_jacoco(root) {
+            "gradle test jacocoTestReport --quiet"
+        } else {
+            "gradle test --quiet"
+        };
+        via("gradle", command.into())
     } else {
         None
+    };
+    let test_absent = if has_pom {
+        "maven is not installed"
+    } else if has_gradle {
+        "gradle is not installed"
+    } else {
+        "no Maven or Gradle project detected"
     };
     vec![
         Step {
@@ -218,7 +232,7 @@ fn java_plan(root: &Path) -> Vec<Step> {
             gate: "tests",
             engine: "tests",
             command: test,
-            absent: "maven is not installed".into(),
+            absent: test_absent.into(),
         },
         Step {
             gate: "lint",
@@ -785,6 +799,23 @@ mod tests {
         let test = steps.iter().find(|step| step.gate == "tests").unwrap();
         let command = test.command.clone().unwrap_or_default();
         assert!(command.contains("jacoco"), "{command}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn java_plan_runs_gradle_tests_without_jacoco_text() {
+        if !which("gradle") && !image_present() {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-java-gradle-plan-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("build.gradle"), "plugins { id 'java' }\n").unwrap();
+        let steps = java_plan(&root);
+        let test = steps.iter().find(|step| step.gate == "tests").unwrap();
+        let command = test.command.clone().unwrap_or_default();
+        assert!(command.contains("gradle test --quiet"), "{command}");
+        assert!(!command.contains("jacocoTestReport"), "{command}");
         let _ = std::fs::remove_dir_all(&root);
     }
 
