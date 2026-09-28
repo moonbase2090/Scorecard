@@ -46,13 +46,14 @@ const CSS: &str = r#"
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);
 font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-main{max-width:880px;margin:0 auto;padding:28px 20px 60px}
+main{padding:28px clamp(12px,3vw,40px) 60px}
 h1{font-size:22px;margin:0}
 h2{font-size:15px;margin:28px 0 10px;color:var(--dim);text-transform:uppercase;
 letter-spacing:.08em}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;
 padding:16px 18px;margin-top:12px}
 .hero{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.hero>div{flex:1 1 220px;min-width:0;overflow-wrap:anywhere}
 .verdict{font-size:15px;font-weight:800;border-radius:999px;padding:8px 22px;
 letter-spacing:.06em}
 .verdict.pass{background:rgba(89,227,165,.14);color:var(--ok);
@@ -97,6 +98,7 @@ padding:2px 10px;border:1px solid #3a5086;color:#bcd0ff;white-space:nowrap}
 .pill.info{border-color:var(--accent);color:#c9d9ff}
 .pill.dim{color:var(--dim)}
 table{width:100%;border-collapse:collapse;font-size:12.5px}
+.card:has(>table){overflow-x:auto}
 th{text-align:left;color:var(--dim);font-weight:600;font-size:11px;
 text-transform:uppercase;letter-spacing:.06em;padding:6px 8px;
 border-bottom:1px solid var(--line)}
@@ -125,6 +127,8 @@ font-size:11.5px;overflow-x:auto;white-space:nowrap}
 .term b{color:var(--ok)}
 td.cmd{width:100%;max-width:0}
 footer{margin-top:32px;color:var(--dim);font-size:11.5px;text-align:center}
+@media (max-width:600px){.card{padding:12px}th,td{padding:6px 5px}
+.bar{min-width:48px}}
 "#;
 
 /// How a verdict should read, shared by every renderer. Exit code and the
@@ -1413,6 +1417,18 @@ mod tests {
         // SHA paint across the tests column.
         assert!(html.contains("minmax(min(100%,220px),1fr)"));
         assert!(html.contains(".meta>div{min-width:0;overflow:hidden}"));
+    }
+
+    #[test]
+    fn html_fits_the_viewport() {
+        let html = to_html(&card());
+        // The report spans the window instead of a fixed 880px column.
+        assert!(!html.contains("max-width:880px"));
+        assert!(html.contains("main{padding:28px clamp(12px,3vw,40px) 60px}"));
+        // An absolute repo path or run id wraps instead of widening the page.
+        assert!(html.contains(".hero>div{flex:1 1 220px;min-width:0;overflow-wrap:anywhere}"));
+        // A table too wide for a phone scrolls inside its card.
+        assert!(html.contains(".card:has(>table){overflow-x:auto}"));
     }
 
     #[test]
