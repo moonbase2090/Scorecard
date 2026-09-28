@@ -707,7 +707,7 @@ fn which(name: &str) -> bool {
 
 fn tool_missing(stderr: &str, stdout: &str) -> bool {
     let text = format!("{stderr}\n{stdout}").to_ascii_lowercase();
-    text.contains("not found")
+    text.contains("command not found")
         || text.contains("no such command")
         || text.contains("not recognized")
         || text.contains("unable to locate a java runtime")
@@ -824,6 +824,35 @@ mod tests {
         let stderr = "The operation couldn’t be completed. Unable to locate a Java Runtime.\nPlease visit http://www.java.com for information on installing Java.\n";
         assert!(tool_missing(stderr, ""));
         assert!(!tool_missing("error: cannot find symbol", ""));
+    }
+
+    #[test]
+    fn c_header_not_found_is_not_a_missing_tool() {
+        // A compiler error about a missing header is a real failure,
+        // not evidence that the compiler is missing.
+        let stderr = "projects/OS400/curlcl.c:31:10: fatal error: 'milib.h' file not found\n";
+        assert!(!tool_missing(stderr, ""));
+    }
+
+    #[test]
+    fn config_not_found_is_not_a_missing_tool() {
+        // A test that outputs "config file not found" is a real test
+        // failure, not evidence that the test runner is missing.
+        let stdout = "config file not found\n";
+        assert!(!tool_missing("", stdout));
+    }
+
+    #[test]
+    fn command_not_found_still_detected() {
+        // The shell's own "command not found" must still be caught.
+        assert!(tool_missing("sh: g++: command not found", ""));
+        assert!(tool_missing("bash: npm: command not found", ""));
+        assert!(tool_missing("g++: command not found", ""));
+    }
+
+    #[test]
+    fn no_such_command_still_detected() {
+        assert!(tool_missing("no such command: faketool", ""));
     }
 
     #[test]

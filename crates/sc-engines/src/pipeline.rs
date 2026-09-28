@@ -1455,7 +1455,7 @@ fn run_lint_engine(
 
 fn command_missing(stderr: &str, stdout: &str) -> bool {
     let text = format!("{stderr}\n{stdout}").to_ascii_lowercase();
-    text.contains("no such command") || text.contains("not found")
+    text.contains("no such command") || text.contains("command not found")
 }
 
 fn run_shell(

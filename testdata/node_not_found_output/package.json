@@ -1,0 +1,6 @@
+{
+  "name": "node-not-found-output",
+  "scripts": {
+    "test": "node test.js"
+  }
+}
