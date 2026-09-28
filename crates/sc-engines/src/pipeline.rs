@@ -2767,10 +2767,10 @@ mod tests {
             enforced: false,
             reason: Some("package.json has no test script".into()),
         };
-        assert!(!tests_ran_and_failed(&[], &[reported.clone()]));
+        assert!(!tests_ran_and_failed(&[], std::slice::from_ref(&reported)));
         assert!(!tests_ran_and_failed(
             &["coverage".into()],
-            &[reported.clone()]
+            std::slice::from_ref(&reported)
         ));
         let enforced_fail = Gate {
             id: "tests".into(),
@@ -2778,8 +2778,14 @@ mod tests {
             enforced: true,
             reason: Some("test failures".into()),
         };
-        assert!(!tests_ran_and_failed(&[], &[enforced_fail.clone()]));
-        assert!(tests_ran_and_failed(&["tests".into()], &[enforced_fail]));
+        assert!(!tests_ran_and_failed(
+            &[],
+            std::slice::from_ref(&enforced_fail)
+        ));
+        assert!(tests_ran_and_failed(
+            &["tests".into()],
+            std::slice::from_ref(&enforced_fail)
+        ));
     }
 
     #[test]
