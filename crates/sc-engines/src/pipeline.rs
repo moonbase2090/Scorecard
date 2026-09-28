@@ -1964,8 +1964,7 @@ fn crap_gate(coverage_complete: bool, over: u64, untested: u64, untested_cc: u32
             pass: false,
             enforced: false,
             reason: Some(
-                "coverage was not measured for all analyzed functions, so CRAP was not scored"
-                    .into(),
+                "some functions have no coverage record and were not scored".into(),
             ),
         };
     }
@@ -3361,6 +3360,10 @@ mod tests {
         let clear = crap_gate(false, 0, 0, 15);
         assert!(!clear.pass);
         assert!(!clear.enforced);
+        assert_eq!(
+            clear.reason.as_deref(),
+            Some("some functions have no coverage record and were not scored")
+        );
     }
 
     #[test]

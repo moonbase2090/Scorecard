@@ -255,15 +255,6 @@ mod tests {
     #[test]
     fn markdown_marks_unmeasured_coverage() {
         let mut card = Scorecard::skeleton(".", 30);
-        card.gates.push(Gate {
-            id: "crap".into(),
-            pass: false,
-            enforced: false,
-            reason: Some(
-                "coverage was not measured for all analyzed functions, so CRAP was not scored"
-                    .into(),
-            ),
-        });
         card.crap = CrapSection {
             threshold: 30,
             worst: vec![CrapFunction {
@@ -276,15 +267,39 @@ mod tests {
         };
         let md = to_markdown(&card);
         assert!(md.contains(
-            "Coverage was not measured for all analyzed functions, so CRAP is not scored."
+            "Coverage was not measured, so CRAP assumes 0% coverage. These numbers are an upper bound."
         ));
         assert!(md.contains("| 132 | 11 | not measured | classify | src/lib.rs |"));
-        card.gates[0].pass = true;
-        card.gates[0].enforced = true;
-        card.gates[0].reason = None;
+        card.engines_run.push("coverage".into());
         let md = to_markdown(&card);
         assert!(md.contains("| 132 | 11 | 0% | classify | src/lib.rs |"));
         assert!(!md.contains("not measured"));
+    }
+
+    #[test]
+    fn markdown_keeps_measured_coverage_when_some_functions_lack_a_record() {
+        let mut card = Scorecard::skeleton(".", 30);
+        card.engines_run.push("coverage".into());
+        card.gates.push(Gate {
+            id: "crap".into(),
+            pass: false,
+            enforced: false,
+            reason: Some("some functions have no coverage record and were not scored".into()),
+        });
+        card.crap = CrapSection {
+            threshold: 30,
+            worst: vec![CrapFunction {
+                symbol: "classify".into(),
+                file: "src/lib.rs".into(),
+                cc: 11,
+                coverage: 0.4,
+                crap: 40.0,
+            }],
+        };
+        let md = to_markdown(&card);
+        assert!(md.contains("| 40 | 11 | 40% | classify | src/lib.rs |"));
+        assert!(!md.contains("not measured"));
+        assert!(!md.contains("CRAP is not scored"));
     }
 
     #[test]

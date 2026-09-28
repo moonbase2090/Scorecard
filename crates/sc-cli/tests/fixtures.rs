@@ -322,7 +322,7 @@ fn partial_python_coverage_keeps_measured_crap() {
         assert_eq!(card["metrics"]["crap_over_threshold"], 0);
         let reason = crap["reason"].as_str().unwrap_or("");
         assert!(
-            reason.contains("CRAP was not scored") || reason.contains("not measured"),
+            reason.contains("no coverage record") || reason.contains("not measured"),
             "reason={reason}\n{card}"
         );
     }

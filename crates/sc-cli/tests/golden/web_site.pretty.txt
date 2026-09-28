@@ -6,7 +6,7 @@ gates
   [ok]  html             enforced
   [ok]  a11y             advisory
   [ok]  links            advisory
-  [xx]  crap             advisory  coverage was not measured for all analyzed f~
+  [xx]  crap             advisory  some functions have no coverage record and w~
   [ok]  secrets          enforced
 
 scores
@@ -17,7 +17,7 @@ scores
   a11y             1.00  [##########]
 
 worst crap  threshold 30
-  coverage not measured: CRAP is not scored for this run
+  coverage not measured: CRAP assumes 0% coverage (upper bound)
   (none)
 
 findings

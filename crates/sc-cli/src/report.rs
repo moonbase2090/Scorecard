@@ -422,24 +422,21 @@ fn scores_metrics(out: &mut String, card: &Scorecard) {
     out.push_str("</table></div>\n<div class=\"tiles\">");
     tile(out, card.metrics.loc_changed.to_string(), "loc changed");
     tile(out, card.metrics.files_changed.to_string(), "files changed");
-    let measured = coverage_measured(card);
-    if measured {
+    if coverage_measured(card) {
         tile(
             out,
             format!("{:.0}%", card.metrics.coverage_changed * 100.0),
             "coverage",
         );
-        tile(out, fmt_num(card.metrics.crap_max), "crap max");
-        tile(
-            out,
-            card.metrics.crap_over_threshold.to_string(),
-            "over threshold",
-        );
     } else {
         tile(out, "—".into(), "coverage not measured");
-        tile(out, "—".into(), "crap not scored");
-        tile(out, "—".into(), "over threshold (unscored)");
     }
+    tile(out, fmt_num(card.metrics.crap_max), "crap max");
+    tile(
+        out,
+        card.metrics.crap_over_threshold.to_string(),
+        "over threshold",
+    );
     tile(
         out,
         card.metrics.undeclared_dependencies.to_string(),
@@ -490,23 +487,16 @@ fn gates(out: &mut String, card: &Scorecard) {
     out.push_str("</table></div>\n");
 }
 
-/// CRAP is scored only when every analyzed function has measured coverage.
-/// When the crap gate reports "not scored", renderers must show "not measured".
+/// Coverage counts as measured only when the coverage engine ran. Incomplete
+/// coverage still leaves measured rows scored; only a missing coverage run
+/// means every CRAP number assumes 0%.
 pub(crate) fn coverage_measured(card: &Scorecard) -> bool {
-    !card.gates.iter().any(|gate| {
-        gate.id == "crap"
-            && !gate.enforced
-            && !gate.pass
-            && gate
-                .reason
-                .as_deref()
-                .is_some_and(|reason| reason.contains("CRAP was not scored"))
-    })
+    card.engines_run.iter().any(|engine| engine == "coverage")
 }
 
 /// One sentence for every renderer when coverage was not measured.
 pub(crate) const COVERAGE_NOT_MEASURED: &str =
-    "Coverage was not measured for all analyzed functions, so CRAP is not scored.";
+    "Coverage was not measured, so CRAP assumes 0% coverage. These numbers are an upper bound.";
 
 /// A diff run only scores changed functions, so it has no tree-wide CRAP
 /// count. Say what the number covers and where the tree total lives
@@ -1210,23 +1200,39 @@ mod tests {
     #[test]
     fn html_says_coverage_not_measured_instead_of_zero() {
         let mut c = card();
-        c.gates[0].enforced = false;
-        c.gates[0].reason = Some(
-            "coverage was not measured for all analyzed functions, so CRAP was not scored".into(),
-        );
+        c.engines_run.retain(|engine| engine != "coverage");
         let html = to_html(&c);
         assert!(html.contains("<b>—</b><span>coverage not measured</span>"));
-        assert!(html.contains("<b>—</b><span>crap not scored</span>"));
-        assert!(html.contains("<b>—</b><span>over threshold (unscored)</span>"));
         assert!(html.contains("<span class=\"cov\">not measured</span>"));
-        assert!(html.contains("CRAP is not scored"));
+        assert!(html.contains("CRAP assumes 0% coverage"));
         assert!(!html.contains("<span>coverage</span>"));
-        assert!(!html.contains("<b>0</b><span>over threshold</span>"));
+        assert!(html.contains("<span>crap max</span>"));
+        assert!(html.contains("<span>over threshold</span>"));
+    }
+
+    #[test]
+    fn html_keeps_measured_coverage_when_some_functions_lack_a_record() {
+        let mut c = card();
+        if !c.engines_run.iter().any(|engine| engine == "coverage") {
+            c.engines_run.push("coverage".into());
+        }
+        c.gates[0].enforced = false;
+        c.gates[0].pass = false;
+        c.gates[0].reason =
+            Some("some functions have no coverage record and were not scored".into());
+        c.crap.worst[0].coverage = 0.4;
+        c.metrics.coverage_changed = 0.4;
+        let html = to_html(&c);
+        assert!(html.contains("<b>40%</b><span>coverage</span>"));
+        assert!(html.contains("<span class=\"cov\">40%</span>"));
+        assert!(!html.contains("not measured"));
+        assert!(!html.contains("CRAP is not scored"));
     }
 
     #[test]
     fn html_shows_measured_coverage_as_a_number() {
         let mut c = card();
+        c.engines_run.push("coverage".into());
         c.crap.worst[0].coverage = 0.5;
         c.metrics.coverage_changed = 0.5;
         let html = to_html(&c);
