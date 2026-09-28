@@ -459,6 +459,8 @@ fn analyze_unsupported(
             crate::facts::is_workspace_root(&request.root),
         ))
     };
+    let started = crate::pack_cov::run_start();
+    crate::pack_cov::clear(&request.root);
     let tools = crate::toolchain::run(
         pack,
         &request.root,
@@ -524,7 +526,7 @@ fn analyze_unsupported(
             .ok()
             .map(|text| crate::poly_cc::go_coverage(&text, &functions, &known))
     } else {
-        crate::pack_cov::load(pack.as_str(), &request.root, &functions)
+        crate::pack_cov::load(pack.as_str(), &request.root, &functions, started)
     };
     let crap = crate::crap::evaluate(
         &functions,
