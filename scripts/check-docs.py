@@ -4,7 +4,8 @@
 1. Runs every fenced block whose info string starts with ``bash doctest`` in
    README.md and docs/**/*.md, each in a fresh git repo copied from testdata.
 2. Checks that the reference names every `sc analyze` flag, config key, gate,
-   and rule id the code defines.
+   and rule id the code defines, and that every `sc` command and flag the docs
+   show in code exists in `sc --help`.
 3. Checks that release links and version pins use the Cargo.toml version.
 4. Checks that relative Markdown links resolve.
 
@@ -120,9 +121,66 @@ def run_blocks(sc: Path, network: bool) -> list[str]:
     return errors
 
 
-def help_flags(sc: Path) -> set[str]:
-    out = subprocess.run([str(sc), "analyze", "--help"], capture_output=True, text=True, check=True).stdout
-    return set(re.findall(r"(--[a-z][a-z-]+)", out)) - {"--help"}
+def sc_options(sc: Path) -> dict[str, set[str]]:
+    """Options of `sc` (key "") and of each subcommand, from their --help."""
+
+    def help_text(*args: str) -> str:
+        return subprocess.run([str(sc), *args, "--help"], capture_output=True, text=True, check=True).stdout
+
+    def options(text: str) -> set[str]:
+        return set(re.findall(r"(?<![\w-])(--[a-z][a-z-]+|-[a-zA-Z])\b", text))
+
+    top = help_text()
+    listed = top.split("Commands:", 1)[1].split("Options:", 1)[0]
+    result = {"": options(top)}
+    for command in re.findall(r"^  ([a-z][a-z-]*) ", listed, re.M):
+        # clap's own `help` subcommand has no --help of its own.
+        result[command] = set() if command == "help" else options(help_text(command))
+    return result
+
+
+# `sc` in command position: line start (after `$`, `exec`, or `sudo`) or after | ; & (
+INVOCATION = re.compile(
+    r"(?:^\s*(?:\$\s+)?(?:(?:exec|sudo)\s+)?|[|;&(]\s*)(?:\./)?sc(?=\s|$)((?:[ \t]+[^\s|;&>#`'\"]+)*)"
+)
+
+
+def code_lines(text: str):
+    """(line number, text) for fenced-block lines and inline code spans."""
+    fenced = False
+    for number, line in enumerate(text.splitlines(), 1):
+        if line.startswith("```"):
+            fenced = not fenced
+        elif fenced:
+            yield number, line
+        else:
+            for span in re.findall(r"`([^`]+)`", line):
+                yield number, span
+
+
+def check_invocations(options: dict[str, set[str]]) -> list[str]:
+    errors = []
+    for path in doc_files():
+        rel = path.relative_to(ROOT)
+        for number, line in code_lines(path.read_text()):
+            for match in INVOCATION.finditer(line):
+                words = match.group(1).split()
+                if not words or words[0][0].isdigit():
+                    continue  # bare `sc`, or a version line such as `sc 0.1.3`
+                command = "" if words[0].startswith("-") else words[0]
+                label = f"sc {command}".strip()
+                where = f"{rel}:{number}: `sc{match.group(1)}`"
+                if command not in options:
+                    errors.append(f"{where}: `{label}` is not an sc command. Check `sc --help` and update this line.")
+                    continue
+                for word in words:
+                    flag = word.split("=", 1)[0]
+                    if flag.startswith("-") and flag not in options[command] | {"--help", "-h"}:
+                        errors.append(
+                            f"{where}: `{flag}` is not an option of `{label}`."
+                            f" Check `{label} --help` and update this line."
+                        )
+    return errors
 
 
 def config_keys() -> set[str]:
@@ -158,7 +216,7 @@ def check_reference(sc: Path) -> list[str]:
     errors = []
     ref = ROOT / "docs/reference"
     cli = (ref / "cli.md").read_text()
-    for flag in sorted(help_flags(sc)):
+    for flag in sorted(sc_options(sc)["analyze"] - {"--help", "-h"}):
         if f"`{flag}" not in cli:
             errors.append(f"docs/reference/cli.md: missing flag {flag}")
     config = (ref / "config.md").read_text()
@@ -214,6 +272,7 @@ def main() -> int:
     parser.add_argument("--network", action="store_true")
     args = parser.parse_args()
     errors = check_versions() + check_links() + check_reference(args.sc)
+    errors += check_invocations(sc_options(args.sc))
     errors += run_blocks(args.sc, args.network)
     if errors:
         print("\n".join(errors), file=sys.stderr)
