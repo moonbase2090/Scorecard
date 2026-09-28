@@ -39,36 +39,7 @@ Node checks syntax with `node --check` and runs `npm test` when a test script ex
 
 On a Rust tree, `sc` runs `cargo check`, `cargo test`, complexity, `cargo llvm-cov`, CRAP, hallucinated imports, and a small secrets scan. `--diff` and `--paths` narrow the CRAP gate. Mutation, the spec check, and the LLM review are off unless you ask for them. A Cargo workspace is scored from each member's `src` directory, found with `cargo metadata`. A top-level `src` is included when it exists.
 
-## Flags
-
-```text
-sc analyze [PATH] [--diff [BASE]] [--diff-head REV] [--paths FILE] [--spec PATH]
-            [--format json|pretty|md|sarif|html|all] [--out PATH] [--fail-on LIST]
-            [--pack PACK] [--mutation off|diff|full] [--llm off|on] [--intent TEXT]
-            [--budget-seconds N] [--config PATH]
-```
-
-| Flag | Default |
-|---|---|
-| `PATH` | `.` |
-| `--format` | `pretty` on a terminal, otherwise `json`. Also `md`, `sarif`, `html`, `all`. |
-| `--fail-on` | `types,tests,crap,secrets,lint` |
-| `--pack` | detect one pack. `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, `web`, or `command` |
-| `--mutation` | `off` |
-| `--llm` | `off`. `on` uses local Ollama unless `[llm] backend` is `cursor` or `openai-compatible` |
-| `--intent` | none |
-| `--budget-seconds` | `120` |
-| `--config` | `analyzer.toml` in the tree, then `~/.config/sc/analyzer.toml` |
-
-`--format pretty` is the terminal layout. It is the default when stdout is a terminal. A pipe or a file stays JSON unless `--format` is set. `NO_COLOR` turns color off. `CLICOLOR_FORCE=1` turns it on. `--format all` prints JSON, then Markdown, on stdout. With `--out`, JSON, Markdown, SARIF, and HTML are written as sibling `.json`, `.md`, `.sarif`, and `.html` files. `--format sarif` writes SARIF to stdout and to `--out`. `--format html` writes a self-contained visual report (no network requests) to stdout and to `--out`.
-
-| Exit | Meaning |
-|---|---|
-| 0 | Configured gates passed |
-| 1 | A configured gate failed |
-| 2 | Analyzer error (missing path, missing required toolchain, timeout on compile or tests) |
-
-Skipping coverage, mutation, or the LLM does not by itself exit 2.
+Flags, output formats, and exit status are in the [CLI reference](reference/cli.md).
 
 ## Fixtures
 

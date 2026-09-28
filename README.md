@@ -4,60 +4,25 @@
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-blue.svg)](LICENSE)
 [![MSRV 1.85](https://img.shields.io/badge/MSRV-1.85-blue.svg)](https://github.com/moonbase2090/Scorecard/blob/main/Cargo.toml)
 
-`sc` checks that a project type-checks, its tests pass, coverage and [CRAP](docs/crap.md) stay in bounds, secrets are absent, and the linter is clean. It also reports undeclared dependencies. Ten language packs are built in. The report is for AI coding agents and for CI. The project site is [scorecardcli.com](https://scorecardcli.com).
-
-## Install
-
-Release [v0.1.0](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.0).
-
-macOS, Apple silicon and Intel in one disk image: [sc-v0.1.0-universal-apple-darwin.dmg](https://github.com/moonbase2090/Scorecard/releases/download/v0.1.0/sc-v0.1.0-universal-apple-darwin.dmg). Double-click `Install Scorecard.pkg` inside it, or download the package directly: [sc-v0.1.0-macos.pkg](https://github.com/moonbase2090/Scorecard/releases/download/v0.1.0/sc-v0.1.0-macos.pkg). Both install `sc` and `sc-mcp` to `/usr/local/bin`.
-
-Each `.tar.gz` contains `sc`, `sc-mcp`, `LICENSE`, and `README.md` at the top of the archive.
-
-Apple silicon:
-
-```bash
-curl -fsSLO https://github.com/moonbase2090/Scorecard/releases/download/v0.1.0/sc-v0.1.0-aarch64-apple-darwin.tar.gz
-tar -xzf sc-v0.1.0-aarch64-apple-darwin.tar.gz
-./sc --version
-```
-
-Intel Mac: `sc-v0.1.0-x86_64-apple-darwin.tar.gz`. Linux: `sc-v0.1.0-aarch64-unknown-linux-gnu.tar.gz` and `sc-v0.1.0-x86_64-unknown-linux-gnu.tar.gz`. Same `curl` and `tar` steps.
-
-Check the published sums. `SHA256SUMS` lists every asset, so tell the checker to skip the ones you didn't download. Run this in the same directory, keeping the original file name. On macOS:
-
-```bash
-curl -fsSL -O https://github.com/moonbase2090/Scorecard/releases/download/v0.1.0/SHA256SUMS
-shasum -a 256 -c --ignore-missing SHA256SUMS
-```
-
-On Linux, `sha256sum -c --ignore-missing SHA256SUMS`. Each file you downloaded should print `OK`.
-
-### From source
-
-Rust 1.85 or newer.
-
-```bash
-cargo build --release -p sc-cli -p sc-mcp
-```
-
-The binaries are `target/release/sc` and `target/release/sc-mcp`. `cargo install --path crates/sc-cli` and `cargo install --path crates/sc-mcp` put them on `PATH`.
-
-Rust coverage also needs `rustup component add llvm-tools` and `cargo install cargo-llvm-cov`. On older toolchains the component is named `llvm-tools-preview`. If either tool is missing, `sc` still runs. Function coverage is treated as 0, a `coverage.missing` warning is recorded, and CRAP is still computed. The process exits 2 only when a required gate (`types` or `tests`) cannot run.
+`sc` is a local code-quality gate. In one run it checks that a project builds, its tests pass, complex code is covered by tests ([CRAP](docs/crap.md)), no secrets are committed, the linter is clean, and every import is a declared dependency. It prints a verdict for people and a JSON scorecard for agents and CI. Ten language packs are built in. Project site: [scorecardcli.com](https://scorecardcli.com).
 
 ## Quickstart
 
-```bash
-sc analyze .
+Download `sc` for your platform and run it on a project:
+
+```bash doctest network
+VERSION=v0.1.3
+case "$(uname -s)-$(uname -m)" in
+  Darwin-arm64) TARGET=aarch64-apple-darwin ;;
+  Darwin-x86_64) TARGET=x86_64-apple-darwin ;;
+  Linux-aarch64) TARGET=aarch64-unknown-linux-gnu ;;
+  Linux-x86_64) TARGET=x86_64-unknown-linux-gnu ;;
+esac
+curl -fsSL "https://github.com/moonbase2090/Scorecard/releases/download/$VERSION/sc-$VERSION-$TARGET.tar.gz" | tar -xz sc
+./sc analyze .
 ```
 
-Exit 0 means the configured gates passed. Exit 1 means a gate failed. Exit 2 means the analyzer itself could not run.
-
-To configure it, copy `analyzer.toml.example` to `analyzer.toml` at the repo root. `sc` reads `analyzer.toml` from the root of the directory it analyzes (the path given to `sc analyze`, usually the repo root), then from `~/.config/sc/analyzer.toml`. It does not look in parent or sub-directories. `--config PATH` overrides both. See [Config](docs/config.md).
-
-## Sample
-
-`sc analyze testdata/good_crate --format pretty` on a terminal. Color is off in this copy. The same run and `testdata/failing_test` are in [examples/terminal](examples/terminal/).
+In a terminal the report looks like this (from `testdata/good_crate`):
 
 ```text
 sc 0.1.3  testdata/good_crate  rust  5ac851c clean  scope tree
@@ -91,80 +56,56 @@ duration: 0.7s
 exit 0: gates passed
 ```
 
-## HTML report
+Exit status: `0` the enforced gates passed, `1` an enforced gate failed, `2` `sc` could not run. [Reading the report](docs/report.md) explains every section.
 
-`sc analyze testdata/good_crate --format html --out scorecard.html` writes one self-contained page. The flow strip is the row under the header: scope, pack, engines, gates, and verdict.
+Next:
 
-![HTML report for testdata/good_crate, including the flow strip](docs/images/good-crate-html-report.png)
+- Put `sc` on your `PATH`: `sudo mv sc /usr/local/bin/`, or see [Install](#install).
+- Add `.sc/` to `.gitignore`. `sc` keeps its last report and caches there.
+- Run `sc setup` so coding agents on this machine can use `sc` ([agents](docs/how-to/agents.md)).
 
-The same command with `--format all --out scorecard.html` also writes `scorecard.json`, `scorecard.md`, and `scorecard.sarif`. Details are in [HTML report](docs/html-report.md).
+## Docs
 
-## Languages
-
-| Pack | Marker |
+| I want to | Read |
 |---|---|
-| Rust | `Cargo.toml` |
-| Node | `package.json` |
-| Python | a Python manifest |
-| Bash | a top-level, `scripts/`, or `bin/` shell file, and no other marker |
-| Go | `go.mod` |
-| Java | `pom.xml` or Gradle |
-| C# | a root `.csproj` or `.sln` |
-| PHP | `composer.json` |
-| C++ | `CMakeLists.txt` |
+| Understand a report | [Reading the report](docs/report.md) |
+| Fix a failing or skipped check | [Troubleshooting](docs/troubleshooting.md) |
+| Gate pull requests in CI | [CI](docs/how-to/ci.md) |
+| Check changes before each commit | [Pre-commit](docs/how-to/pre-commit.md) |
+| Let Claude Code, Cursor, or another agent run `sc` | [Agents and MCP](docs/how-to/agents.md) |
+| Add an LLM spec review (Ollama, OpenRouter, Cursor) | [LLM providers](docs/how-to/llm.md) |
+| Change gates, thresholds, or excluded paths | [Configure](docs/how-to/config.md) |
+| Look up a flag, config key, gate, or rule id | [CLI](docs/reference/cli.md), [config](docs/reference/config.md), [gates](docs/reference/gates.md), [rules](docs/reference/rules.md) |
+| Know what runs for my language | [Packs](docs/packs.md) |
+| Read common questions | [FAQ](docs/faq.md) |
 
-One pack per tree. Two markers and no override is an error. Details are in [packs](docs/packs.md).
+## Install
 
-## MCP
+Release [v0.1.3](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.3). Each `.tar.gz` holds `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md`.
 
-`sc-mcp` speaks MCP over stdio. It serves `analyze_paths`, `analyze_diff`, `explain`, and `list_findings`. `explain` and `list_findings` read `.sc/last-scorecard.json`.
+| Platform | Asset |
+|---|---|
+| macOS, Apple silicon | `sc-v0.1.3-aarch64-apple-darwin.tar.gz` |
+| macOS, Intel | `sc-v0.1.3-x86_64-apple-darwin.tar.gz` |
+| macOS installer | `sc-v0.1.3-macos.pkg`, or `sc-v0.1.3-universal-apple-darwin.dmg`. Installs `sc` and `sc-mcp` to `/usr/local/bin` |
+| Linux, arm64 | `sc-v0.1.3-aarch64-unknown-linux-gnu.tar.gz` |
+| Linux, x86_64 | `sc-v0.1.3-x86_64-unknown-linux-gnu.tar.gz` |
 
-Claude Code, stdio, verified with `claude mcp add --help`:
+To check a download, fetch `SHA256SUMS` into the same directory and verify only the files you have:
 
 ```bash
-claude mcp add sc -- sc-mcp
+curl -fsSLO https://github.com/moonbase2090/Scorecard/releases/download/v0.1.3/SHA256SUMS
+shasum -a 256 -c --ignore-missing SHA256SUMS   # Linux: sha256sum -c --ignore-missing SHA256SUMS
 ```
 
-Cursor reads `~/.cursor/mcp.json`. `sc setup` writes this shape, with the absolute path of the binary:
+From source (Rust 1.85 or newer), in a clone of this repository:
 
-```json
-{
-  "mcpServers": {
-    "sc": {"command": "sc-mcp", "args": []}
-  }
-}
+```bash
+cargo install --locked --path crates/sc-cli
+cargo install --locked --path crates/sc-mcp
 ```
 
-More is in [MCP](docs/mcp.md).
-
-## GitHub Action
-
-```yaml
-- uses: moonbase2090/Scorecard/action@v0.1.0
-  with:
-    fail-on: types,tests,crap,secrets,lint
-    format: sarif
-```
-
-`moonbase2090/Scorecard/action@v0.1.0` is the `action/action.yml` on the `v0.1.0` tag. `sca` is advisory and is not in the default `fail-on` list. With `format: sarif` or `all`, the SARIF report is uploaded.
-
-| Input | Default | Notes |
-|---|---|---|
-| `spec` | `""` | Path to a spec or task file |
-| `fail-on` | `types,tests,crap,secrets,lint` | Comma-separated gates that fail the process |
-| `mutation` | `off` | `off`, `diff`, or `full` |
-| `format` | `sarif` | `json`, `md`, `sarif`, `html`, or `all` |
-| `diff` | `""` | Git base ref; empty skips `--diff` |
-| `build-from-source` | `false` | Build `sc` from this checkout instead of installing a release |
-
-## More
-
-- [Examples](examples/README.md)
-- [Packs](docs/packs.md)
-- [Config](docs/config.md)
-- [MCP](docs/mcp.md)
-- [CRAP](docs/crap.md)
-- [HTML report](docs/html-report.md)
+Rust coverage needs `rustup component add llvm-tools` and `cargo install cargo-llvm-cov`. Without them `sc` still runs and reports coverage as not measured. Other packs need their own tools; see [packs](docs/packs.md).
 
 ## License
 
