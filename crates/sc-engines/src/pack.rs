@@ -179,17 +179,44 @@ pub fn text_secrets(root: &Path, exclude: &[String]) -> Vec<sc_core::Finding> {
     );
     let mut findings = Vec::new();
     for path in files {
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            continue;
-        };
         let rel = path
             .strip_prefix(root)
             .unwrap_or(&path)
             .to_string_lossy()
             .replace('\\', "/");
+        // `read_to_string` skips the whole file on one non-UTF-8 byte, which
+        // hides every secret in it. Scan the bytes we can read.
+        let bytes = match std::fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                findings.push(unreadable(&rel, &err));
+                continue;
+            }
+        };
+        let text = String::from_utf8_lossy(&bytes);
         findings.extend(crate::secrets::secrets_in_text(&text, &rel));
     }
     findings
+}
+
+fn unreadable(rel: &str, err: &std::io::Error) -> sc_core::Finding {
+    sc_core::Finding {
+        id: format!("secrets:unreadable:{rel}"),
+        rule: "secrets.unreadable".into(),
+        engine: "secrets".into(),
+        severity: "error".into(),
+        file: rel.to_string(),
+        span: None,
+        symbol: None,
+        message: format!(
+            "could not read {rel} ({err}), so the secrets scan does not pass. Restore read access, or exclude it with `exclude = [\"{rel}\"]` under `[scope]` in analyzer.toml."
+        ),
+        evidence: serde_json::json!({ "error": err.to_string() }),
+        suggested_action: Some(
+            "Restore read access, or add the path to scope.exclude in analyzer.toml".into(),
+        ),
+        disposition: String::new(),
+    }
 }
 
 fn collect_text(
@@ -652,6 +679,24 @@ mod tests {
         );
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn a_non_utf8_byte_does_not_hide_a_secret() {
+        let key = format!("AKIA{}", "IOSFODNN7EXAMPLE");
+        let root = temp("secrets-utf8");
+        let mut bytes = key.into_bytes();
+        bytes.push(0xff);
+        bytes.extend(b"\n");
+        fs::write(root.join("leak.py"), bytes).unwrap();
+        let findings = text_secrets(&root, &[]);
+        assert!(
+            findings.iter().any(
+                |finding| finding.file == "leak.py" && finding.rule == "secrets.aws_access_key"
+            ),
+            "{findings:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
