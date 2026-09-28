@@ -18,9 +18,6 @@ pub fn package_name(text: &str) -> Option<String> {
     None
 }
 
-/// Dependency and package names from every `Cargo.toml` under `root`.
-/// Member crates and `[workspace.dependencies]` count. `target` and dot
-/// directories are skipped.
 /// Names this source file may import: its own package, that package's
 /// dependencies, and `[workspace.dependencies]`. Another crate's dependencies
 /// do not count.
