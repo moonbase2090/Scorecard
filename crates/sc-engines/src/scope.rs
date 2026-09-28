@@ -7,7 +7,7 @@ use std::time::Duration;
 use sc_graph::FunctionInfo;
 
 use crate::command::{run_cmd, CommandError};
-use crate::facts::{analyze_rels, analyze_tree, AnalyzedFile};
+use crate::facts::{analyze_rels, AnalyzedFile};
 
 #[derive(Debug, Clone)]
 pub struct Selection {
@@ -21,10 +21,11 @@ pub struct Selection {
     pub files_changed: u64,
     /// Resolved diff base, only in diff mode.
     pub base: Option<String>,
+    pub workspace_root: bool,
 }
 
 pub fn empty_selection() -> Selection {
-    tree_like("tree", Vec::new())
+    tree_like("tree", Vec::new(), false)
 }
 
 pub fn select(
@@ -38,16 +39,26 @@ pub fn select(
         return Err("pass either --diff or --paths, not both".into());
     }
     if let Some(base) = diff_base {
-        return select_diff(root, exclude, base, diff_head);
+        return select_diff(
+            root,
+            exclude,
+            base,
+            diff_head,
+            crate::facts::is_workspace_root(root),
+        );
     }
     if !path_list.is_empty() {
-        return Ok(select_paths(root, path_list));
+        return Ok(select_paths(
+            root,
+            path_list,
+            crate::facts::is_workspace_root(root),
+        ));
     }
-    let files = analyze_tree(root, exclude);
-    Ok(tree_like("tree", files))
+    let (files, workspace_root) = crate::facts::analyze_tree_with_workspace(root, exclude);
+    Ok(tree_like("tree", files, workspace_root))
 }
 
-fn tree_like(mode: &str, files: Vec<AnalyzedFile>) -> Selection {
+fn tree_like(mode: &str, files: Vec<AnalyzedFile>, workspace_root: bool) -> Selection {
     let crap_functions = files
         .iter()
         .flat_map(|file| file.functions.clone())
@@ -65,16 +76,17 @@ fn tree_like(mode: &str, files: Vec<AnalyzedFile>) -> Selection {
         loc_changed,
         files_changed,
         base: None,
+        workspace_root,
     }
 }
 
-fn select_paths(root: &Path, path_list: &[String]) -> Selection {
+fn select_paths(root: &Path, path_list: &[String], workspace_root: bool) -> Selection {
     let rels: Vec<String> = path_list
         .iter()
         .map(|path| normalize_rel(root, path))
         .filter(|rel| rel.ends_with(".rs"))
         .collect();
-    tree_like("paths", analyze_rels(root, &rels))
+    tree_like("paths", analyze_rels(root, &rels), workspace_root)
 }
 
 fn select_diff(
@@ -82,6 +94,7 @@ fn select_diff(
     exclude: &[String],
     base: &str,
     head: Option<&str>,
+    workspace_root: bool,
 ) -> Result<Selection, String> {
     let base = resolve_base(root, base)?;
     let deltas = diff_files(root, &base, head)?;
@@ -132,6 +145,7 @@ fn select_diff(
         loc_changed,
         files_changed,
         base: Some(base),
+        workspace_root,
     })
 }
 

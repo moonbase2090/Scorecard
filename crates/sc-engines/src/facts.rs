@@ -25,9 +25,19 @@ pub struct AnalyzedFile {
     pub local_names: Vec<String>,
 }
 
-pub fn analyze_tree(root: &Path, exclude: &[String]) -> Vec<AnalyzedFile> {
+/// Analyze project sources and return whether `root` is the Cargo workspace root.
+pub(crate) fn analyze_tree_with_workspace(
+    root: &Path,
+    exclude: &[String],
+) -> (Vec<AnalyzedFile>, bool) {
+    let metadata = cargo_metadata(root);
+    let workspace_root = metadata
+        .as_ref()
+        .is_some_and(|meta| metadata_is_workspace_root(root, meta));
     let mut dirs = vec![root.join("src")];
-    dirs.extend(member_src_dirs(root));
+    if workspace_root {
+        dirs.extend(member_src_dirs(metadata.as_ref()));
+    }
     let paths = source_files_under(root, &dirs, exclude);
     let rels: Vec<String> = paths
         .iter()
@@ -38,7 +48,7 @@ pub fn analyze_tree(root: &Path, exclude: &[String]) -> Vec<AnalyzedFile> {
                 .replace('\\', "/")
         })
         .collect();
-    analyze_rels(root, &rels)
+    (analyze_rels(root, &rels), workspace_root)
 }
 
 pub fn analyze_rels(root: &Path, rels: &[String]) -> Vec<AnalyzedFile> {
@@ -68,28 +78,8 @@ pub fn analyze_rels(root: &Path, rels: &[String]) -> Vec<AnalyzedFile> {
     out
 }
 
-/// `src` directories of Cargo workspace members, from `cargo metadata`.
-///
-/// A missing manifest or a failed metadata call leaves discovery on `root/src`.
-fn member_src_dirs(root: &Path) -> Vec<PathBuf> {
-    if !root.join("Cargo.toml").is_file() {
-        return Vec::new();
-    }
-    let mut cmd = crate::command::cargo_command(root);
-    cmd.args([
-        "metadata",
-        "--no-deps",
-        "--offline",
-        "--format-version",
-        "1",
-    ]);
-    let Ok(captured) = crate::command::run_cmd(&mut cmd, std::time::Duration::from_secs(60)) else {
-        return Vec::new();
-    };
-    if !captured.status.success() {
-        return Vec::new();
-    }
-    let Ok(meta) = serde_json::from_str::<CargoMetadata>(&captured.stdout) else {
+fn member_src_dirs(meta: Option<&CargoMetadata>) -> Vec<PathBuf> {
+    let Some(meta) = meta else {
         return Vec::new();
     };
     let members: std::collections::BTreeSet<&str> =
@@ -110,10 +100,45 @@ fn member_src_dirs(root: &Path) -> Vec<PathBuf> {
     dirs
 }
 
+pub(crate) fn is_workspace_root(root: &Path) -> bool {
+    let Some(meta) = cargo_metadata(root) else {
+        return false;
+    };
+    metadata_is_workspace_root(root, &meta)
+}
+
+fn metadata_is_workspace_root(root: &Path, meta: &CargoMetadata) -> bool {
+    let workspace_root = PathBuf::from(&meta.workspace_root);
+    match (root.canonicalize(), workspace_root.canonicalize()) {
+        (Ok(root), Ok(workspace_root)) => root == workspace_root,
+        _ => false,
+    }
+}
+
+fn cargo_metadata(root: &Path) -> Option<CargoMetadata> {
+    if !root.join("Cargo.toml").is_file() {
+        return None;
+    }
+    let mut cmd = crate::command::cargo_command(root);
+    cmd.args([
+        "metadata",
+        "--no-deps",
+        "--offline",
+        "--format-version",
+        "1",
+    ]);
+    let captured = crate::command::run_cmd(&mut cmd, std::time::Duration::from_secs(60)).ok()?;
+    if !captured.status.success() {
+        return None;
+    }
+    serde_json::from_str(&captured.stdout).ok()
+}
+
 #[derive(Deserialize)]
 struct CargoMetadata {
     packages: Vec<CargoPackage>,
     workspace_members: Vec<String>,
+    workspace_root: String,
 }
 
 #[derive(Deserialize)]
@@ -242,14 +267,14 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("src")).unwrap();
         fs::write(dir.join("src/lib.rs"), "pub fn cached() -> i32 { 1 }\n").unwrap();
-        let first = analyze_tree(&dir, &[]);
+        let first = analyze_tree_with_workspace(&dir, &[]).0;
         assert_eq!(first[0].functions[0].symbol, "cached");
         fs::write(
             dir.join(".sc/cache/parse-v2.json"),
             fs::read_to_string(dir.join(".sc/cache/parse-v2.json")).unwrap(),
         )
         .unwrap();
-        let second = analyze_tree(&dir, &[]);
+        let second = analyze_tree_with_workspace(&dir, &[]).0;
         assert_eq!(second[0].functions[0].symbol, "cached");
         let _ = fs::remove_dir_all(&dir);
     }
@@ -260,7 +285,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("sc-ws-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         copy_fixture(&src, &dir);
-        let files = analyze_tree(&dir, &[]);
+        let files = analyze_tree_with_workspace(&dir, &[]).0;
         let rels: Vec<&str> = files.iter().map(|file| file.rel.as_str()).collect();
         assert!(
             rels.iter()

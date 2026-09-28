@@ -108,6 +108,8 @@ cargo install --locked --path crates/sc-mcp
 
 Rust coverage needs `rustup component add llvm-tools` and `cargo install cargo-llvm-cov`. Without them `sc` still runs and reports coverage as not measured. Other packs need their own tools; see [packs](docs/packs.md).
 
+For a Cargo workspace, analyze the root to check every member. Analyze a member directory to check only that package and avoid sibling crates.
+
 ## License
 
 Scorecard is licensed under the [Mozilla Public License 2.0](LICENSE). You can use it in commercial products. If you distribute modified MPL-covered files, you must make their source available under MPL-2.0.

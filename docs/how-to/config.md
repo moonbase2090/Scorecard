@@ -23,6 +23,8 @@ exclude = ["target/**", "generated/**", "vendor/**"]
 lint = "cargo clippy --workspace --all-targets -- -D warnings"
 ```
 
+At a workspace root, this checks every member. If you analyze a member directory, Scorecard removes the workspace scope so sibling crates do not affect its lint result.
+
 Check that a config is read:
 
 ```bash doctest
