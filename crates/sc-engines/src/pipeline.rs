@@ -446,6 +446,12 @@ fn mode_gate(id: &str, pass: bool, enforced: bool, reason: &str) -> Gate {
     }
 }
 
+/// Coverage may only blame the tests gate when the test command actually ran.
+fn tests_ran_and_failed(ran: &[String], gates: &[Gate]) -> bool {
+    ran.iter().any(|engine| engine == "tests")
+        && gates.iter().any(|gate| gate.id == "tests" && !gate.pass)
+}
+
 fn analyze_unsupported(
     request: AnalyzeRequest,
     pack: crate::pack::PackId,
@@ -538,16 +544,43 @@ fn analyze_unsupported(
         request.config.gates.new_fn_untested_cc,
         |_| true,
     );
+    let tests_failed = tests_ran_and_failed(&ran, &gates);
+    let test_exit = runs
+        .iter()
+        .rev()
+        .find(|run| run.engine == "tests" && run.exit_code != Some(0))
+        .and_then(|run| run.exit_code);
+    let tests_reason = gates
+        .iter()
+        .find(|gate| gate.id == "tests")
+        .and_then(|gate| gate.reason.as_deref())
+        .unwrap_or("");
     if !crap.coverage_complete {
-        let unmatched = coverage
-            .as_ref()
-            .map(|data| crate::crap::unmatched_count(&functions, data))
-            .unwrap_or(functions.len() as u64);
-        if unmatched > 0 {
+        if coverage.is_none() && tests_failed {
+            let reason = match test_exit {
+                Some(code) => {
+                    format!("coverage skipped: tests gate failed (test command exit code {code})")
+                }
+                None if !tests_reason.is_empty() => {
+                    format!("coverage skipped: tests gate failed ({tests_reason})")
+                }
+                None => "coverage skipped: tests gate failed (test command was not run)".into(),
+            };
             findings.push(crate::coverage::missing_finding(
-                &format!("coverage data is missing for {unmatched} analyzed function(s)"),
-                coverage_fix_hint(pack),
+                &reason,
+                "Fix the failing tests and re-run to collect coverage",
             ));
+        } else {
+            let unmatched = coverage
+                .as_ref()
+                .map(|data| crate::crap::unmatched_count(&functions, data))
+                .unwrap_or(functions.len() as u64);
+            if unmatched > 0 {
+                findings.push(crate::coverage::missing_finding(
+                    &format!("coverage data is missing for {unmatched} analyzed function(s)"),
+                    coverage_fix_hint(pack),
+                ));
+            }
         }
     }
     findings.extend(crap.findings.clone());
@@ -932,31 +965,35 @@ fn coverage_phase(
         if !state.skipped.iter().any(|engine| engine == "coverage") {
             state.skipped.push("coverage".into());
         }
-        let failed_test = state
-            .runs
-            .iter()
-            .rev()
-            .find(|run| run.engine == "tests" && run.exit_code != Some(0));
-        let reason = match failed_test {
-            Some(run) => format!(
-                "coverage skipped: tests gate failed (test command exit code {})",
-                run.exit_code
-                    .map(|code| code.to_string())
-                    .unwrap_or_else(|| "unavailable".into())
-            ),
-            None => format!(
-                "coverage skipped: tests gate failed ({})",
-                if state.tests_reason.is_empty() {
-                    "test command was not run"
-                } else {
-                    &state.tests_reason
-                }
-            ),
-        };
-        state.findings.push(crate::coverage::missing_finding(
-            &reason,
-            "Fix the test failures, then re-run `sc analyze` to score CRAP",
-        ));
+        // Only when the test command ran and failed. A missing toolchain or
+        // compile-blocked skip must not read as "tests gate failed".
+        if state.ran.iter().any(|engine| engine == "tests") {
+            let failed_test = state
+                .runs
+                .iter()
+                .rev()
+                .find(|run| run.engine == "tests" && run.exit_code != Some(0));
+            let reason = match failed_test {
+                Some(run) => format!(
+                    "coverage skipped: tests gate failed (test command exit code {})",
+                    run.exit_code
+                        .map(|code| code.to_string())
+                        .unwrap_or_else(|| "unavailable".into())
+                ),
+                None => format!(
+                    "coverage skipped: tests gate failed ({})",
+                    if state.tests_reason.is_empty() {
+                        "test command was not run"
+                    } else {
+                        &state.tests_reason
+                    }
+                ),
+            };
+            state.findings.push(crate::coverage::missing_finding(
+                &reason,
+                "Fix the failing tests and re-run to collect coverage",
+            ));
+        }
         return;
     }
     if !coverage_enabled {
@@ -2720,6 +2757,35 @@ mod tests {
         let mut skipped = Vec::new();
         let mut findings = Vec::new();
         llm_engine(request, spec, &mut ran, &mut skipped, &mut findings, &[])
+    }
+
+    #[test]
+    fn tests_ran_and_failed_ignores_reported_gates() {
+        let reported = Gate {
+            id: "tests".into(),
+            pass: false,
+            enforced: false,
+            reason: Some("package.json has no test script".into()),
+        };
+        assert!(!tests_ran_and_failed(&[], std::slice::from_ref(&reported)));
+        assert!(!tests_ran_and_failed(
+            &["coverage".into()],
+            std::slice::from_ref(&reported)
+        ));
+        let enforced_fail = Gate {
+            id: "tests".into(),
+            pass: false,
+            enforced: true,
+            reason: Some("test failures".into()),
+        };
+        assert!(!tests_ran_and_failed(
+            &[],
+            std::slice::from_ref(&enforced_fail)
+        ));
+        assert!(tests_ran_and_failed(
+            &["tests".into()],
+            std::slice::from_ref(&enforced_fail)
+        ));
     }
 
     #[test]

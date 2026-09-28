@@ -25,7 +25,7 @@ findings
 warning
   coverage.missing
   .
-  Fix the test failures, then re-run `sc analyze` to score CRAP
+  Fix the failing tests and re-run to collect coverage
 error
   test.failed
   src/lib.rs:12  tests::it_adds

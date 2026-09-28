@@ -124,16 +124,19 @@ pub fn run(
             .as_ref()
             .map(|data| crate::crap::unmatched_count(&functions, data))
             .unwrap_or(functions.len() as u64);
+        let tests_ran = ran.iter().any(|engine| engine == "tests");
+        let test_exit = runs
+            .iter()
+            .rev()
+            .find(|run| run.engine == "tests" && run.exit_code != Some(0))
+            .and_then(|run| run.exit_code);
         let (reason, fix) = if !tests_enforced {
             (
                 "no pytest suite was detected, so coverage was not collected".to_string(),
                 "Add pytest tests, then run `sc analyze` again",
             )
         } else if !tests_pass {
-            (
-                format!("tests did not pass ({tests_reason}), so coverage was not collected"),
-                "Fix the tests, then run `sc analyze` again",
-            )
+            coverage_tests_skip_reason(tests_ran, test_exit, &tests_reason)
         } else if coverage.is_none() {
             (
                 coverage_reason.unwrap_or_else(|| {
@@ -292,6 +295,30 @@ fn pyproject_mentions_pytest(root: &Path) -> bool {
     std::fs::read_to_string(root.join("pyproject.toml"))
         .map(|text| text.contains("[tool.pytest"))
         .unwrap_or(false)
+}
+
+/// Message when coverage is skipped because tests failed or never ran.
+fn coverage_tests_skip_reason(
+    tests_ran: bool,
+    test_exit: Option<i32>,
+    tests_reason: &str,
+) -> (String, &'static str) {
+    if tests_ran {
+        let reason = test_exit
+            .map(|code| {
+                format!("coverage skipped: tests gate failed (test command exit code {code})")
+            })
+            .unwrap_or_else(|| format!("coverage skipped: tests gate failed ({tests_reason})"));
+        (
+            reason,
+            "Fix the failing tests and re-run to collect coverage",
+        )
+    } else {
+        (
+            format!("tests did not run ({tests_reason}), so coverage was not collected"),
+            "Install the test runner, then re-run `sc analyze`",
+        )
+    }
 }
 
 #[inline(never)]
@@ -1783,6 +1810,23 @@ fn error_finding(id: &str, rule: &str, engine: &str, message: String, action: &s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn coverage_tests_skip_reason_does_not_blame_missing_pytest() {
+        let (reason, fix) = coverage_tests_skip_reason(false, Some(127), "pytest is not installed");
+        assert!(!reason.contains("tests gate failed"), "{reason}");
+        assert!(!reason.contains("exit code"), "{reason}");
+        assert!(reason.contains("tests did not run"), "{reason}");
+        assert!(fix.contains("Install the test runner"), "{fix}");
+    }
+
+    #[test]
+    fn coverage_tests_skip_reason_names_exit_code_when_tests_ran() {
+        let (reason, fix) = coverage_tests_skip_reason(true, Some(1), "pytest failed");
+        assert!(reason.contains("tests gate failed"), "{reason}");
+        assert!(reason.contains("exit code 1"), "{reason}");
+        assert_eq!(fix, "Fix the failing tests and re-run to collect coverage");
+    }
 
     #[test]
     fn a_suite_under_test_runs_and_an_empty_tree_says_so() {
