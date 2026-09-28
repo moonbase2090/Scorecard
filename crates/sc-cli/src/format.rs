@@ -27,6 +27,38 @@ pub fn to_json(card: &Scorecard) -> String {
 /// assert!(md.contains("**Verdict:** fail"));
 /// assert!(md.contains("**Repo:** ."));
 /// ```
+fn push_llm_markdown(out: &mut String, card: &Scorecard) {
+    let Some(section) = card.llm.as_ref() else {
+        return;
+    };
+    out.push_str("## LLM\n\n");
+    if section.status == "skipped" {
+        out.push_str("Skipped: ");
+        out.push_str(section.reason.as_deref().unwrap_or("llm did not run"));
+        out.push_str(".\n\n");
+        return;
+    }
+    if let Some(backend) = section.backend.as_deref() {
+        out.push_str(&format!("- backend: {backend}\n"));
+    }
+    if let Some(model) = section.model.as_deref() {
+        out.push_str(&format!("- model: {model}\n"));
+    }
+    if let Some(rounds) = section.rounds {
+        out.push_str(&format!("- rounds: {rounds}\n"));
+    }
+    if let Some(verdict) = section.verdict.as_deref() {
+        out.push_str(&format!("- verdict: {verdict}\n"));
+    }
+    if !section.notes.is_empty() {
+        out.push('\n');
+        for note in section.notes.iter().take(10) {
+            out.push_str(&format!("- {note}\n"));
+        }
+    }
+    out.push('\n');
+}
+
 pub fn to_markdown(card: &Scorecard) -> String {
     let mut out = String::new();
     let head = card.git.head.as_deref().unwrap_or("none");
@@ -67,6 +99,7 @@ pub fn to_markdown(card: &Scorecard) -> String {
             card.engines_skipped.join(", ")
         ));
     }
+    push_llm_markdown(&mut out, card);
 
     out.push_str("## Gates\n\n");
     out.push_str("| Gate | Result | Enforced | Reason |\n|---|---|---|---|\n");
@@ -195,7 +228,29 @@ fn fmt_num(value: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sc_core::{CrapFunction, CrapSection, Finding, Gate, Scorecard};
+    use sc_core::{CrapFunction, CrapSection, Finding, Gate, LlmSection, Scorecard};
+
+    #[test]
+    fn markdown_shows_llm_notes_and_a_plain_skip_reason() {
+        let mut card = Scorecard::skeleton("demo", 30);
+        let off = to_markdown(&card);
+        assert!(!off.contains("## LLM"));
+        card.llm = Some(LlmSection::skipped(
+            "llm is on, but neither --spec nor --intent was given. Re-run with --spec PATH or --intent TEXT.",
+        ));
+        let skipped = to_markdown(&card);
+        assert!(skipped.contains("neither --spec nor --intent"));
+        card.llm = Some(LlmSection::ran(
+            "ollama",
+            "qwen2.5-coder",
+            2,
+            1,
+            vec!["the intent's SHA clip is missing".into()],
+        ));
+        let ran = to_markdown(&card);
+        assert!(ran.contains("verdict: gaps found"));
+        assert!(ran.contains("the intent's SHA clip is missing"));
+    }
 
     #[test]
     fn markdown_marks_unmeasured_coverage() {
