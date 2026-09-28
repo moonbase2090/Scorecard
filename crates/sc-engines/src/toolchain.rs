@@ -405,7 +405,11 @@ fn apply(root: &Path, deadline: Instant, step: Step, report: &mut ToolReport) {
                 } else {
                     format!("{} failed: {detail}", step.engine)
                 };
-                if step.enforce {
+                // Without a build database, only missing headers stay advisory.
+                // An undeclared name or a syntax error still fails the gate.
+                let advisory = !step.enforce
+                    && include_only_failure(&format!("{}\n{}", captured.stdout, captured.stderr));
+                if !advisory {
                     let rule = match step.engine {
                         "tests" => "test.failed",
                         "lint" => "lint.failed",
@@ -548,6 +552,25 @@ fn cpp_types_absent(compiler_present: bool, sources_empty: bool) -> &'static str
 /// project has `CMakeLists.txt` or `compile_commands.json`.
 fn types_enforced(root: &Path) -> bool {
     root.join("CMakeLists.txt").is_file() || root.join("compile_commands.json").is_file()
+}
+
+/// True when every compiler error is a missing header or file.
+/// An undeclared identifier or a syntax error returns false.
+fn include_only_failure(text: &str) -> bool {
+    let mut saw_error = false;
+    for line in text.lines() {
+        let lower = line.to_ascii_lowercase();
+        if !lower.contains("error:") {
+            continue;
+        }
+        saw_error = true;
+        let missing =
+            lower.contains("file not found") || lower.contains("no such file or directory");
+        if !missing {
+            return false;
+        }
+    }
+    saw_error
 }
 
 fn split_c_family(files: &[String]) -> (Vec<String>, Vec<String>) {
@@ -1136,6 +1159,49 @@ mod tests {
         let reason = gate.reason.clone().unwrap_or_default();
         assert!(reason.contains("not enforced"), "{reason}");
         assert!(reason.contains("Include paths"), "{reason}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn include_errors_are_the_only_advisory_compile_failures() {
+        assert!(include_only_failure(
+            "demo.c:1:10: fatal error: 'missing.h' file not found\n"
+        ));
+        assert!(include_only_failure(
+            "demo.c:1:10: fatal error: missing.h: No such file or directory\n"
+        ));
+        assert!(!include_only_failure(
+            "bad.c:1:25: error: use of undeclared identifier 'x'\n"
+        ));
+        assert!(!include_only_failure(
+            "demo.c:1:20: error: expected ';' after return statement\n"
+        ));
+        assert!(!include_only_failure(
+            "demo.c:1:10: fatal error: 'missing.h' file not found\nbad.c:1:25: error: use of undeclared identifier 'x'\n"
+        ));
+        assert!(!include_only_failure("cc failed\n"));
+    }
+
+    #[test]
+    fn undeclared_identifier_on_a_makefile_fails_the_types_gate() {
+        if !which("cc") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-undeclared-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("Makefile"), "all:\n\tcc -o demo demo.c\n").unwrap();
+        std::fs::write(root.join("demo.c"), "int main(void) { return 0; }\n").unwrap();
+        std::fs::write(root.join("bad.c"), "int main(void) { return x; }\n").unwrap();
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(!gate.pass, "{gate:?} {:?}", report.findings);
+        assert!(gate.enforced, "{gate:?} {:?}", report.findings);
         let _ = std::fs::remove_dir_all(&root);
     }
 
