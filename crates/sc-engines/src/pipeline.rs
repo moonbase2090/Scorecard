@@ -614,11 +614,11 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         } else {
             gate("types", false, &outcome.types_reason)
         },
-        if outcome.tests_enforced {
-            gate("tests", outcome.tests_pass, &outcome.tests_reason)
-        } else {
-            gate_reported("tests")
-        },
+        tests_gate(
+            outcome.tests_enforced,
+            outcome.tests_pass,
+            &outcome.tests_reason,
+        ),
         crap_gate(
             outcome.crap_coverage_complete,
             outcome.crap_over,
@@ -2211,6 +2211,21 @@ fn sca_detail(undeclared: u64, hallucinated: u64, unresolved: u64) -> String {
     parts.join(", ")
 }
 
+fn tests_gate(enforced: bool, pass: bool, reason: &str) -> Gate {
+    if enforced {
+        gate("tests", pass, reason)
+    } else if !reason.is_empty() {
+        Gate {
+            id: "tests".into(),
+            pass: false,
+            enforced: false,
+            reason: Some(reason.to_string()),
+        }
+    } else {
+        gate_reported("tests")
+    }
+}
+
 fn gate_reported(id: &str) -> Gate {
     Gate {
         id: id.to_string(),
@@ -2305,6 +2320,19 @@ mod tests {
             }
             other => panic!("expected a capped run, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_python_tree_without_a_suite_does_not_blame_the_pack() {
+        let gate = tests_gate(false, true, crate::python::NO_PYTEST_SUITE);
+        assert!(!gate.pass);
+        assert!(!gate.enforced);
+        let reason = gate.reason.unwrap();
+        assert!(reason.contains("no pytest suite"));
+        assert!(reason.contains("`sc analyze`"));
+        assert!(!reason.contains("not provided"));
+        let pack = tests_gate(false, true, "");
+        assert_eq!(pack.reason.as_deref(), Some("not provided by this pack"));
     }
 
     #[test]

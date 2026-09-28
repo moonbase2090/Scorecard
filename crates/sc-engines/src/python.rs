@@ -203,9 +203,37 @@ fn compile_tree(
     }
 }
 
+pub(crate) const NO_PYTEST_SUITE: &str = "no pytest suite was found. Add a test/ or tests/ directory, a test_*.py or *_test.py file, or a pytest config, then re-run `sc analyze`";
+
 fn has_tests(root: &Path) -> bool {
     root.join("tests").is_dir()
-        || root.join("pyproject.toml").is_file() && pyproject_mentions_pytest(root)
+        || root.join("test").is_dir()
+        || root_test_file(root)
+        || pytest_declared(root)
+}
+
+fn root_test_file(root: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        name.ends_with(".py") && (name.starts_with("test_") || name.ends_with("_test.py"))
+    })
+}
+
+fn pytest_declared(root: &Path) -> bool {
+    pyproject_mentions_pytest(root)
+        || root.join("pytest.ini").is_file()
+        || ini_has_header(root, "tox.ini", "[pytest]")
+        || ini_has_header(root, "setup.cfg", "[tool:pytest]")
+}
+
+fn ini_has_header(root: &Path, file: &str, header: &str) -> bool {
+    std::fs::read_to_string(root.join(file))
+        .map(|text| text.lines().any(|line| line.trim() == header))
+        .unwrap_or(false)
 }
 
 fn pyproject_mentions_pytest(root: &Path) -> bool {
@@ -225,7 +253,7 @@ fn run_pytest(
 ) -> (bool, bool, String) {
     if !has_tests(root) {
         skipped.push("tests".into());
-        return (false, true, String::new());
+        return (false, true, NO_PYTEST_SUITE.into());
     }
     let base = if root.join("uv.lock").is_file() || root.join(".venv").is_dir() {
         "uv run --extra dev --with pytest-cov pytest -q".to_string()
@@ -1311,6 +1339,72 @@ fn error_finding(id: &str, rule: &str, engine: &str, message: String, action: &s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_suite_under_test_runs_and_an_empty_tree_says_so() {
+        let root = std::env::temp_dir().join(format!("sc-py-test-dir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("test")).unwrap();
+        std::fs::write(root.join("app.py"), "def add(a, b):\n    return a + b\n").unwrap();
+        std::fs::write(
+            root.join("test/test_app.py"),
+            "def test_add():\n    assert False\n",
+        )
+        .unwrap();
+        assert!(has_tests(&root));
+        let mut findings = Vec::new();
+        let (enforced, pass, _) = run_pytest(
+            &root,
+            std::time::Instant::now() + std::time::Duration::from_secs(30),
+            &mut findings,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut Vec::new(),
+        );
+        assert!(enforced);
+        assert!(!pass);
+        if host_pytest() {
+            assert!(
+                findings.iter().any(|finding| finding.rule == "test.failed"),
+                "{findings:?}"
+            );
+        }
+        let bare = root.join("bare");
+        std::fs::create_dir_all(&bare).unwrap();
+        std::fs::write(bare.join("app.py"), "x = 1\n").unwrap();
+        assert!(!has_tests(&bare));
+        let (enforced, pass, reason) = run_pytest(
+            &bare,
+            std::time::Instant::now() + std::time::Duration::from_secs(5),
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut Vec::new(),
+        );
+        assert!(!enforced);
+        assert!(pass);
+        assert_eq!(reason, NO_PYTEST_SUITE);
+        assert!(!NO_PYTEST_SUITE.contains("not provided"));
+        std::fs::write(bare.join("pytest.ini"), "[pytest]\n").unwrap();
+        assert!(has_tests(&bare));
+        let cfg = root.join("cfg");
+        std::fs::create_dir_all(&cfg).unwrap();
+        std::fs::write(cfg.join("setup.cfg"), "[metadata]\nname = x\n").unwrap();
+        assert!(!has_tests(&cfg));
+        std::fs::write(cfg.join("setup.cfg"), "[tool:pytest]\n").unwrap();
+        assert!(has_tests(&cfg));
+        let tox = root.join("tox");
+        std::fs::create_dir_all(&tox).unwrap();
+        std::fs::write(tox.join("tox.ini"), "[testenv]\n").unwrap();
+        assert!(!has_tests(&tox));
+        std::fs::write(tox.join("tox.ini"), "[pytest]\n").unwrap();
+        assert!(has_tests(&tox));
+        let file = root.join("file");
+        std::fs::create_dir_all(&file).unwrap();
+        std::fs::write(file.join("app_test.py"), "def test_x():\n    assert True\n").unwrap();
+        assert!(has_tests(&file));
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn reads_pytest_json_coverage_for_a_function() {
