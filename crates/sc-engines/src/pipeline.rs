@@ -1660,8 +1660,8 @@ fn crap_gate_reason(over: u64, untested: u64, untested_cc: u32) -> String {
 }
 
 fn crap_gate(coverage_complete: bool, over: u64, untested: u64, untested_cc: u32) -> Gate {
-    // Nothing was scored. One missing record must not hide a measured failure,
-    // so this advisory path is only for a run with no over-threshold result.
+    // A function with no coverage record is not scored. It must not hide a
+    // measured failure, so the gate is advisory only when none failed.
     if !coverage_complete && over == 0 && untested == 0 {
         return Gate {
             id: "crap".into(),
@@ -2590,6 +2590,10 @@ mod tests {
         let reason = gate.reason.unwrap();
         assert!(reason.contains("1 function over threshold"), "{reason}");
         assert!(reason.contains("no coverage record"), "{reason}");
+
+        let untested = crap_gate(false, 0, 1, 15);
+        assert!(!untested.pass);
+        assert!(untested.enforced);
 
         let clear = crap_gate(false, 0, 0, 15);
         assert!(!clear.pass);
