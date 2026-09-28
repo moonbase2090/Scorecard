@@ -1695,37 +1695,48 @@ fn import_findings(
     ran.push("sca".into());
     let mut count = 0u64;
     for file in &selection.files {
-        for import in &file.imports {
-            let name = crate::manifest::normalize(&import.crate_name);
-            if allowed.contains(&name) || local.contains(&name) {
-                continue;
-            }
-            count += 1;
-            findings.push(Finding {
-                id: format!("sca:{}:{}", import.file, import.crate_name),
-                rule: "sca.undeclared_dependency".into(),
-                engine: "sca".into(),
-                severity: "warning".into(),
-                file: import.file.clone(),
-                span: Some(sc_core::Span {
-                    start_line: import.line,
-                    start_col: 1,
-                    end_line: import.line,
-                    end_col: 1,
-                }),
-                symbol: Some(import.crate_name.clone()),
-                message: format!(
-                    "Advisory: crate `{}` is used in source and is not in Cargo.toml",
-                    import.crate_name
-                ),
-                evidence: serde_json::json!({"crate": import.crate_name}),
-                suggested_action: Some(format!(
-                    "Add `{}` to Cargo.toml or remove the import",
-                    import.crate_name
-                )),
-                disposition: String::new(),
-            });
+        count += undeclared_imports(file, &allowed, &local, findings);
+    }
+    count
+}
+
+fn undeclared_imports(
+    file: &crate::facts::AnalyzedFile,
+    allowed: &std::collections::BTreeSet<String>,
+    local: &std::collections::BTreeSet<String>,
+    findings: &mut Vec<Finding>,
+) -> u64 {
+    let mut count = 0u64;
+    for import in &file.imports {
+        let name = crate::manifest::normalize(&import.crate_name);
+        if allowed.contains(&name) || local.contains(&name) {
+            continue;
         }
+        count += 1;
+        let file_name = import.file.as_str();
+        let crate_name = import.crate_name.as_str();
+        findings.push(Finding {
+            id: format!("sca:{file_name}:{crate_name}"),
+            rule: "sca.undeclared_dependency".into(),
+            engine: "sca".into(),
+            severity: "warning".into(),
+            file: file_name.to_string(),
+            span: Some(sc_core::Span {
+                start_line: import.line,
+                start_col: 1,
+                end_line: import.line,
+                end_col: 1,
+            }),
+            symbol: Some(crate_name.to_string()),
+            message: format!(
+                "Advisory: crate `{crate_name}` is used in source and is not in Cargo.toml"
+            ),
+            evidence: serde_json::json!({"crate": crate_name}),
+            suggested_action: Some(format!(
+                "Add `{crate_name}` to Cargo.toml or remove the import"
+            )),
+            disposition: String::new(),
+        });
     }
     count
 }

@@ -286,12 +286,14 @@ fn local_mod_pub_use_is_not_hallucinated() {
 #[test]
 fn python_local_imports_are_not_dependency_findings() {
     let (code, card, _, stderr) = analyze(&["testdata/py_local_import"]);
-    assert_eq!(code, 0, "stderr={stderr}\ncard={card}");
     let dependency: Vec<_> = rules(&card)
         .into_iter()
         .filter(|rule| rule.starts_with("sca."))
         .collect();
-    assert!(dependency.is_empty(), "{dependency:?}\n{card}");
+    assert!(
+        dependency.is_empty(),
+        "{dependency:?}\nstderr={stderr}\n{card}"
+    );
     assert_eq!(card["metrics"]["hallucinated_imports"], 0);
     assert_eq!(card["metrics"]["undeclared_dependencies"], 0);
     assert!(card["gates"]
@@ -299,6 +301,12 @@ fn python_local_imports_are_not_dependency_findings() {
         .unwrap()
         .iter()
         .any(|gate| { gate["id"] == "sca" && gate["pass"] == true && gate["enforced"] == false }));
+    // The scorecard job does not install Ruff. A missing linter fails `lint`
+    // and must not look like a dependency miss. When lint ran, the tree passes.
+    let lint_missing = rules(&card).contains(&"engine.unavailable");
+    if !lint_missing {
+        assert_eq!(code, 0, "stderr={stderr}\n{card}");
+    }
 }
 
 #[test]

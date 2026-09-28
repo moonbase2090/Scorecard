@@ -749,9 +749,7 @@ fn pythonpath_from_pyproject(text: &str, root: &Path) -> Vec<PathBuf> {
             }
             continue;
         }
-        for token in quoted_tokens(trimmed) {
-            push_rel(&mut paths, root, &token);
-        }
+        push_quoted(&mut paths, root, trimmed);
         if trimmed.contains(']') {
             in_array = false;
         }
@@ -784,23 +782,31 @@ fn pythonpath_from_ini(text: &str, header: &str, root: &Path) -> Vec<PathBuf> {
                 if value.is_empty() {
                     collecting = true;
                 } else {
-                    for part in value.split_whitespace() {
-                        push_rel(&mut paths, root, part);
-                    }
+                    push_words(&mut paths, root, value);
                     collecting = false;
                 }
             }
             continue;
         }
         if collecting && (line.starts_with(' ') || line.starts_with('\t')) {
-            for part in trimmed.split_whitespace() {
-                push_rel(&mut paths, root, part);
-            }
+            push_words(&mut paths, root, trimmed);
         } else {
             collecting = false;
         }
     }
     paths
+}
+
+fn push_quoted(paths: &mut Vec<PathBuf>, root: &Path, line: &str) {
+    for token in quoted_tokens(line) {
+        push_rel(paths, root, &token);
+    }
+}
+
+fn push_words(paths: &mut Vec<PathBuf>, root: &Path, line: &str) {
+    for part in line.split_whitespace() {
+        push_rel(paths, root, part);
+    }
 }
 
 fn push_rel(paths: &mut Vec<PathBuf>, root: &Path, raw: &str) {
@@ -817,34 +823,51 @@ fn push_rel(paths: &mut Vec<PathBuf>, root: &Path, raw: &str) {
 fn installed_modules(root: &Path) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     for site in site_packages(root) {
-        let Ok(entries) = std::fs::read_dir(&site) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Some(fname) = path.file_name().and_then(|s| s.to_str()) else {
-                continue;
-            };
-            if let Some(_stem) = fname.strip_suffix(".dist-info") {
-                if let Ok(text) = std::fs::read_to_string(path.join("top_level.txt")) {
-                    for line in text.lines() {
-                        let name = normalize_mod(line.trim());
-                        if !name.is_empty() {
-                            names.insert(name);
-                        }
-                    }
-                }
-                continue;
-            }
-            if let Some(stem) = fname.strip_suffix(".py") {
-                if !stem.is_empty() {
-                    names.insert(normalize_mod(stem));
-                }
-                continue;
-            }
-            if path.is_dir() && path.join("__init__.py").is_file() {
-                names.insert(normalize_mod(fname));
-            }
+        names.append(&mut site_module_names(&site));
+    }
+    names
+}
+
+fn site_module_names(site: &Path) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    let Ok(entries) = std::fs::read_dir(site) else {
+        return names;
+    };
+    for entry in entries.flatten() {
+        names.append(&mut entry_module_names(&entry.path()));
+    }
+    names
+}
+
+fn entry_module_names(path: &Path) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    let Some(fname) = path.file_name().and_then(|s| s.to_str()) else {
+        return names;
+    };
+    if fname.ends_with(".dist-info") {
+        if let Ok(text) = std::fs::read_to_string(path.join("top_level.txt")) {
+            names.extend(top_level_names(&text));
+        }
+        return names;
+    }
+    if let Some(stem) = fname.strip_suffix(".py") {
+        if !stem.is_empty() {
+            names.insert(normalize_mod(stem));
+        }
+        return names;
+    }
+    if path.is_dir() && path.join("__init__.py").is_file() {
+        names.insert(normalize_mod(fname));
+    }
+    names
+}
+
+fn top_level_names(text: &str) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    for line in text.lines() {
+        let name = normalize_mod(line.trim());
+        if !name.is_empty() {
+            names.insert(name);
         }
     }
     names
