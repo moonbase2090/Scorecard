@@ -92,9 +92,15 @@ fn pem_end() -> &'static str {
 }
 
 fn aws_key_at(line: &str) -> Option<usize> {
-    token_at(line, "AKIA", 16, |c| {
-        c.is_ascii_uppercase() || c.is_ascii_digit()
-    })
+    let mut found = None;
+    for prefix in ["AKIA", "ASIA"] {
+        if let Some(at) = token_at(line, prefix, 16, |c| {
+            c.is_ascii_uppercase() || c.is_ascii_digit()
+        }) {
+            found = Some(found.map_or(at, |prev: usize| prev.min(at)));
+        }
+    }
+    found
 }
 
 fn github_at(line: &str) -> Option<usize> {
@@ -243,6 +249,21 @@ mod tests {
                 "{prefix} short tail must not match"
             );
         }
+    }
+
+    #[test]
+    fn flags_a_temporary_aws_access_key_the_same_as_a_long_lived_one() {
+        for prefix in ["AKIA", "ASIA"] {
+            let id = format!("{prefix}{}", "A1B2C3D4E5F6G7H8");
+            assert_eq!(id.len(), 20, "{prefix}");
+            let text = format!("aws_access_key_id = \"{id}\"\n");
+            let findings = secrets_in_text(&text, "config.env");
+            assert_eq!(findings.len(), 1, "{prefix} {findings:?}");
+            assert_eq!(findings[0].rule, "secrets.aws_access_key");
+            assert!(findings[0].message.contains("AWS access key id"));
+        }
+        let short = format!("ASIA{}", "A".repeat(15));
+        assert!(secrets_in_text(&format!("key = \"{short}\"\n"), "a.env").is_empty());
     }
 
     #[test]
