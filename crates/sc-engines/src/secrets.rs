@@ -74,13 +74,33 @@ fn match_line(line: &str) -> Option<(&'static str, usize)> {
 }
 
 /// The two PEM markers live on separate lines so this file does not match itself.
+/// A line that only names the label is not a key; require base64 material too.
 fn private_key_at(line: &str) -> Option<usize> {
     let begin = pem_begin();
-    if line.contains(begin) && line.contains(pem_end()) {
-        line.find(begin)
-    } else {
-        None
+    if !(line.contains(begin) && line.contains(pem_end())) {
+        return None;
     }
+    if !has_pem_material(line) {
+        return None;
+    }
+    line.find(begin)
+}
+
+fn has_pem_material(line: &str) -> bool {
+    let material: String = line
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '+' || *c == '/' || *c == '=')
+        .collect();
+    // Strip the short ASCII from the PEM markers themselves.
+    let without_markers = material
+        .replace("BEGIN", "")
+        .replace("PRIVATE", "")
+        .replace("KEY", "")
+        .replace("RSA", "")
+        .replace("EC", "")
+        .replace("OPENSSH", "")
+        .replace("ENCRYPTED", "");
+    without_markers.len() >= 32 && shannon(&without_markers) >= 3.0
 }
 
 fn pem_begin() -> &'static str {
@@ -97,10 +117,24 @@ fn aws_key_at(line: &str) -> Option<usize> {
         if let Some(at) = token_at(line, prefix, 16, |c| {
             c.is_ascii_uppercase() || c.is_ascii_digit()
         }) {
+            let token = aws_access_token(line, at);
+            // AWS docs use ids that end in EXAMPLE (AKIAIOSFODNN7EXAMPLE).
+            if token.ends_with("EXAMPLE") {
+                continue;
+            }
             found = Some(found.map_or(at, |prev: usize| prev.min(at)));
         }
     }
     found
+}
+
+fn aws_access_token(line: &str, at: usize) -> &str {
+    let bytes = line.as_bytes();
+    let mut end = at;
+    while end < bytes.len() && (bytes[end].is_ascii_uppercase() || bytes[end].is_ascii_digit()) {
+        end += 1;
+    }
+    &line[at..end]
 }
 
 fn github_at(line: &str) -> Option<usize> {
@@ -111,6 +145,12 @@ fn github_at(line: &str) -> Option<usize> {
         if let Some(at) = token_at(line, prefix, min_tail, |c| {
             c.is_ascii_alphanumeric() || (allow_underscore && c == '_')
         }) {
+            let token = token_body(line, at, prefix.len(), |c| {
+                c.is_ascii_alphanumeric() || (allow_underscore && c == '_')
+            });
+            if !credential_signal(token) {
+                continue;
+            }
             found = Some(found.map_or(at, |prev: usize| prev.min(at)));
         }
     }
@@ -133,7 +173,7 @@ fn aws_secret_at(line: &str) -> Option<usize> {
         }
         let end = secret_run_end(bytes, index);
         let token = &line[index..end];
-        if token.len() == 40 && token != AWS_DOCUMENTED_SECRET && shannon(token) >= 3.0 {
+        if token.len() == 40 && token != AWS_DOCUMENTED_SECRET && credential_signal(token) {
             return Some(index);
         }
         index = end;
@@ -173,6 +213,42 @@ fn shannon(token: &str) -> f64 {
     entropy
 }
 
+/// Placeholders and docs examples: low entropy, one repeated character,
+/// nearly sorted / sequential bodies, or a token whose only letters are a
+/// filler word (`placeholder` / `example`). A mixed body that merely embeds
+/// that word still has credential signal.
+fn credential_signal(token: &str) -> bool {
+    if token.is_empty() {
+        return false;
+    }
+    if shannon(token) < 3.0 {
+        return false;
+    }
+    if mostly_sequential(token) {
+        return false;
+    }
+    let core: String = token
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect();
+    if core == "placeholder" || core == "example" {
+        return false;
+    }
+    true
+}
+
+fn mostly_sequential(token: &str) -> bool {
+    let chars: Vec<u32> = token.chars().map(|c| c as u32).collect();
+    if chars.len() < 12 {
+        return false;
+    }
+    let pairs = chars.len() - 1;
+    let ascending = chars.windows(2).filter(|w| w[0] <= w[1]).count();
+    let descending = chars.windows(2).filter(|w| w[0] >= w[1]).count();
+    ascending * 100 / pairs >= 85 || descending * 100 / pairs >= 85
+}
+
 fn slack_at(line: &str) -> Option<usize> {
     let bytes = line.as_bytes();
     let mut index = 0;
@@ -186,7 +262,7 @@ fn slack_at(line: &str) -> Option<usize> {
                 .chars()
                 .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
                 .collect();
-            if token.len() >= 10 {
+            if token.len() >= 10 && credential_signal(&token) {
                 return Some(index);
             }
         }
@@ -196,7 +272,15 @@ fn slack_at(line: &str) -> Option<usize> {
 }
 
 fn stripe_at(line: &str) -> Option<usize> {
-    token_at(line, "sk_live_", 16, |c| c.is_ascii_alphanumeric())
+    let at = token_at(line, "sk_live_", 16, |c| c.is_ascii_alphanumeric())?;
+    let body = token_body(line, at, "sk_live_".len(), |c| c.is_ascii_alphanumeric());
+    credential_signal(body).then_some(at)
+}
+
+fn token_body(line: &str, at: usize, prefix_len: usize, tail: impl Fn(char) -> bool) -> &str {
+    let after = &line[at + prefix_len..];
+    let count = after.chars().take_while(|c| tail(*c)).count();
+    &after[..count]
 }
 
 fn token_at(
@@ -224,26 +308,74 @@ fn token_at(
 mod tests {
     use super::*;
 
+    fn mixed_tail(len: usize) -> String {
+        let parts = ["Ab", "3k", "Qm", "9Z", "nR", "4p", "Lx", "7w"];
+        parts.iter().cycle().take(len / 2).copied().collect()
+    }
+
     #[test]
     fn flags_a_github_token_and_ignores_the_pattern_text() {
-        let token = format!("ghp_{}", "A".repeat(36));
+        let token = format!("ghp_{}", mixed_tail(36));
         let text = format!("const KEY: &str = \"{token}\";\nconst NOTE: &str = \"ghp_short\";\n");
         let findings = secrets_in_text(&text, "src/lib.rs");
-        assert_eq!(findings.len(), 1);
+        assert_eq!(findings.len(), 1, "{findings:?}");
         assert_eq!(findings[0].rule, "secrets.github_token");
         assert_eq!(findings[0].span.as_ref().unwrap().start_line, 1);
     }
 
     #[test]
+    fn ignores_documentation_placeholders_and_test_tokens() {
+        let cases = [
+            "// The AWS docs example access key is AKIAIOSFODNN7EXAMPLE.\n",
+            "/// The PEM label is -----BEGIN RSA PRIVATE KEY-----\n",
+            "// placeholder ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n",
+            "// Slack docs-style placeholder: xoxb-000000000000-placeholder\n",
+            "// placeholder sk_live_0000000000000000\n",
+            "ghp_1234567890abcdefghijklmnopqrstuvwxyzAB\n",
+            "github_pat_11ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuv\n",
+        ];
+        for text in cases {
+            let findings = secrets_in_text(text, "src/lib.rs");
+            assert!(
+                findings.is_empty(),
+                "should ignore placeholder in {text:?}, got {findings:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn does_not_ignore_a_mixed_token_that_embeds_zero_runs() {
+        // Build the body in pieces so this source file does not match itself.
+        let body = ["Ab3k", "000000", "Qm9ZnR4pLx7w", "Ab3k", "Qm9ZnR4pLx"].concat();
+        assert_eq!(body.len(), 36, "{body}");
+        let token = format!("ghp_{body}");
+        let findings = secrets_in_text(&format!("TOKEN = \"{token}\"\n"), "app.py");
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].rule, "secrets.github_token");
+    }
+
+    #[test]
+    fn does_not_ignore_a_mixed_token_that_embeds_placeholder() {
+        // 36-char mixed body that contains the substring "placeholder".
+        let body = ["k7Qm9", "placeholder", "Lx4wAb3ZnR8pY2cF9wQx"].concat();
+        assert_eq!(body.len(), 36, "{body}");
+        assert!(body.contains("placeholder"));
+        let token = format!("ghp_{body}");
+        let findings = secrets_in_text(&format!("TOKEN = \"{token}\"\n"), "app.py");
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].rule, "secrets.github_token");
+    }
+
+    #[test]
     fn flags_github_oauth_and_app_tokens() {
         for prefix in ["gho_", "ghu_", "ghs_", "ghr_"] {
-            let token = format!("{prefix}{}", "B".repeat(36));
+            let token = format!("{prefix}{}", mixed_tail(36));
             let text = format!("TOKEN = \"{token}\"\n");
             let findings = secrets_in_text(&text, "app.py");
-            assert_eq!(findings.len(), 1, "{prefix}");
+            assert_eq!(findings.len(), 1, "{prefix} {findings:?}");
             assert_eq!(findings[0].rule, "secrets.github_token");
             assert_eq!(findings[0].span.as_ref().unwrap().start_col, 10);
-            let short = format!("{prefix}{}", "B".repeat(35));
+            let short = format!("{prefix}{}", mixed_tail(34));
             assert!(
                 secrets_in_text(&format!("TOKEN = \"{short}\"\n"), "app.py").is_empty(),
                 "{prefix} short tail must not match"
@@ -264,6 +396,11 @@ mod tests {
         }
         let short = format!("ASIA{}", "A".repeat(15));
         assert!(secrets_in_text(&format!("key = \"{short}\"\n"), "a.env").is_empty());
+        let example = "aws_access_key_id = \"AKIAIOSFODNN7EXAMPLE\"\n";
+        assert!(
+            secrets_in_text(example, "a.env").is_empty(),
+            "AWS docs EXAMPLE id must not fail the build"
+        );
     }
 
     #[test]
@@ -299,10 +436,20 @@ mod tests {
 
     #[test]
     fn flags_a_private_key_and_ignores_the_detector_source() {
-        let text = format!("{}RSA {}\n", super::pem_begin(), super::pem_end());
+        let material = mixed_tail(64);
+        let text = format!(
+            "{}RSA {} {material}\n",
+            super::pem_begin(),
+            super::pem_end()
+        );
         let findings = secrets_in_text(&text, "src/lib.rs");
-        assert_eq!(findings.len(), 1);
+        assert_eq!(findings.len(), 1, "{findings:?}");
         assert_eq!(findings[0].rule, "secrets.private_key");
+        let label_only = format!("{}RSA {}\n", super::pem_begin(), super::pem_end());
+        assert!(
+            secrets_in_text(&label_only, "src/lib.rs").is_empty(),
+            "PEM label without key material must not fail"
+        );
         let own = include_str!("secrets.rs");
         assert!(
             secrets_in_text(own, "crates/sc-engines/src/secrets.rs").is_empty(),
