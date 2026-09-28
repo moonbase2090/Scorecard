@@ -60,6 +60,8 @@ sc analyze [PATH] [--diff [BASE]] [--diff-head REV] [--paths FILE] [--spec PATH]
 | `--budget-seconds` | `120` |
 | `--config` | `analyzer.toml` in the tree, then `~/.config/sc/analyzer.toml` |
 
+`--budget-seconds` is one wall clock for the whole run. Each command gets only the time left. At the deadline that command and its child processes are killed, and the report records the timeout.
+
 `--format pretty` is the terminal layout. It is the default when stdout is a terminal. A pipe or a file stays JSON unless `--format` is set. `NO_COLOR` turns color off. `CLICOLOR_FORCE=1` turns it on. `--format all` prints JSON, then Markdown, on stdout. With `--out`, JSON, Markdown, SARIF, and HTML are written as sibling `.json`, `.md`, `.sarif`, and `.html` files. `--format sarif` writes SARIF to stdout and to `--out`. `--format html` writes a self-contained visual report (no network requests) to stdout and to `--out`.
 
 | Exit | Meaning |

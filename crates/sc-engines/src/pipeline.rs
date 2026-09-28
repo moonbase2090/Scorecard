@@ -805,7 +805,7 @@ fn compile_phase(root: &Path, manifest: &Path, deadline: Instant, state: &mut Ru
             );
             state
                 .findings
-                .push(unavailable("compile", "cargo check timed out"));
+                .push(timed_out("compile", "cargo check timed out"));
             state.skipped.push("compile".into());
         }
         Err(err) => {
@@ -870,7 +870,7 @@ fn test_phase(
             state.tests_reason = "timed out".into();
             state
                 .findings
-                .push(unavailable("tests", "cargo test timed out"));
+                .push(timed_out("tests", "cargo test timed out"));
             state.skipped.push("tests".into());
         }
         Err(err) => {
@@ -1440,7 +1440,7 @@ fn run_lint_engine(
             note_run(sink.runs, "lint", script, None, started.elapsed());
             sink.skipped.push("lint".into());
             sink.findings
-                .push(unavailable("lint", "lint command timed out"));
+                .push(timed_out("lint", "lint command timed out"));
             true
         }
         Err(err) => {
@@ -1617,6 +1617,12 @@ fn run_git(root: &Path, args: &[&str]) -> Result<String, ()> {
         Ok(captured) if captured.status.success() => Ok(captured.stdout),
         _ => Err(()),
     }
+}
+
+fn timed_out(engine: &str, message: &str) -> Finding {
+    let mut finding = unavailable(engine, message);
+    finding.suggested_action = Some(crate::command::TIMEOUT_FIX.into());
+    finding
 }
 
 fn unavailable(engine: &str, message: &str) -> Finding {

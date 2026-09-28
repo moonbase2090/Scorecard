@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: MPL-2.0
 use std::io::Read;
 use std::path::Path;
-use std::process::{Command, ExitStatus, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
+
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 
 #[derive(Debug)]
 pub struct Captured {
@@ -29,6 +32,9 @@ impl CommandError {
         }
     }
 }
+
+pub const TIMEOUT_FIX: &str =
+    "Raise --budget-seconds, or make this command finish within the deadline.";
 
 pub fn brief(text: &str) -> String {
     let mut out = String::new();
@@ -112,6 +118,10 @@ pub fn run_cmd(cmd: &mut Command, timeout: Duration) -> Result<Captured, Command
     if timeout.is_zero() {
         return Err(CommandError::Timeout);
     }
+    #[cfg(unix)]
+    {
+        cmd.process_group(0);
+    }
     let mut child = match cmd.spawn() {
         Ok(child) => child,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
@@ -143,18 +153,16 @@ pub fn run_cmd(cmd: &mut Command, timeout: Duration) -> Result<Captured, Command
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if start.elapsed() >= timeout => {
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = out_handle.join();
-                let _ = err_handle.join();
+                stop_tree(&mut child);
+                let _ = drain(out_handle);
+                let _ = drain(err_handle);
                 return Err(CommandError::Timeout);
             }
             Ok(None) => thread::sleep(Duration::from_millis(20)),
             Err(err) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = out_handle.join();
-                let _ = err_handle.join();
+                stop_tree(&mut child);
+                let _ = drain(out_handle);
+                let _ = drain(err_handle);
                 return Err(CommandError::Spawn(err.to_string()));
             }
         }
@@ -189,9 +197,46 @@ fn shell_quote_arg(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
 }
 
+/// Kill the child and every process in its group, then stop waiting.
+fn stop_tree(child: &mut Child) {
+    #[cfg(unix)]
+    unsafe {
+        kill(-(child.id() as i32), 9);
+    }
+    let _ = child.kill();
+    let grace = Instant::now() + Duration::from_millis(500);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) | Err(_) => break,
+            Ok(None) if Instant::now() >= grace => break,
+            Ok(None) => thread::sleep(Duration::from_millis(10)),
+        }
+    }
+}
+
+fn drain(handle: thread::JoinHandle<String>) -> String {
+    let grace = Instant::now() + Duration::from_millis(200);
+    while !handle.is_finished() && Instant::now() < grace {
+        thread::sleep(Duration::from_millis(10));
+    }
+    if handle.is_finished() {
+        handle.join().unwrap_or_default()
+    } else {
+        drop(handle);
+        String::new()
+    }
+}
+
+#[cfg(unix)]
+unsafe extern "C" {
+    fn kill(pid: i32, sig: i32) -> i32;
+}
+
 #[cfg(test)]
 mod tests {
     use super::under_llvm_cov;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
 
     #[test]
     fn nested_llvm_cov_is_detected_from_its_wrapper() {
@@ -203,5 +248,36 @@ mod tests {
         assert!(!under_llvm_cov(&[("CARGO_LLVM_COV", "")]));
         assert!(!under_llvm_cov(&[("RUSTC_WRAPPER", "/usr/bin/sccache")]));
         assert!(!under_llvm_cov(&[]));
+    }
+
+    #[test]
+    fn timeout_kills_a_grandchild_that_holds_the_pipe() {
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
+            .arg("sleep 30 & echo $!; wait")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let start = Instant::now();
+        let err = super::run_cmd(&mut cmd, Duration::from_millis(300)).unwrap_err();
+        assert!(matches!(err, super::CommandError::Timeout));
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "budget wait ran for {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn a_finished_command_still_returns_its_output() {
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
+            .arg("echo ready")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let captured = super::run_cmd(&mut cmd, Duration::from_secs(5)).unwrap();
+        assert!(captured.status.success());
+        assert!(captured.stdout.contains("ready"));
     }
 }
