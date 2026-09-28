@@ -1,0 +1,5 @@
+pack = "rust"
+
+[commands]
+lint = "cargo clippy -- -D warnings"
+

@@ -1682,6 +1682,90 @@ fn is_env_assignment(value: &str) -> bool {
     })
 }
 
+struct ClippyDiagnostic {
+    file: String,
+    line: u32,
+    column: u32,
+    lint: String,
+    message: String,
+}
+
+fn first_clippy_diagnostic(root: &Path, output: &str) -> Option<ClippyDiagnostic> {
+    let lines: Vec<_> = output.lines().collect();
+    for (index, line) in lines.iter().enumerate() {
+        let Some(message) = lint_diagnostic_message(line) else {
+            continue;
+        };
+        let mut location = None;
+        let mut lint = None;
+        for line in lines.iter().skip(index + 1) {
+            if lint_diagnostic_message(line).is_some() {
+                break;
+            }
+            if location.is_none() {
+                location = diagnostic_location(line);
+            }
+            if lint.is_none() {
+                lint = clippy_lint_name(line);
+            }
+        }
+        if let (Some((file, line, column)), Some(lint)) = (location, lint) {
+            return Some(ClippyDiagnostic {
+                file: crate::compile::normalize_file(root, &file),
+                line,
+                column,
+                lint,
+                message: message.to_string(),
+            });
+        }
+    }
+    None
+}
+
+fn lint_diagnostic_message(line: &str) -> Option<&str> {
+    let line = line.trim_start();
+    line.strip_prefix("error: ")
+        .or_else(|| line.strip_prefix("warning: "))
+}
+
+fn diagnostic_location(line: &str) -> Option<(String, u32, u32)> {
+    let line = line.trim_start();
+    let location = line
+        .strip_prefix("-->")
+        .or_else(|| line.strip_prefix(":::"))?
+        .trim();
+    let mut parts = location.rsplitn(3, ':');
+    let column = parts.next()?.parse().ok()?;
+    let line_number = parts.next()?.parse().ok()?;
+    let file = parts.next()?.trim();
+    (!file.is_empty()).then(|| (file.to_string(), line_number, column))
+}
+
+fn clippy_lint_name(line: &str) -> Option<String> {
+    let (name, is_clippy) = if let Some((_, name)) = line.split_once("index.html#") {
+        (name, true)
+    } else if let Some((_, name)) = line.split_once("clippy::") {
+        (name, true)
+    } else {
+        let name = ["#[warn(", "#[deny(", "#[allow("]
+            .into_iter()
+            .find_map(|marker| line.split_once(marker).map(|(_, name)| name))?;
+        (name, false)
+    };
+    let name: String = name
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+        .collect();
+    if name.is_empty() {
+        return None;
+    }
+    if is_clippy {
+        Some(format!("clippy::{name}"))
+    } else {
+        Some(name)
+    }
+}
+
 fn run_lint_engine(
     root: &Path,
     lint: &str,
@@ -1720,20 +1804,34 @@ fn run_lint_engine(
                 true
             } else {
                 sink.ran.push("lint".into());
-                let detail =
-                    crate::command::brief(&format!("{}\n{}", captured.stdout, captured.stderr));
+                let output = format!("{}\n{}", captured.stdout, captured.stderr);
+                let diagnostic = first_clippy_diagnostic(root, &output);
+                let detail = diagnostic
+                    .as_ref()
+                    .map(|item| item.message.clone())
+                    .or_else(|| {
+                        let brief = crate::command::brief(&output);
+                        (!brief.is_empty()).then_some(brief)
+                    });
                 sink.findings.push(Finding {
                     id: "lint:failed".into(),
                     rule: "lint.failed".into(),
                     engine: "lint".into(),
                     severity: "error".into(),
-                    file: ".".into(),
-                    span: None,
-                    symbol: None,
-                    message: if detail.is_empty() {
-                        "lint command failed".into()
-                    } else {
-                        format!("lint command failed: {detail}")
+                    file: diagnostic
+                        .as_ref()
+                        .map(|item| item.file.clone())
+                        .unwrap_or_else(|| ".".into()),
+                    span: diagnostic.as_ref().map(|item| sc_core::Span {
+                        start_line: item.line,
+                        start_col: item.column,
+                        end_line: item.line,
+                        end_col: item.column,
+                    }),
+                    symbol: diagnostic.as_ref().map(|item| item.lint.clone()),
+                    message: match detail {
+                        Some(detail) => format!("lint command failed: {detail}"),
+                        None => "lint command failed".into(),
                     },
                     evidence: serde_json::json!({"command": script}),
                     suggested_action: Some("Fix the lint findings and re-run".into()),
@@ -2903,6 +3001,43 @@ mod tests {
         assert!(!reason.contains("not provided"));
         let pack = tests_gate(false, true, "");
         assert_eq!(pack.reason.as_deref(), Some("not provided by this pack"));
+    }
+
+    #[test]
+    fn lint_failures_report_the_first_clippy_location_and_name() {
+        let root = std::env::temp_dir();
+        let script = r#"printf '%s\n' 'Checking demo v0.1.0' 'warning: this redundant pattern should be removed' ' --> src/lib.rs:8:5' ' = note: `#[warn(clippy::redundant_pattern_matching)]` on by default' ' = help: for further information visit https://rust-lang.github.io/rust-clippy/master/index.html#redundant_pattern_matching' 'warning: second diagnostic' ' --> src/other.rs:9:1' ' = help: for further information visit https://rust-lang.github.io/rust-clippy/master/index.html#needless_return' >&2; exit 1"#;
+        let mut ran = Vec::new();
+        let mut skipped = Vec::new();
+        let mut findings = Vec::new();
+        let mut runs = Vec::new();
+
+        run_lint_engine(
+            &root,
+            script,
+            false,
+            true,
+            Instant::now() + Duration::from_secs(5),
+            LintSink {
+                ran: &mut ran,
+                skipped: &mut skipped,
+                findings: &mut findings,
+                runs: &mut runs,
+            },
+        );
+
+        let finding = findings.first().expect("lint failure finding");
+        assert_eq!(finding.file, "src/lib.rs");
+        assert_eq!(finding.span.as_ref().unwrap().start_line, 8);
+        assert_eq!(finding.span.as_ref().unwrap().start_col, 5);
+        assert_eq!(
+            finding.symbol.as_deref(),
+            Some("clippy::redundant_pattern_matching")
+        );
+        assert_eq!(
+            finding.message,
+            "lint command failed: this redundant pattern should be removed"
+        );
     }
 
     #[test]
