@@ -25,7 +25,7 @@ The action installs `sc`, runs `sc analyze .`, and fails the job when an enforce
 | Input | Default | Meaning |
 |---|---|---|
 | `fail-on` | `types,tests,crap,secrets,lint` | Gates that fail the job. Empty reports without failing. |
-| `diff` | `""` | Base ref for `--diff`. Empty scores the whole tree. |
+| `diff` | `""` | Base ref for `--diff`. Empty scores the whole tree. On a pull request, pass the base ref so the report covers changed code and a one-line count of the rest of the tree. |
 | `format` | `sarif` | `json`, `md`, `sarif`, `html`, or `all` |
 | `spec` | `""` | Path for `--spec` |
 | `mutation` | `off` | `off`, `diff`, or `full` |

@@ -234,6 +234,9 @@ fn hero(out: &mut String, card: &Scorecard) {
     if !card.scope.paths.is_empty() {
         meta(out, "paths", &paths(card));
     }
+    if let Some(line) = rest_of_tree(card) {
+        meta(out, "rest of tree", &esc(&line));
+    }
     out.push_str("</div></div>\n");
 }
 
@@ -310,10 +313,18 @@ fn pipeline(out: &mut String, card: &Scorecard) {
         format!("{passed}/{} pass", provided.len())
     };
     out.push_str("<h2>flow</h2>\n<div class=\"flow\">");
-    let scope = match card.scope.paths.len() {
-        0 => card.scope.mode.clone(),
-        1 => format!("{} · 1 path", card.scope.mode),
-        n => format!("{} · {n} paths", card.scope.mode),
+    let scope = match (
+        card.scope.mode.as_str(),
+        card.scope.paths.len(),
+        card.scope.other_paths,
+    ) {
+        ("diff", n, Some(other)) => format!(
+            "diff · {n} path{}; {other} other",
+            if n == 1 { "" } else { "s" }
+        ),
+        (_, 0, _) => card.scope.mode.clone(),
+        (_, 1, _) => format!("{} · 1 path", card.scope.mode),
+        (_, n, _) => format!("{} · {n} paths", card.scope.mode),
     };
     step(out, "scope", &scope, 0, false);
     step(out, "pack", &card.pack, 0, false);
@@ -498,6 +509,36 @@ pub(crate) fn coverage_measured(card: &Scorecard) -> bool {
 pub(crate) const COVERAGE_NOT_MEASURED: &str =
     "Coverage was not measured, so CRAP assumes 0% coverage. These numbers are an upper bound.";
 
+/// One line for a `--diff` report: how many paths were scored, and how many
+/// other source paths remain in the tree. `None` when not a diff run or when
+/// the tree count is unknown.
+pub(crate) fn rest_of_tree(card: &Scorecard) -> Option<String> {
+    if card.scope.mode != "diff" {
+        return None;
+    }
+    let other = card.scope.other_paths?;
+    let scored = card.scope.paths.len() as u64;
+    Some(format!(
+        "{} in this diff; {} other {} in the tree",
+        plural(scored as usize, "path", "paths"),
+        other,
+        if other == 1 { "path" } else { "paths" }
+    ))
+}
+
+/// Short terminal form of `rest_of_tree`; fits 80 columns.
+pub(crate) fn rest_of_tree_short(card: &Scorecard) -> Option<String> {
+    if card.scope.mode != "diff" {
+        return None;
+    }
+    let other = card.scope.other_paths?;
+    let scored = card.scope.paths.len() as u64;
+    Some(format!(
+        "{scored} path{} in this diff; {other} other in the tree",
+        if scored == 1 { "" } else { "s" }
+    ))
+}
+
 /// A diff run only scores changed functions, so it has no tree-wide CRAP
 /// count. Say what the number covers and where the tree total lives
 /// rather than inventing one. `None` outside diff scope.
@@ -552,6 +593,11 @@ fn crap(out: &mut String, card: &Scorecard) {
     out.push_str("<h2>worst crap · threshold ");
     out.push_str(&card.crap.threshold.to_string());
     out.push_str("</h2>\n<div class=\"card\">");
+    if let Some(line) = rest_of_tree(card) {
+        out.push_str("<p style=\"color:var(--dim);margin:0 0 8px\">");
+        out.push_str(&esc(&line));
+        out.push_str("</p>");
+    }
     if let Some(line) = diff_baseline(card) {
         out.push_str("<p style=\"color:var(--dim);margin:0 0 8px\">");
         out.push_str(&esc(&line));
@@ -1270,6 +1316,22 @@ mod tests {
         assert!(html.contains("<p>error: using chunks_exact</p><details class=\"log\"><summary>full output</summary><pre>   Compiling demo v0.1.0\nerror: using chunks_exact &lt;T&gt;</pre></details>"));
         // The CRAP card has no log, so exactly one disclosure.
         assert_eq!(html.matches("<details class=\"log\">").count(), 1);
+    }
+
+    #[test]
+    fn html_rest_of_tree_names_paths_outside_the_diff() {
+        let mut c = card();
+        c.scope.mode = "diff".into();
+        c.scope.paths = vec!["src/a.rs".into(), "src/b.rs".into()];
+        c.scope.other_paths = Some(38);
+        c.scope.base = Some("origin/develop".into());
+        let html = to_html(&c);
+        assert!(html.contains("2 paths in this diff; 38 other paths in the tree"));
+        assert!(html.contains("diff · 2 paths; 38 other"));
+        c.scope.mode = "tree".into();
+        c.scope.other_paths = None;
+        let html = to_html(&c);
+        assert!(!html.contains("other paths in the tree"));
     }
 
     #[test]

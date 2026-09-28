@@ -130,6 +130,7 @@ fn analyze_blocked(
         mode: "tree".into(),
         paths: Vec::new(),
         base: None,
+        other_paths: None,
         fail_on: request.fail_on,
         findings,
         ran: Vec::new(),
@@ -288,6 +289,7 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         mode: "tree".into(),
         paths: Vec::new(),
         base: None,
+        other_paths: None,
         fail_on,
         findings,
         ran: {
@@ -573,6 +575,7 @@ fn analyze_unsupported(
         mode: "tree".into(),
         paths: Vec::new(),
         base: None,
+        other_paths: None,
         fail_on,
         findings,
         ran: {
@@ -671,6 +674,7 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         mode: "tree".into(),
         paths: Vec::new(),
         base: None,
+        other_paths: None,
         fail_on: request.fail_on,
         findings: outcome.findings,
         ran: outcome.ran,
@@ -1214,6 +1218,7 @@ fn assemble_rust_report(
         mode: selection.mode.clone(),
         paths: selection.paths.clone(),
         base: selection.base.clone(),
+        other_paths: selection.other_paths,
         fail_on: request.fail_on.clone(),
         findings: state.findings,
         ran: state.ran,
@@ -1240,6 +1245,7 @@ struct Draft {
     mode: String,
     paths: Vec<String>,
     base: Option<String>,
+    other_paths: Option<u64>,
     fail_on: Vec<String>,
     findings: Vec<Finding>,
     ran: Vec<String>,
@@ -1275,6 +1281,7 @@ fn finish(mut draft: Draft) -> AnalyzeOutput {
             mode: draft.mode,
             paths: draft.paths,
             base: draft.base,
+            other_paths: draft.other_paths,
         },
         intent: draft.intent,
         verdict: if failed { "fail" } else { "pass" }.to_string(),
@@ -3276,6 +3283,7 @@ mod tests {
             loc_changed: 0,
             files_changed: 0,
             base: None,
+            other_paths: None,
             workspace_root: true,
         };
         let mut ran = Vec::new();
@@ -3329,6 +3337,7 @@ mod tests {
             loc_changed: 0,
             files_changed: 0,
             base: None,
+            other_paths: None,
             workspace_root: true,
         };
         let mut findings = Vec::new();
@@ -3381,6 +3390,7 @@ mod tests {
             loc_changed: 0,
             files_changed: 0,
             base: None,
+            other_paths: None,
             workspace_root: true,
         };
         let mut findings = Vec::new();

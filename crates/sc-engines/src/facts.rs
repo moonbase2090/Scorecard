@@ -32,6 +32,13 @@ pub(crate) fn analyze_tree_with_workspace(
     root: &Path,
     exclude: &[String],
 ) -> (Vec<AnalyzedFile>, bool) {
+    let (rels, workspace_root) = tree_source_rels(root, exclude);
+    (analyze_rels(root, &rels), workspace_root)
+}
+
+/// Count (and list) the same source paths a tree-scope run would analyze,
+/// without parsing them. Diff reports use the count for the rest-of-tree line.
+pub(crate) fn tree_source_rels(root: &Path, exclude: &[String]) -> (Vec<String>, bool) {
     let metadata = cargo_metadata(root);
     let workspace_root = metadata
         .as_ref()
@@ -42,7 +49,7 @@ pub(crate) fn analyze_tree_with_workspace(
     }
     let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     let paths = source_files_under(&root, &dirs, exclude);
-    let rels: Vec<String> = paths
+    let mut rels: Vec<String> = paths
         .iter()
         .map(|path| {
             path.strip_prefix(&root)
@@ -51,7 +58,8 @@ pub(crate) fn analyze_tree_with_workspace(
                 .replace('\\', "/")
         })
         .collect();
-    (analyze_rels(&root, &rels), workspace_root)
+    rels.sort();
+    (rels, workspace_root)
 }
 
 pub fn analyze_rels(root: &Path, rels: &[String]) -> Vec<AnalyzedFile> {

@@ -21,6 +21,8 @@ pub struct Selection {
     pub files_changed: u64,
     /// Resolved diff base, only in diff mode.
     pub base: Option<String>,
+    /// Tree source paths that are not in this diff, only in diff mode.
+    pub other_paths: Option<u64>,
     pub workspace_root: bool,
 }
 
@@ -76,6 +78,7 @@ fn tree_like(mode: &str, files: Vec<AnalyzedFile>, workspace_root: bool) -> Sele
         loc_changed,
         files_changed,
         base: None,
+        other_paths: None,
         workspace_root,
     }
 }
@@ -134,7 +137,18 @@ fn select_diff(
         };
     }
     let files_changed = files.len() as u64;
-    let paths = files.iter().map(|file| file.rel.clone()).collect();
+    let paths: Vec<String> = files.iter().map(|file| file.rel.clone()).collect();
+    let (tree_rels, _) = crate::facts::tree_source_rels(root, exclude);
+    // Diff paths can include src/ files outside the cargo tree scan (deleted
+    // members, non-member crates). Count tree paths that are not in the diff,
+    // not `tree_len - diff_len`.
+    let path_set: std::collections::BTreeSet<&str> = paths.iter().map(String::as_str).collect();
+    let other_paths = Some(
+        tree_rels
+            .iter()
+            .filter(|rel| !path_set.contains(rel.as_str()))
+            .count() as u64,
+    );
     Ok(Selection {
         mode: "diff".into(),
         files,
@@ -145,6 +159,7 @@ fn select_diff(
         loc_changed,
         files_changed,
         base: Some(base),
+        other_paths,
         workspace_root,
     })
 }
@@ -370,5 +385,13 @@ mod tests {
         };
         assert!(overlaps(&function, &[5]));
         assert!(!overlaps(&function, &[1, 2]));
+    }
+    #[test]
+    fn other_paths_counts_tree_paths_not_in_the_diff() {
+        let tree = ["src/a.rs", "src/b.rs", "src/lib.rs"];
+        let paths = ["src/a.rs", "src/lib.rs", "tools/src/main.rs"];
+        let path_set: std::collections::BTreeSet<&str> = paths.iter().copied().collect();
+        let other = tree.iter().filter(|rel| !path_set.contains(*rel)).count();
+        assert_eq!(other, 1);
     }
 }
