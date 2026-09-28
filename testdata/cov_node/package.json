@@ -3,6 +3,6 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "test": "node test/choose.test.js"
+    "test": "node -e \"const { choose } = require('./src/choose.js'); if (choose(1) !== 'pos') { process.exit(1); }\""
   }
 }

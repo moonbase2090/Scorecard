@@ -89,13 +89,9 @@ fn node_plan(root: &Path) -> Vec<Step> {
         via("node", check_chain("node --check", &files))
     };
     let test = npm_test(root).and_then(|command| {
-        via(
-            "c8",
-            format!(
-                "mkdir -p .sc/coverage && c8 --all --reporter=json --reports-dir=.sc/coverage {command}"
-            ),
-        )
-        .or_else(|| via("npm", command))
+        via("c8", node_coverage_command("c8", &command))
+            .or_else(|| via("nyc", node_coverage_command("nyc", &command)))
+            .or_else(|| via("npm", command))
     });
     vec![
         Step {
@@ -643,6 +639,21 @@ fn has_php_tests(root: &Path) -> bool {
         || list_files(root, &["php"])
             .iter()
             .any(|file| file.contains("Test") || file.contains("/tests/"))
+}
+
+/// Wrap an npm test command so unloaded files are still measured at 0%.
+/// c8 and nyc both need `--all`; without it a never-required module disappears
+/// from the report and CRAP cannot fail on it (#120 / #79).
+fn node_coverage_command(tool: &str, command: &str) -> String {
+    match tool {
+        "c8" => format!(
+            "mkdir -p .sc/coverage && c8 --all --reporter=json --reports-dir=.sc/coverage {command}"
+        ),
+        "nyc" => format!(
+            "mkdir -p .sc/coverage && nyc --all --reporter=json --report-dir=.sc/coverage {command}"
+        ),
+        other => panic!("unsupported node coverage tool: {other}"),
+    }
 }
 
 fn npm_test(root: &Path) -> Option<String> {
@@ -1271,5 +1282,16 @@ mod tests {
         std::fs::write(root.join("eslint.config.cjs"), "module.exports = [];\n").unwrap();
         assert!(eslint_config(&root));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn node_coverage_wraps_c8_and_nyc_with_all() {
+        let c8 = node_coverage_command("c8", "npm test --silent");
+        assert!(c8.contains("c8 --all "), "{c8}");
+        assert!(c8.contains("--reporter=json"), "{c8}");
+        let nyc = node_coverage_command("nyc", "npm test --silent");
+        assert!(nyc.contains("nyc --all "), "{nyc}");
+        assert!(nyc.contains("--reporter=json"), "{nyc}");
+        assert!(nyc.contains("--report-dir=.sc/coverage"), "{nyc}");
     }
 }

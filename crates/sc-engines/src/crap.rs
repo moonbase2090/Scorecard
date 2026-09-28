@@ -55,6 +55,7 @@ pub fn evaluate(
             .and_then(|data| data.for_function_known(&function.file, &function.symbol, &files))
             .is_some()
     });
+
     let crap_max = rows.first().map(|row| row.crap).unwrap_or(0.0);
     let over = rows
         .iter()
@@ -271,6 +272,51 @@ mod tests {
         assert_eq!(outcome.findings[0].rule, "crap.over_threshold");
         assert_eq!(outcome.findings[0].severity, "error");
         assert!(!outcome.findings[0].message.contains("not measured"));
+    }
+
+    #[test]
+    fn partial_coverage_scores_measured_rows() {
+        let functions = vec![
+            FunctionInfo {
+                file: "src/lib.rs".into(),
+                symbol: "covered".into(),
+                span: Span {
+                    start_line: 1,
+                    start_col: 1,
+                    end_line: 20,
+                    end_col: 2,
+                },
+                cc: 12,
+            },
+            FunctionInfo {
+                file: "src/other.rs".into(),
+                symbol: "missing".into(),
+                span: Span {
+                    start_line: 1,
+                    start_col: 1,
+                    end_line: 20,
+                    end_col: 2,
+                },
+                cc: 12,
+            },
+        ];
+        let coverage = CoverageData {
+            functions: vec![crate::coverage::CovFunction {
+                file: "src/lib.rs".into(),
+                demangled: "crate::covered".into(),
+                coverage: 0.0,
+            }],
+            line_rate: 0.5,
+        };
+        let outcome = evaluate(&functions, Some(&coverage), 30, 15, |_| true);
+        assert!(!outcome.coverage_complete);
+        assert_eq!(outcome.over, 1);
+        assert_eq!(outcome.untested, 0);
+        assert_eq!(outcome.crap_max, 156.0);
+        assert_eq!(outcome.worst.len(), 1);
+        assert_eq!(outcome.worst[0].symbol, "covered");
+        assert_eq!(outcome.findings.len(), 1);
+        assert_eq!(outcome.findings[0].rule, "crap.over_threshold");
     }
 
     #[test]

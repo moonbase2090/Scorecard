@@ -27,4 +27,4 @@ At CC 5 and 0% coverage, CRAP is exactly 30, so the function passes. At CC 12 an
 
 `gates.new_fn_untested_cc` defaults to 15. In tree and `--paths` mode, every function in scope at or above that complexity with 0% coverage produces `complexity.untested` and fails the `crap` gate. With `--diff`, CRAP scores only changed functions, and `complexity.untested` scores only functions that are new relative to the base. At CC 11 and 0% coverage, CRAP already fails the default threshold, and `complexity.untested` does not fire.
 
-Dimension scores are described in [Reading the report](report.md#terminal-layout).
+Dimension scores are described in [Reading the report](report.md#terminal-layout). `sca` warnings subtract 0.01 because that gate is advisory by default. See `crates/sc-core/src/score.rs`.

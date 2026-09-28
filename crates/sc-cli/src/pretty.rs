@@ -172,16 +172,16 @@ fn push_crap(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize
         out.push_str(&paint(opts.color, dim(), &fit(&line, width, opts.color)));
         out.push('\n');
     }
-    let rows: Vec<&CrapFunction> = card.crap.worst.iter().take(5).collect();
-    if rows.is_empty() {
-        out.push_str("  (none)\n\n");
-        return;
-    }
     let measured = crate::report::coverage_measured(card);
     if !measured {
         let note = "  coverage not measured: CRAP assumes 0% coverage (upper bound)";
         out.push_str(&paint(opts.color, dim(), &fit(note, width, opts.color)));
         out.push('\n');
+    }
+    let rows: Vec<&CrapFunction> = card.crap.worst.iter().take(5).collect();
+    if rows.is_empty() {
+        out.push_str("  (none)\n\n");
+        return;
     }
     out.push_str("  CRAP   CC   COV  SYMBOL            LOCATION\n");
     for row in rows {
@@ -641,6 +641,39 @@ mod tests {
         let text = to_pretty(&card, &opts);
         assert!(text.contains("   132   11    0%  classify"));
         assert!(!text.contains("not measured"));
+    }
+
+    #[test]
+    fn crap_rows_keep_measured_coverage_when_some_functions_lack_a_record() {
+        let mut card = Scorecard::skeleton("demo", 30);
+        card.verdict = "pass".into();
+        card.engines_run.push("coverage".into());
+        card.gates.push(Gate {
+            id: "crap".into(),
+            pass: false,
+            enforced: false,
+            reason: Some("some functions have no coverage record and were not scored".into()),
+        });
+        card.crap.worst = vec![CrapFunction {
+            symbol: "classify".into(),
+            file: "src/lib.rs".into(),
+            cc: 11,
+            coverage: 0.4,
+            crap: 40.0,
+        }];
+        let text = to_pretty(
+            &card,
+            &PrettyOpts {
+                color: false,
+                width: 120,
+                version: "0.1.0".into(),
+                report: None,
+                exit_code: 0,
+            },
+        );
+        assert!(text.contains("    40   11   40%  classify"));
+        assert!(!text.contains("CRAP is not scored"));
+        assert!(!text.contains("    --  classify"));
     }
 
     #[test]

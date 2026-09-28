@@ -487,8 +487,9 @@ fn gates(out: &mut String, card: &Scorecard) {
     out.push_str("</table></div>\n");
 }
 
-/// Coverage counts as measured only when the coverage engine ran. Otherwise
-/// every CRAP number assumes 0% coverage, and 0% must not read as a result.
+/// Coverage counts as measured only when the coverage engine ran. Incomplete
+/// coverage still leaves measured rows scored; only a missing coverage run
+/// means every CRAP number assumes 0%.
 pub(crate) fn coverage_measured(card: &Scorecard) -> bool {
     card.engines_run.iter().any(|engine| engine == "coverage")
 }
@@ -1198,12 +1199,34 @@ mod tests {
 
     #[test]
     fn html_says_coverage_not_measured_instead_of_zero() {
-        // card() never ran the coverage engine.
-        let html = to_html(&card());
+        let mut c = card();
+        c.engines_run.retain(|engine| engine != "coverage");
+        let html = to_html(&c);
         assert!(html.contains("<b>—</b><span>coverage not measured</span>"));
         assert!(html.contains("<span class=\"cov\">not measured</span>"));
         assert!(html.contains("CRAP assumes 0% coverage"));
         assert!(!html.contains("<span>coverage</span>"));
+        assert!(html.contains("<span>crap max</span>"));
+        assert!(html.contains("<span>over threshold</span>"));
+    }
+
+    #[test]
+    fn html_keeps_measured_coverage_when_some_functions_lack_a_record() {
+        let mut c = card();
+        if !c.engines_run.iter().any(|engine| engine == "coverage") {
+            c.engines_run.push("coverage".into());
+        }
+        c.gates[0].enforced = false;
+        c.gates[0].pass = false;
+        c.gates[0].reason =
+            Some("some functions have no coverage record and were not scored".into());
+        c.crap.worst[0].coverage = 0.4;
+        c.metrics.coverage_changed = 0.4;
+        let html = to_html(&c);
+        assert!(html.contains("<b>40%</b><span>coverage</span>"));
+        assert!(html.contains("<span class=\"cov\">40%</span>"));
+        assert!(!html.contains("not measured"));
+        assert!(!html.contains("CRAP is not scored"));
     }
 
     #[test]
