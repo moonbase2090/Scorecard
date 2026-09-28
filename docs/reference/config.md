@@ -28,7 +28,7 @@ Only the first file found is read. Command-line flags override the matching keys
 
 | Key | Default | Meaning |
 |---|---|---|
-| `scope.exclude` | `["target/**", "generated/**"]` | Globs, relative to the project root, left out of complexity and CRAP. |
+| `scope.exclude` | `["target/**", "generated/**"]` | Globs, relative to the project root, left out of complexity, CRAP, and the secrets walk. |
 
 ### `[engines]`
 

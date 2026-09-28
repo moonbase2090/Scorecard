@@ -167,7 +167,16 @@ pub enum Detected {
 
 pub fn text_secrets(root: &Path, exclude: &[String]) -> Vec<sc_core::Finding> {
     let mut files = Vec::new();
-    collect_text(root, root, exclude, &mut files);
+    let mut seen_dirs = std::collections::HashSet::new();
+    let mut seen_files = std::collections::HashSet::new();
+    collect_text(
+        root,
+        root,
+        exclude,
+        &mut files,
+        &mut seen_dirs,
+        &mut seen_files,
+    );
     let mut findings = Vec::new();
     for path in files {
         let Ok(text) = std::fs::read_to_string(&path) else {
@@ -183,7 +192,18 @@ pub fn text_secrets(root: &Path, exclude: &[String]) -> Vec<sc_core::Finding> {
     findings
 }
 
-fn collect_text(root: &Path, dir: &Path, exclude: &[String], out: &mut Vec<std::path::PathBuf>) {
+fn collect_text(
+    root: &Path,
+    dir: &Path,
+    exclude: &[String],
+    out: &mut Vec<std::path::PathBuf>,
+    seen_dirs: &mut std::collections::HashSet<std::path::PathBuf>,
+    seen_files: &mut std::collections::HashSet<std::path::PathBuf>,
+) {
+    let dir_key = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    if !seen_dirs.insert(dir_key) {
+        return;
+    }
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -194,7 +214,8 @@ fn collect_text(root: &Path, dir: &Path, exclude: &[String], out: &mut Vec<std::
             Ok(meta) => meta,
             Err(_) => continue,
         };
-        // A directory symlink can loop once the depth cap is gone.
+        // A directory symlink can loop, or walk the same tree twice, once the
+        // depth cap is gone.
         if meta.file_type().is_symlink() && path.is_dir() {
             continue;
         }
@@ -210,7 +231,7 @@ fn collect_text(root: &Path, dir: &Path, exclude: &[String], out: &mut Vec<std::
             if sc_graph::is_excluded(&rel, exclude) {
                 continue;
             }
-            collect_text(root, &path, exclude, out);
+            collect_text(root, &path, exclude, out, seen_dirs, seen_files);
         } else if secret_file(name) {
             let rel = path
                 .strip_prefix(root)
@@ -218,6 +239,10 @@ fn collect_text(root: &Path, dir: &Path, exclude: &[String], out: &mut Vec<std::
                 .to_string_lossy()
                 .replace('\\', "/");
             if sc_graph::is_excluded(&rel, exclude) {
+                continue;
+            }
+            let file_key = path.canonicalize().unwrap_or_else(|_| path.clone());
+            if !seen_files.insert(file_key) {
                 continue;
             }
             out.push(path);
@@ -627,6 +652,44 @@ mod tests {
         );
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn symlinks_are_not_followed_and_testdata_exclude_hides_fixtures() {
+        let key = format!("AKIA{}", "IOSFODNN7EXAMPLE");
+        let root = temp("secrets-cycle");
+        fs::create_dir_all(root.join("real")).unwrap();
+        fs::write(root.join("real/leak.py"), format!("KEY = \"{key}\"\n")).unwrap();
+        std::os::unix::fs::symlink(root.join("real"), root.join("link-a")).unwrap();
+        std::os::unix::fs::symlink(root.join("link-a"), root.join("link-b")).unwrap();
+        std::os::unix::fs::symlink(root.join("real/leak.py"), root.join("again.py")).unwrap();
+        fs::create_dir_all(root.join("cycle")).unwrap();
+        std::os::unix::fs::symlink(root.join("cycle"), root.join("cycle/loop")).unwrap();
+        fs::create_dir_all(root.join("testdata")).unwrap();
+        fs::write(root.join("testdata/leak.py"), format!("KEY = \"{key}\"\n")).unwrap();
+
+        let findings = text_secrets(&root, &["testdata/**".into()]);
+        let files: Vec<&str> = findings
+            .iter()
+            .map(|finding| finding.file.as_str())
+            .collect();
+        assert_eq!(
+            files
+                .iter()
+                .filter(|file| file.ends_with("leak.py") || file.ends_with("again.py"))
+                .count(),
+            1,
+            "{files:?}"
+        );
+        assert!(
+            !files.iter().any(|file| file.contains("link-")),
+            "{files:?}"
+        );
+        assert!(
+            !files.iter().any(|file| file.contains("testdata/")),
+            "{files:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 
     fn temp(name: &str) -> std::path::PathBuf {
