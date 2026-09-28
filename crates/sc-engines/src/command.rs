@@ -193,7 +193,7 @@ pub fn run_cargo(root: &Path, args: &[&str], deadline: Instant) -> Result<Captur
     run_cmd(&mut cmd, timeout)
 }
 
-fn shell_quote_arg(text: &str) -> String {
+pub(crate) fn shell_quote_arg(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
 }
 

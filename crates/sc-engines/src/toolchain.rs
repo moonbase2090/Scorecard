@@ -89,7 +89,7 @@ fn node_plan(root: &Path) -> Vec<Step> {
         via(
             "c8",
             format!(
-                "mkdir -p .sc/coverage && c8 --reporter=json --reports-dir=.sc/coverage {command}"
+                "mkdir -p .sc/coverage && c8 --all --reporter=json --reports-dir=.sc/coverage {command}"
             ),
         )
         .or_else(|| via("npm", command))

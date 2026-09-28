@@ -66,9 +66,11 @@ pub fn run(root: &Path, deadline: Instant, threshold: u32, untested_cc: u32) -> 
         &mut ran,
         &mut skipped,
     );
+    let functions = crate::poly_cc::functions_for_pack(root, "python");
     let (tests_enforced, tests_pass, tests_reason) = run_pytest(
         root,
         deadline,
+        &cov_sources(&functions),
         &mut findings,
         &mut runs,
         &mut ran,
@@ -83,7 +85,6 @@ pub fn run(root: &Path, deadline: Instant, threshold: u32, untested_cc: u32) -> 
         &mut skipped,
     );
     let sca = check_imports(root, &mut findings, &mut ran);
-    let functions = crate::poly_cc::functions_for_pack(root, "python");
     let coverage = read_coverage(root, &functions);
     let crap = crate::crap::evaluate(
         &functions,
@@ -248,6 +249,7 @@ fn pyproject_mentions_pytest(root: &Path) -> bool {
 fn run_pytest(
     root: &Path,
     deadline: Instant,
+    sources: &[String],
     findings: &mut Vec<Finding>,
     runs: &mut Vec<RunRecord>,
     ran: &mut Vec<String>,
@@ -267,7 +269,15 @@ fn run_pytest(
         let _ = std::fs::create_dir_all(parent);
     }
     let _ = std::fs::remove_file(&cov_file);
-    let command = format!("{base} --cov --cov-report=json:{}", cov_file.display());
+    let cov: Vec<String> = sources
+        .iter()
+        .map(|dir| format!("--cov={}", crate::command::shell_quote_arg(dir)))
+        .collect();
+    let command = format!(
+        "{base} {} --cov-report=json:{}",
+        cov.join(" "),
+        cov_file.display()
+    );
     let command = if base.starts_with("uv ") || host_pytest() {
         command
     } else {
@@ -324,6 +334,24 @@ fn run_pytest(
             (true, false, "pytest did not run".into())
         }
     }
+}
+
+/// Each directory that holds a scored function, as a `--cov` source. With no
+/// source, coverage.py leaves out a file the tests never import, and that file
+/// is not scored. A source directory is read even without `__init__.py`, which
+/// covers a `src/` layout and namespace packages.
+fn cov_sources(functions: &[sc_graph::FunctionInfo]) -> Vec<String> {
+    let mut dirs: BTreeSet<String> = functions
+        .iter()
+        .map(|function| match Path::new(&function.file).parent() {
+            Some(dir) if !dir.as_os_str().is_empty() => dir.to_string_lossy().into_owned(),
+            _ => ".".into(),
+        })
+        .collect();
+    if dirs.is_empty() {
+        dirs.insert(".".into());
+    }
+    dirs.into_iter().collect()
 }
 
 fn run_ruff(
@@ -1362,6 +1390,7 @@ mod tests {
         let (enforced, pass, _) = run_pytest(
             &root,
             std::time::Instant::now() + std::time::Duration::from_secs(30),
+            &[".".to_string()],
             &mut findings,
             &mut Vec::new(),
             &mut Vec::new(),
@@ -1382,6 +1411,7 @@ mod tests {
         let (enforced, pass, reason) = run_pytest(
             &bare,
             std::time::Instant::now() + std::time::Duration::from_secs(5),
+            &[".".to_string()],
             &mut Vec::new(),
             &mut Vec::new(),
             &mut Vec::new(),
@@ -1452,6 +1482,7 @@ mod tests {
         let _ = run_pytest(
             &empty,
             std::time::Instant::now() + std::time::Duration::from_secs(5),
+            &[".".to_string()],
             &mut findings,
             &mut runs,
             &mut ran,
@@ -1460,6 +1491,7 @@ mod tests {
         let _ = run_pytest(
             &root,
             std::time::Instant::now() + std::time::Duration::from_secs(20),
+            &[".".to_string()],
             &mut findings,
             &mut runs,
             &mut ran,
@@ -1652,6 +1684,29 @@ dev = ["pytest>=8"]
             .message
             .contains("the package index could not be reached"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cov_sources_names_each_directory_with_a_scored_function() {
+        let function = |file: &str| sc_graph::FunctionInfo {
+            file: file.into(),
+            symbol: "f".into(),
+            span: sc_core::Span {
+                start_line: 1,
+                start_col: 1,
+                end_line: 2,
+                end_col: 1,
+            },
+            cc: 1,
+        };
+        let functions = [
+            function("src/app/core.py"),
+            function("src/app/unused.py"),
+            function("tools/run.py"),
+            function("setup.py"),
+        ];
+        assert_eq!(cov_sources(&functions), [".", "src/app", "tools"]);
+        assert_eq!(cov_sources(&[]), ["."]);
     }
 
     #[test]
