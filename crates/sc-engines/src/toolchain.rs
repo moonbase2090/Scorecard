@@ -435,7 +435,7 @@ fn apply(root: &Path, deadline: Instant, step: Step, report: &mut ToolReport) {
                     ));
                 } else {
                     let reason = format!(
-                        "{failed}. Include paths and generated headers are not known for a Makefile or configure tree, so this types check is not enforced."
+                        "{failed}. Include paths and generated headers are not known without CMakeLists.txt or compile_commands.json, so this types check is not enforced."
                     );
                     report.findings.push(Finding {
                         id: format!("{}:failed", step.engine),
@@ -548,22 +548,10 @@ fn cpp_types_absent(compiler_present: bool, sources_empty: bool) -> &'static str
     }
 }
 
-fn make_or_configure(root: &Path) -> bool {
-    [
-        "Makefile",
-        "makefile",
-        "GNUmakefile",
-        "configure",
-        "configure.ac",
-    ]
-    .iter()
-    .any(|name| root.join(name).is_file())
-}
-
-/// A Makefile or configure script does not record include paths or generated
-/// headers, so a syntax check on that tree is reported and does not fail the run.
+/// A syntax check cannot see include paths or generated headers unless the
+/// project has `CMakeLists.txt` or `compile_commands.json`.
 fn types_enforced(root: &Path) -> bool {
-    !make_or_configure(root)
+    root.join("CMakeLists.txt").is_file() || root.join("compile_commands.json").is_file()
 }
 
 fn split_c_family(files: &[String]) -> (Vec<String>, Vec<String>) {
@@ -1053,7 +1041,7 @@ mod tests {
 
     #[test]
     fn valid_c_with_a_makefile_uses_cc_and_does_not_fail_types() {
-        let root = std::env::temp_dir().join(format!("sc-cc-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("sc-valid-c-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("Makefile"), "all:\n").unwrap();
@@ -1078,6 +1066,36 @@ mod tests {
             let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
             assert!(gate.pass, "{gate:?} {:?}", report.findings);
         }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn cmake_and_makefile_keeps_a_compile_error_enforced() {
+        if !which("cc") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cmake-make-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("CMakeLists.txt"),
+            "cmake_minimum_required(VERSION 3.16)\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("Makefile"), "all:\n").unwrap();
+        std::fs::write(root.join("demo.c"), "int main(void) { return }\n").unwrap();
+        let steps = cpp_plan(&root);
+        let types = steps.iter().find(|step| step.gate == "types").unwrap();
+        assert!(types.enforce);
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(!gate.pass, "{gate:?} {:?}", report.findings);
+        assert!(gate.enforced, "{gate:?}");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1121,7 +1139,7 @@ mod tests {
         let command = types.command.clone().unwrap_or_default();
         assert!(command.contains("g++ -fsyntax-only"), "{command}");
         assert!(!command.contains("cc -fsyntax-only"), "{command}");
-        assert!(types.enforce);
+        assert!(!types.enforce);
         let _ = std::fs::remove_dir_all(&root);
     }
 
