@@ -6,7 +6,7 @@
 
 use sc_core::Finding;
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub fn missing_finding(reason: &str) -> Finding {
     let reason = if reason.trim().is_empty() {
@@ -238,10 +238,11 @@ pub fn merge_known<'a>(
     files: impl IntoIterator<Item = &'a str>,
     extra: &'a [String],
 ) -> Vec<&'a str> {
-    let mut known: Vec<&str> = files.into_iter().collect();
-    for path in extra {
-        if !known.contains(&path.as_str()) {
-            known.push(path.as_str());
+    let mut seen = HashSet::new();
+    let mut known = Vec::new();
+    for path in files.into_iter().chain(extra.iter().map(String::as_str)) {
+        if seen.insert(path) {
+            known.push(path);
         }
     }
     known
@@ -253,11 +254,17 @@ pub fn merge_known<'a>(
 pub fn file_owners<'a>(
     reports: impl IntoIterator<Item = &'a str>,
     known: &[&str],
-) -> std::collections::HashMap<String, String> {
-    let mut map = std::collections::HashMap::new();
+) -> HashMap<String, String> {
+    let index = KnownPaths::new(known);
+    let mut map = HashMap::new();
+    let mut seen = HashSet::new();
     for report in reports {
-        if let Some(file) = owner_of(report, known) {
-            map.insert(normalize_path(report), file.to_string());
+        let key = normalize_path(report);
+        if !seen.insert(key.clone()) {
+            continue;
+        }
+        if let Some(file) = index.owner(&key) {
+            map.insert(key, file.to_string());
         }
     }
     map
@@ -273,52 +280,76 @@ pub fn report_owns(
         .is_some_and(|owner| owner == &normalize_path(file))
 }
 
-fn owner_of<'a>(report: &str, known: &[&'a str]) -> Option<&'a str> {
-    // Longest suffix wins. One pass: `path_owned` would rescan `known` per file.
-    let mut best: Option<(usize, &'a str)> = None;
-    for file in known {
-        let Some(prefix) = path_prefix_len(report, file) else {
-            continue;
-        };
-        best = Some(match best {
-            None => (prefix, *file),
-            Some((best_prefix, _)) if prefix < best_prefix => (prefix, *file),
-            Some(kept) => kept,
-        });
-    }
-    if let Some((_, file)) = best {
-        return Some(file);
-    }
-    // JaCoCo's package plus source file is a suffix of the project path.
-    let report_path = normalize_path(report);
-    if report_path.is_empty() {
-        return None;
-    }
-    let mut suffix_hits = Vec::new();
-    for file in known {
-        let file_path = normalize_path(file);
-        if file_path == report_path || file_path.ends_with(&format!("/{report_path}")) {
-            suffix_hits.push(*file);
+/// Known files grouped by basename. A report path can only belong to a file
+/// with the same final component, so a vendor tree is not scanned per line.
+struct KnownPaths<'a> {
+    by_base: HashMap<String, Vec<(&'a str, String)>>,
+}
+
+impl<'a> KnownPaths<'a> {
+    fn new(known: &[&'a str]) -> Self {
+        let mut by_base: HashMap<String, Vec<(&str, String)>> = HashMap::new();
+        for file in known {
+            let norm = normalize_path(file);
+            let base = norm.rsplit('/').next().unwrap_or("").to_string();
+            by_base.entry(base).or_default().push((*file, norm));
         }
+        Self { by_base }
     }
-    if suffix_hits.len() == 1 {
-        return Some(suffix_hits[0]);
-    }
-    if report_path.contains('/') {
-        return None;
-    }
-    let mut only = None;
-    for file in known {
-        let base = normalize_path(file);
-        let base = base.rsplit('/').next().unwrap_or("");
-        if base == report_path {
-            if only.is_some() {
-                return None;
+
+    fn owner(&self, report_norm: &str) -> Option<&'a str> {
+        if report_norm.is_empty() {
+            return None;
+        }
+        let base = report_norm.rsplit('/').next().unwrap_or("");
+        let candidates = self.by_base.get(base)?;
+        let mut best: Option<(usize, &'a str)> = None;
+        for (file, norm) in candidates {
+            let Some(prefix) = normalized_prefix_len(report_norm, norm) else {
+                continue;
+            };
+            best = Some(match best {
+                None => (prefix, *file),
+                Some((best_prefix, _)) if prefix < best_prefix => (prefix, *file),
+                Some(kept) => kept,
+            });
+        }
+        if let Some((_, file)) = best {
+            return Some(file);
+        }
+        // JaCoCo names the package plus the source file, a suffix of the project path.
+        let mut suffix_hits = Vec::new();
+        let marker = format!("/{report_norm}");
+        for (file, norm) in candidates {
+            if norm == report_norm || norm.ends_with(&marker) {
+                suffix_hits.push(*file);
             }
-            only = Some(*file);
         }
+        if suffix_hits.len() == 1 {
+            return Some(suffix_hits[0]);
+        }
+        if report_norm.contains('/') || candidates.len() != 1 {
+            return None;
+        }
+        Some(candidates[0].0)
     }
-    only
+}
+
+fn normalized_prefix_len(cov: &str, rel: &str) -> Option<usize> {
+    if rel.is_empty() {
+        return None;
+    }
+    if cov == rel {
+        return Some(0);
+    }
+    if cov.len() > rel.len()
+        && cov.as_bytes()[cov.len() - rel.len() - 1] == b'/'
+        && cov.ends_with(rel)
+    {
+        Some(cov.len() - rel.len() - 1)
+    } else {
+        None
+    }
 }
 
 pub fn path_owned<'a>(cov_file: &str, rel: &str, known: impl IntoIterator<Item = &'a str>) -> bool {
@@ -359,6 +390,41 @@ fn normalize_path(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn many_vendor_paths_resolve_once_per_report_file() {
+        let mut known = Vec::new();
+        known.push("src/App.php".to_string());
+        for index in 0..30_000 {
+            known.push(format!("vendor/p{index}/File.php"));
+        }
+        known.push("vendor/pkg/App.php".to_string());
+        let refs: Vec<&str> = known.iter().map(String::as_str).collect();
+        let mut reports = vec!["src/App.php"; 60_000];
+        reports.push("vendor/pkg/App.php");
+        reports.push("com/example/App.java");
+        let started = std::time::Instant::now();
+        let owners = file_owners(reports, &refs);
+        assert!(
+            started.elapsed().as_secs() < 5,
+            "owner map took {:?}",
+            started.elapsed()
+        );
+        assert_eq!(
+            owners.get("src/App.php").map(String::as_str),
+            Some("src/App.php")
+        );
+        assert_eq!(
+            owners.get("vendor/pkg/App.php").map(String::as_str),
+            Some("vendor/pkg/App.php")
+        );
+        let java = ["src/main/java/com/example/App.java"];
+        let jacoco = file_owners(["com/example/App.java", "com/example/App.java"], &java);
+        assert_eq!(
+            jacoco.get("com/example/App.java").map(String::as_str),
+            Some("src/main/java/com/example/App.java")
+        );
+    }
 
     #[test]
     fn demangle_and_match_classify() {
