@@ -165,9 +165,9 @@ pub enum Detected {
     Ambiguous(Vec<PackId>),
 }
 
-pub fn text_secrets(root: &Path) -> Vec<sc_core::Finding> {
+pub fn text_secrets(root: &Path, exclude: &[String]) -> Vec<sc_core::Finding> {
     let mut files = Vec::new();
-    collect_text(root, root, 0, &mut files);
+    collect_text(root, root, exclude, &mut files);
     let mut findings = Vec::new();
     for path in files {
         let Ok(text) = std::fs::read_to_string(&path) else {
@@ -183,55 +183,79 @@ pub fn text_secrets(root: &Path) -> Vec<sc_core::Finding> {
     findings
 }
 
-fn collect_text(_root: &Path, dir: &Path, depth: u32, out: &mut Vec<std::path::PathBuf>) {
-    if depth > 4 || out.len() >= 200 {
-        return;
-    }
+fn collect_text(root: &Path, dir: &Path, exclude: &[String], out: &mut Vec<std::path::PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
         let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-        if name.starts_with('.') || name == "node_modules" || name == "target" || name == "dist" {
+        if name == ".git"
+            || name == "target"
+            || name == "node_modules"
+            || name == "dist"
+            || name == ".sc"
+        {
+            continue;
+        }
+        let rel = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        if sc_graph::is_excluded(&rel, exclude) {
             continue;
         }
         if path.is_dir() {
-            collect_text(_root, &path, depth + 1, out);
-        } else if matches!(
-            path.extension().and_then(|ext| ext.to_str()),
-            Some(
-                "rs" | "js"
-                    | "jsx"
-                    | "mjs"
-                    | "cjs"
-                    | "ts"
-                    | "tsx"
-                    | "py"
-                    | "go"
-                    | "toml"
-                    | "json"
-                    | "sh"
-                    | "bash"
-                    | "java"
-                    | "cs"
-                    | "php"
-                    | "c"
-                    | "cc"
-                    | "cpp"
-                    | "cxx"
-                    | "h"
-                    | "hh"
-                    | "hpp"
-                    | "hxx"
-                    | "html"
-                    | "htm"
-                    | "css",
-            )
-        ) {
+            collect_text(root, &path, exclude, out);
+        } else if secret_file(name) {
             out.push(path);
         }
     }
+}
+
+fn secret_file(name: &str) -> bool {
+    if name == ".env" || name.starts_with(".env.") {
+        return true;
+    }
+    matches!(
+        std::path::Path::new(name)
+            .extension()
+            .and_then(|ext| ext.to_str()),
+        Some(
+            "rs" | "js"
+                | "jsx"
+                | "mjs"
+                | "cjs"
+                | "ts"
+                | "tsx"
+                | "py"
+                | "go"
+                | "toml"
+                | "json"
+                | "sh"
+                | "bash"
+                | "java"
+                | "cs"
+                | "php"
+                | "c"
+                | "cc"
+                | "cpp"
+                | "cxx"
+                | "h"
+                | "hh"
+                | "hpp"
+                | "hxx"
+                | "html"
+                | "htm"
+                | "css"
+                | "pem"
+                | "yml"
+                | "yaml"
+                | "md"
+                | "env",
+        )
+    )
 }
 
 pub fn detect(root: &Path, override_pack: &str) -> Result<Detected, String> {
@@ -467,6 +491,71 @@ fn has_shell(root: &Path) -> bool {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn secrets_walk_reaches_deep_files_dotenv_and_honors_exclude() {
+        let key = format!("AKIA{}", "IOSFODNN7EXAMPLE");
+        let root = temp("secrets-walk");
+        let deep = root.join("n/n/n/n/n");
+        fs::create_dir_all(&deep).unwrap();
+        fs::write(deep.join("leak.py"), format!("KEY = \"{key}\"\n")).unwrap();
+        fs::write(root.join(".env"), format!("AWS_ACCESS_KEY_ID={key}\n")).unwrap();
+        fs::write(root.join("README.md"), format!("key {key}\n")).unwrap();
+        fs::write(root.join("secrets.yaml"), format!("key: \"{key}\"\n")).unwrap();
+        let begin = "-----BEGIN ";
+        let end = "PRIVATE KEY-----";
+        fs::write(root.join("key.pem"), format!("{begin}RSA {end}\nMIIB\n")).unwrap();
+        fs::create_dir_all(root.join("tests")).unwrap();
+        fs::write(
+            root.join("tests/leak.rs"),
+            format!("const K: &str = \"{key}\";\n"),
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("a")).unwrap();
+        for index in 0..200 {
+            fs::write(root.join(format!("a/f{index:03}.json")), "{}\n").unwrap();
+        }
+        fs::create_dir_all(root.join("b")).unwrap();
+        fs::write(root.join("b/leak.py"), format!("KEY = \"{key}\"\n")).unwrap();
+        fs::create_dir_all(root.join("vendor")).unwrap();
+        fs::write(root.join("vendor/leak.py"), format!("KEY = \"{key}\"\n")).unwrap();
+
+        let findings = text_secrets(&root, &["vendor/**".into()]);
+        let files: Vec<&str> = findings
+            .iter()
+            .map(|finding| finding.file.as_str())
+            .collect();
+        assert!(
+            files.iter().any(|file| file.ends_with("n/n/n/n/n/leak.py")),
+            "{files:?}"
+        );
+        assert!(files.iter().any(|file| file.ends_with(".env")), "{files:?}");
+        assert!(
+            files.iter().any(|file| file.ends_with("README.md")),
+            "{files:?}"
+        );
+        assert!(
+            files.iter().any(|file| file.ends_with("secrets.yaml")),
+            "{files:?}"
+        );
+        assert!(
+            files.iter().any(|file| file.ends_with("key.pem")),
+            "{files:?}"
+        );
+        assert!(
+            files.iter().any(|file| file.ends_with("tests/leak.rs")),
+            "{files:?}"
+        );
+        assert!(
+            files.iter().any(|file| file.ends_with("b/leak.py")),
+            "{files:?}"
+        );
+        assert!(
+            !files.iter().any(|file| file.contains("vendor/")),
+            "{files:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
 
     fn temp(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("sc-pack-{name}-{}", std::process::id()));
