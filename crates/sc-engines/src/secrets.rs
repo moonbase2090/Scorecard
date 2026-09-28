@@ -214,18 +214,15 @@ fn shannon(token: &str) -> f64 {
 }
 
 /// Placeholders and docs examples: low entropy, one repeated character,
-/// nearly sorted / sequential bodies, or an obvious filler word.
+/// nearly sorted / sequential bodies, or the literal filler `placeholder`.
+/// Do not substring-match `example` / `000000` / `aaaaaa` — a real token can
+/// contain those runs. AWS docs ids are handled separately via an `EXAMPLE` suffix.
 fn credential_signal(token: &str) -> bool {
     if token.is_empty() {
         return false;
     }
     let lower = token.to_ascii_lowercase();
-    if lower.contains("example")
-        || lower.contains("placeholder")
-        || lower.contains("000000")
-        || lower.contains("aaaaaa")
-        || lower.contains("xxxxxx")
-    {
+    if lower.contains("placeholder") {
         return false;
     }
     if shannon(token) < 3.0 {
@@ -340,6 +337,17 @@ mod tests {
                 "should ignore placeholder in {text:?}, got {findings:?}"
             );
         }
+    }
+
+    #[test]
+    fn does_not_ignore_a_mixed_token_that_embeds_zero_runs() {
+        // Build the body in pieces so this source file does not match itself.
+        let body = ["Ab3k", "000000", "Qm9ZnR4pLx7w", "Ab3k", "Qm9ZnR4pLx"].concat();
+        assert_eq!(body.len(), 36, "{body}");
+        let token = format!("ghp_{body}");
+        let findings = secrets_in_text(&format!("TOKEN = \"{token}\"\n"), "app.py");
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].rule, "secrets.github_token");
     }
 
     #[test]
