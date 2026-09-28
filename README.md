@@ -155,6 +155,7 @@ More is in [MCP](docs/mcp.md).
 | `mutation` | `off` | `off`, `diff`, or `full` |
 | `format` | `sarif` | `json`, `md`, `sarif`, `html`, or `all` |
 | `diff` | `""` | Git base ref; empty skips `--diff` |
+| `build-from-source` | `false` | Build `sc` from this checkout instead of installing a release |
 
 ## More
 
