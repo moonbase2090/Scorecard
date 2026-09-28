@@ -1660,7 +1660,9 @@ fn crap_gate_reason(over: u64, untested: u64, untested_cc: u32) -> String {
 }
 
 fn crap_gate(coverage_complete: bool, over: u64, untested: u64, untested_cc: u32) -> Gate {
-    if !coverage_complete {
+    // A function with no coverage record is not scored. It must not hide a
+    // measured failure, so the gate is advisory only when none failed.
+    if !coverage_complete && over == 0 && untested == 0 {
         return Gate {
             id: "crap".into(),
             pass: false,
@@ -1668,11 +1670,16 @@ fn crap_gate(coverage_complete: bool, over: u64, untested: u64, untested_cc: u32
             reason: Some("coverage was not measured for all analyzed functions".into()),
         };
     }
-    gate(
-        "crap",
-        over == 0 && untested == 0,
-        &crap_gate_reason(over, untested, untested_cc),
-    )
+    let mut reason = crap_gate_reason(over, untested, untested_cc);
+    if !coverage_complete {
+        let note = "some functions have no coverage record and were not scored";
+        if reason.is_empty() {
+            reason = note.to_string();
+        } else {
+            reason = format!("{reason}; {note}");
+        }
+    }
+    gate("crap", over == 0 && untested == 0, &reason)
 }
 
 fn import_findings(
@@ -2573,6 +2580,24 @@ mod tests {
         assert_eq!(file_module("src/lib.rs"), None);
         assert_eq!(file_module("src/mod.rs"), None);
         assert_eq!(file_module("README.md"), None);
+    }
+
+    #[test]
+    fn one_unscored_function_does_not_hide_a_measured_crap_failure() {
+        let gate = crap_gate(false, 1, 0, 15);
+        assert!(!gate.pass);
+        assert!(gate.enforced);
+        let reason = gate.reason.unwrap();
+        assert!(reason.contains("1 function over threshold"), "{reason}");
+        assert!(reason.contains("no coverage record"), "{reason}");
+
+        let untested = crap_gate(false, 0, 1, 15);
+        assert!(!untested.pass);
+        assert!(untested.enforced);
+
+        let clear = crap_gate(false, 0, 0, 15);
+        assert!(!clear.pass);
+        assert!(!clear.enforced);
     }
 
     #[test]
