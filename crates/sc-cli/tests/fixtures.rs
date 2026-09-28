@@ -270,7 +270,7 @@ fn advisory_sca_findings_reduce_security_score_proportionally() {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|finding| finding["rule"] == "sca.hallucinated_import")
+        .filter(|finding| finding["rule"] == "sca.undeclared_dependency")
         .count();
     assert_eq!(sca_count, 16, "{card}");
     let security = card["scores"]["security"].as_f64().unwrap();
