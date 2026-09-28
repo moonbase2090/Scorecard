@@ -594,3 +594,53 @@ fn all_format_writes_an_html_sibling() {
         let _ = std::fs::remove_file(out.with_extension(ext));
     }
 }
+
+#[test]
+fn config_init_writes_a_starter_and_does_not_overwrite() {
+    let home = std::env::temp_dir().join(format!("sc-user-cfg-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).unwrap();
+    let cfg = home.join(".config/sc/analyzer.toml");
+    let path_out = sc_with_home(&home, &["config", "path"]);
+    assert_eq!(path_out.0, 0, "{}", path_out.2);
+    assert_eq!(path_out.1.trim(), cfg.display().to_string());
+    let wrote = sc_with_home(&home, &["config", "init"]);
+    assert_eq!(wrote.0, 0, "{}", wrote.2);
+    assert!(wrote.1.contains("Wrote "));
+    let starter = std::fs::read_to_string(&cfg).unwrap();
+    assert!(starter.starts_with("# Scorecard configuration."));
+    std::fs::write(&cfg, "keep\n").unwrap();
+    let kept = sc_with_home(&home, &["config", "init"]);
+    assert_eq!(kept.0, 0, "{}", kept.2);
+    assert!(kept.1.contains("left unchanged"));
+    assert!(kept.1.contains("sc config init --force"));
+    assert_eq!(std::fs::read_to_string(&cfg).unwrap(), "keep\n");
+    let forced = sc_with_home(&home, &["config", "init", "--force"]);
+    assert_eq!(forced.0, 0, "{}", forced.2);
+    assert!(std::fs::read_to_string(&cfg)
+        .unwrap()
+        .starts_with("# Scorecard configuration."));
+    let missing = Command::new(env!("CARGO_BIN_EXE_sc"))
+        .env_remove("HOME")
+        .args(["config", "init"])
+        .output()
+        .unwrap();
+    assert_ne!(missing.status.code(), Some(0));
+    let err = String::from_utf8_lossy(&missing.stderr);
+    assert!(err.contains("HOME is not set"), "{err}");
+    assert!(err.contains("sc config init"), "{err}");
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+fn sc_with_home(home: &std::path::Path, args: &[&str]) -> (i32, String, String) {
+    let output = Command::new(env!("CARGO_BIN_EXE_sc"))
+        .env("HOME", home)
+        .args(args)
+        .output()
+        .expect("spawn sc");
+    (
+        output.status.code().unwrap_or(101),
+        String::from_utf8_lossy(&output.stdout).to_string(),
+        String::from_utf8_lossy(&output.stderr).to_string(),
+    )
+}

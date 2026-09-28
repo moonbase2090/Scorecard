@@ -24,6 +24,12 @@ Check the install:
 
   sc --version
 
+The package creates ~/.config/sc/analyzer.toml when that file is absent.
+It does not replace a file you already have. To write it yourself:
+
+  sc config init
+  sc config path
+
 To remove them later, delete the two files from wherever you put them:
 
   sudo rm /usr/local/bin/sc /usr/local/bin/sc-mcp

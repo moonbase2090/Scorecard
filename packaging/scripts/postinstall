@@ -1,0 +1,21 @@
+#!/bin/bash
+# Write ~/.config/sc/analyzer.toml for the person at the console.
+# Create the directory. Never replace a file that is already there.
+set -u
+sc=/usr/local/bin/sc
+if [ ! -x "$sc" ]; then
+  echo "sc is not at /usr/local/bin/sc, so the user config was not created. Install sc and run: sc config init" >&2
+  exit 0
+fi
+user=$(stat -f %Su /dev/console 2>/dev/null || true)
+if [ -z "$user" ] || [ "$user" = "root" ] || [ "$user" = "loginwindow" ]; then
+  echo "No console user, so ~/.config/sc/analyzer.toml was not created. Run: sc config init" >&2
+  exit 0
+fi
+home=$(dscl . -read "/Users/$user" NFSHomeDirectory 2>/dev/null | awk '{print $2}')
+if [ -z "$home" ]; then
+  echo "Could not read the home directory for $user, so the user config was not created. Run: sc config init" >&2
+  exit 0
+fi
+/usr/bin/sudo -u "$user" /usr/bin/env HOME="$home" "$sc" config init
+exit 0

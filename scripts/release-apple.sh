@@ -185,7 +185,8 @@ run_with_timeout() {
 mkdir -p "$work/pkgroot/usr/local/bin"
 cp "$stage/sc" "$stage/sc-mcp" "$work/pkgroot/usr/local/bin/"
 pkgbuild --root "$work/pkgroot" --identifier com.moonbase2090.scorecard \
-  --version "$ver" --install-location / "$work/scorecard-component.pkg"
+  --version "$ver" --install-location / \
+  --scripts "$root/packaging/scripts" "$work/scorecard-component.pkg"
 sed "s/@VER@/$ver/g" "$root/packaging/distribution.xml.in" > "$work/distribution.xml"
 pkg="$dist/sc-v${ver}-macos.pkg"
 if [ -n "$installer_identity" ]; then
