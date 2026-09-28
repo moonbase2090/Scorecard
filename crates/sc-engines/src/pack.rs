@@ -216,9 +216,7 @@ pub fn text_secrets(root: &Path, exclude: &[String]) -> Vec<sc_core::Finding> {
                 continue;
             }
         };
-        if bytes.iter().take(BINARY_PROBE).any(|byte| *byte == 0) {
-            continue;
-        }
+        // Patterns are ASCII. A NUL in a comment must not hide the rest of the file.
         let text = String::from_utf8_lossy(&bytes);
         findings.extend(crate::secrets::secrets_in_text(&text, &rel));
     }
@@ -527,7 +525,7 @@ fn visit(dir: &Path, depth: u32, seen: &mut usize, on_file: &mut dyn FnMut(&Path
             .file_name()
             .and_then(|item| item.to_str())
             .unwrap_or("");
-        if skip_dir(name) {
+        if detect_skip_dir(name) {
             continue;
         }
         if path.is_dir() {
@@ -548,7 +546,7 @@ fn visit(dir: &Path, depth: u32, seen: &mut usize, on_file: &mut dyn FnMut(&Path
     }
 }
 
-fn skip_dir(name: &str) -> bool {
+fn detect_skip_dir(name: &str) -> bool {
     matches!(
         name,
         ".git"
@@ -760,10 +758,20 @@ mod tests {
         let mut hidden = format!("{key}\n").into_bytes();
         hidden.insert(0, 0);
         fs::write(root.join("blob.dat"), hidden).unwrap();
+        let mut js = format!("// note\nconst k = \"{key}\";\n").into_bytes();
+        js.insert(3, 0);
+        fs::write(root.join("app.js"), js).unwrap();
         fs::create_dir_all(root.join("testdata")).unwrap();
         fs::write(root.join("testdata/leak.py"), format!("KEY = \"{key}\"\n")).unwrap();
 
-        let findings = text_secrets(&root, &["testdata/**".into()]);
+        let findings = text_secrets(
+            &root,
+            &[
+                "target/**".into(),
+                "generated/**".into(),
+                "testdata/**".into(),
+            ],
+        );
         let files: Vec<&str> = findings
             .iter()
             .map(|finding| finding.file.as_str())
@@ -773,7 +781,8 @@ mod tests {
         assert!(files.contains(&"src/target/keys.py"), "{files:?}");
         assert!(files.contains(&".npmrc"), "{files:?}");
         assert!(!files.contains(&"target/keys.py"), "{files:?}");
-        assert!(!files.contains(&"blob.dat"), "{files:?}");
+        assert!(files.contains(&"blob.dat"), "{files:?}");
+        assert!(files.contains(&"app.js"), "{files:?}");
         assert!(
             !files.iter().any(|file| file.contains("testdata/")),
             "{files:?}"
