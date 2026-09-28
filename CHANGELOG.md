@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `--budget-seconds` is one wall clock for the run. A pack command that is still running at the deadline is killed with its child processes, and the report records the timeout instead of waiting until those children close the output pipes.
 - The secrets gate reports GitHub OAuth and app tokens (`gho_`, `ghu_`, `ghs_`, `ghr_`) and an AWS secret access key. The documented example secret is ignored, and a low-entropy string is not a key.
 - A spec-gap reply that is valid JSON followed by a stray `}` still parses. The reader takes the first complete JSON value.
 - A spec-gap reply with a `}` before its first `{` no longer aborts the run. An empty `tool_calls` array is treated as no tool call, and a JSON retry does not resend tool calls without their results.
