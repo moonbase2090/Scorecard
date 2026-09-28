@@ -16,7 +16,7 @@ A gate is a pass or fail check. Enforced gates decide the exit status; advisory 
 | `links` | no | A link points at a missing file in the tree | `links.missing` |
 | `a11y` | no | A static accessibility check fails | see [accessibility](../a11y.md) |
 
-When coverage was not measured, a `crap` failure is advisory for that run: the gate shows `advisory` and the reason says coverage was not measured.
+When no function was scored, a `crap` failure is advisory for that run: the gate shows `advisory` and the reason says coverage was not measured. A function that was measured and is over the threshold still fails the gate, even if another function has no coverage record. The unscored function is reported and does not clear that failure.
 
 To enforce an advisory gate, add it to the list:
 

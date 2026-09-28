@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- One function with no coverage record no longer makes the whole CRAP gate advisory. Functions that were measured and are over the threshold still fail the gate. Unscored functions are reported and do not clear that failure. A run that scored nothing stays advisory.
 - CRAP no longer scores test code in the non-Rust packs. Files under `test/`, `tests/`, `__tests__/`, `spec/`, `testdata/`, or a `.Tests` project, and files named like tests (`test_*.py`, `*_test.go`, `*.test.js`, `*.spec.ts`, `*Test.java`, `conftest.py`), are skipped. A CC 6 test helper at 0% coverage no longer fails the gate. Test files that the coverage tool leaves out no longer make the CRAP gate advisory. Rust already skipped `#[test]` and `#[cfg(test)]` code.
 - Node lint auto-detection treats `eslint.config.cjs` as an ESLint config file.
 - Java pack Gradle projects now run `gradle test` even when the build file does not mention Jacoco. When Jacoco is configured, Scorecard still runs `jacocoTestReport` after tests.
