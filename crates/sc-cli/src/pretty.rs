@@ -167,6 +167,11 @@ fn score_line(out: &mut String, name: &str, score: f64, opts: &PrettyOpts, width
 
 fn push_crap(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize) {
     out.push_str(&format!("worst crap  threshold {}\n", card.crap.threshold));
+    if let Some(line) = crate::report::rest_of_tree_short(card) {
+        let line = format!("  {line}");
+        out.push_str(&paint(opts.color, dim(), &fit(&line, width, opts.color)));
+        out.push('\n');
+    }
     if let Some(line) = crate::report::diff_baseline_short(card) {
         let line = format!("  {line}");
         out.push_str(&paint(opts.color, dim(), &fit(&line, width, opts.color)));
@@ -695,6 +700,29 @@ mod tests {
         );
         let line = "  diff scope: 12 over threshold here; tree count: latest develop push run";
         assert!(text.contains(&format!("worst crap  threshold 30\n{line}\n")));
+        assert!(line.len() <= 80);
+    }
+
+    #[test]
+    fn rest_of_tree_line_names_paths_outside_the_diff() {
+        let mut card = Scorecard::skeleton("demo", 30);
+        card.verdict = "pass".into();
+        card.scope.mode = "diff".into();
+        card.scope.paths = vec!["src/a.rs".into(), "src/b.rs".into()];
+        card.scope.tree_paths = Some(40);
+        card.scope.base = Some("origin/develop".into());
+        let text = to_pretty(
+            &card,
+            &PrettyOpts {
+                color: false,
+                width: 80,
+                version: "0.1.0".into(),
+                report: None,
+                exit_code: 0,
+            },
+        );
+        let line = "  2 paths in this diff; 38 other in the tree";
+        assert!(text.contains(line));
         assert!(line.len() <= 80);
     }
 }

@@ -21,6 +21,8 @@ pub struct Selection {
     pub files_changed: u64,
     /// Resolved diff base, only in diff mode.
     pub base: Option<String>,
+    /// Source paths in the whole tree, only in diff mode.
+    pub tree_paths: Option<u64>,
     pub workspace_root: bool,
 }
 
@@ -76,6 +78,7 @@ fn tree_like(mode: &str, files: Vec<AnalyzedFile>, workspace_root: bool) -> Sele
         loc_changed,
         files_changed,
         base: None,
+        tree_paths: None,
         workspace_root,
     }
 }
@@ -135,6 +138,8 @@ fn select_diff(
     }
     let files_changed = files.len() as u64;
     let paths = files.iter().map(|file| file.rel.clone()).collect();
+    let (tree_rels, _) = crate::facts::tree_source_rels(root, exclude);
+    let tree_paths = Some(tree_rels.len() as u64);
     Ok(Selection {
         mode: "diff".into(),
         files,
@@ -145,6 +150,7 @@ fn select_diff(
         loc_changed,
         files_changed,
         base: Some(base),
+        tree_paths,
         workspace_root,
     })
 }

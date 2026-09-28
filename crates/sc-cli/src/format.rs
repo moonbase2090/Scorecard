@@ -80,8 +80,12 @@ pub fn to_markdown(card: &Scorecard) -> String {
         1 => ", 1 path".into(),
         n => format!(", {n} paths"),
     };
+    let rest = match crate::report::rest_of_tree(card) {
+        Some(line) => format!(" {line}."),
+        None => String::new(),
+    };
     out.push_str(&format!(
-        "**Scope:** {}{paths}. `loc_changed`, `files_changed`, and `coverage_changed` describe that scope.\n\n",
+        "**Scope:** {}{paths}.{rest} `loc_changed`, `files_changed`, and `coverage_changed` describe that scope.\n\n",
         card.scope.mode
     ));
     if let Some(intent) = &card.intent {
@@ -127,6 +131,10 @@ pub fn to_markdown(card: &Scorecard) -> String {
 
     out.push_str("## Worst CRAP\n\n");
     out.push_str(&format!("Threshold {}.\n\n", card.crap.threshold));
+    if let Some(line) = crate::report::rest_of_tree(card) {
+        out.push_str(&line);
+        out.push_str("\n\n");
+    }
     if let Some(line) = crate::report::diff_baseline(card) {
         out.push_str(&line);
         out.push_str("\n\n");
@@ -321,6 +329,19 @@ mod tests {
         let md = to_markdown(&card);
         assert!(md.contains("- FAILED tests/test_x.py::test_x\n\n<details><summary>full output</summary>\n\n````text\n....F\n```\nFAILED"));
         assert!(md.contains("\n````\n\n</details>"));
+    }
+
+    #[test]
+    fn markdown_rest_of_tree_names_paths_outside_the_diff() {
+        let mut card = Scorecard::skeleton(".", 30);
+        card.scope.mode = "diff".into();
+        card.scope.paths = vec!["src/a.rs".into()];
+        card.scope.tree_paths = Some(12);
+        card.scope.base = Some("main".into());
+        let md = to_markdown(&card);
+        assert!(md.contains("1 path in this diff; 11 other paths in the tree"));
+        assert!(md
+            .contains("**Scope:** diff, 1 path. 1 path in this diff; 11 other paths in the tree."));
     }
 
     #[test]

@@ -8,7 +8,7 @@
 sc 0.1.3  .  python  99b879c dirty  scope tree
 ```
 
-The header: `sc` version, analyzed path, [pack](packs.md), git commit, `clean` or `dirty`, and scope. Scope is `tree` (everything), `diff` (`--diff`), or `paths` (`--paths`).
+The header: `sc` version, analyzed path, [pack](packs.md), git commit, `clean` or `dirty`, and scope. Scope is `tree` (everything), `diff` (`--diff`), or `paths` (`--paths`). A `diff` report lists the changed paths and a one-line count of the other source paths still in the tree.
 
 ```text
 PASS  2 advisory gates failing
