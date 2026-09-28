@@ -10,7 +10,9 @@ use sha2::{Digest, Sha256};
 
 use crate::secrets::secrets_in_text;
 
-const CACHE_VERSION: u32 = 2;
+/// Bump when what a parse records changes, so an upgrade does not reuse old
+/// facts for unchanged files.
+const CACHE_VERSION: u32 = 3;
 
 #[derive(Debug, Clone)]
 pub struct AnalyzedFile {

@@ -55,11 +55,12 @@ fn crate_names(tree: &UseTree, prefix: Option<&str>, out: &mut Vec<String>) {
             let prefix = next.as_deref().or(prefix);
             crate_names(&path.tree, prefix, out);
         }
-        UseTree::Name(name) => {
-            out.push(prefix.unwrap_or(&name.ident.to_string()).to_string());
-        }
-        UseTree::Rename(name) => {
-            out.push(prefix.unwrap_or(&name.ident.to_string()).to_string());
+        // A bare `use Name;` or `use Name as Alias;` re-exports a name that is
+        // already in scope. Only a path or `extern crate` names a crate.
+        UseTree::Name(_) | UseTree::Rename(_) => {
+            if let Some(prefix) = prefix {
+                out.push(prefix.to_string());
+            }
         }
         UseTree::Glob(_) => {
             if let Some(prefix) = prefix {
@@ -75,16 +76,30 @@ fn crate_names(tree: &UseTree, prefix: Option<&str>, out: &mut Vec<String>) {
 }
 
 fn is_builtin(name: &str) -> bool {
-    matches!(name, "self" | "super" | "crate" | "std" | "core" | "alloc")
+    matches!(
+        name,
+        "self" | "super" | "crate" | "std" | "core" | "alloc" | "proc_macro"
+    )
 }
 
 /// First segments that can never be external crates: modules declared in
-/// this file (`mod name;` or `mod name { ... }`) and `extern crate` rename
-/// targets (`extern crate foo as bar;` used as `bar::...`).
+/// this file (`mod name;` or `mod name { ... }`, also inside a macro call such
+/// as `cfg_if! { mod name { ... } }`) and `extern crate` rename targets
+/// (`extern crate foo as bar;` used as `bar::...`).
 pub fn local_names_in_file(file: &syn::File) -> Vec<String> {
     let mut out = Vec::new();
-    for item in &file.items {
+    local_names(&file.items, &mut out);
+    out
+}
+
+fn local_names(items: &[Item], out: &mut Vec<String>) {
+    for item in items {
         match item {
+            Item::Macro(item_macro) => {
+                if let Ok(inner) = syn::parse2::<syn::File>(item_macro.mac.tokens.clone()) {
+                    local_names(&inner.items, out);
+                }
+            }
             Item::Mod(item_mod) => {
                 let name = item_mod.ident.to_string();
                 if !out.contains(&name) {
@@ -102,7 +117,6 @@ pub fn local_names_in_file(file: &syn::File) -> Vec<String> {
             _ => {}
         }
     }
-    out
 }
 
 #[cfg(test)]
@@ -139,5 +153,35 @@ extern crate self as this_crate;
             local_names_in_file(&file),
             vec!["score", "inline", "serde_alias", "this_crate"]
         );
+    }
+
+    #[test]
+    fn proc_macro_and_bare_reexports_are_not_crates() {
+        let src = r#"
+use proc_macro::TokenStream;
+extern crate proc_macro;
+use format::{KindFormatter, RichFormatter};
+pub use KindFormatter as DefaultFormatter;
+pub use RichFormatter;
+use serde as serde_alias;
+"#;
+        let file = syn::parse_file(src).unwrap();
+        let hits = imports_in_file(&file, "src/lib.rs");
+        let names: Vec<_> = hits.iter().map(|hit| hit.crate_name.as_str()).collect();
+        assert_eq!(names, vec!["format"]);
+    }
+
+    #[test]
+    fn a_mod_declared_inside_a_macro_is_local() {
+        let src = r#"
+cfg_has_atomic_u64! {
+    mod static_macro {
+        pub struct StaticAtomicU64;
+    }
+}
+pub(crate) use static_macro::StaticAtomicU64;
+"#;
+        let file = syn::parse_file(src).unwrap();
+        assert_eq!(local_names_in_file(&file), vec!["static_macro"]);
     }
 }
