@@ -709,7 +709,7 @@ mod tests {
         card.verdict = "pass".into();
         card.scope.mode = "diff".into();
         card.scope.paths = vec!["src/a.rs".into(), "src/b.rs".into()];
-        card.scope.tree_paths = Some(40);
+        card.scope.other_paths = Some(38);
         card.scope.base = Some("origin/develop".into());
         let text = to_pretty(
             &card,

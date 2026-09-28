@@ -66,10 +66,10 @@ pub struct Scope {
     /// Resolved git base of a diff-scoped run (`--diff`). Absent otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base: Option<String>,
-    /// Source paths in the whole tree on a `--diff` run. The report uses this
-    /// to print how many paths were left outside the diff. Absent otherwise.
+    /// Source paths in the tree that are not in this `--diff` selection.
+    /// Absent outside diff mode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tree_paths: Option<u64>,
+    pub other_paths: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -311,7 +311,7 @@ impl Scorecard {
                 mode: "tree".to_string(),
                 paths: Vec::new(),
                 base: None,
-                tree_paths: None,
+                other_paths: None,
             },
             intent: None,
             verdict: "fail".to_string(),
@@ -358,17 +358,17 @@ mod tests {
         // Scorecards written before the field existed still load.
         let old: Scope = serde_json::from_str(r#"{"mode":"tree","paths":[]}"#).unwrap();
         assert_eq!(old.base, None);
-        assert_eq!(old.tree_paths, None);
-        card.scope.tree_paths = Some(40);
+        assert_eq!(old.other_paths, None);
+        card.scope.other_paths = Some(40);
         let json = serde_json::to_value(&card).unwrap();
-        assert_eq!(json["scope"]["tree_paths"], 40);
+        assert_eq!(json["scope"]["other_paths"], 40);
     }
 
     #[test]
-    fn scope_tree_paths_omitted_when_absent() {
+    fn scope_other_paths_omitted_when_absent() {
         let card = Scorecard::skeleton("demo", 30);
         let json = serde_json::to_value(&card).unwrap();
-        assert!(json["scope"].get("tree_paths").is_none());
+        assert!(json["scope"].get("other_paths").is_none());
     }
 
     #[test]
@@ -408,7 +408,7 @@ mod tests {
                 mode: "tree".into(),
                 paths: vec!["src/parse.rs".into()],
                 base: None,
-                tree_paths: None,
+                other_paths: None,
             },
             intent: Some("keep parse_input under the CRAP threshold".into()),
             verdict: "fail".into(),

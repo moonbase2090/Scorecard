@@ -336,7 +336,7 @@ mod tests {
         let mut card = Scorecard::skeleton(".", 30);
         card.scope.mode = "diff".into();
         card.scope.paths = vec!["src/a.rs".into()];
-        card.scope.tree_paths = Some(12);
+        card.scope.other_paths = Some(11);
         card.scope.base = Some("main".into());
         let md = to_markdown(&card);
         assert!(md.contains("1 path in this diff; 11 other paths in the tree"));

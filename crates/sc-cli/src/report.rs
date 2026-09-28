@@ -316,15 +316,12 @@ fn pipeline(out: &mut String, card: &Scorecard) {
     let scope = match (
         card.scope.mode.as_str(),
         card.scope.paths.len(),
-        card.scope.tree_paths,
+        card.scope.other_paths,
     ) {
-        ("diff", n, Some(tree)) => {
-            let other = tree.saturating_sub(n as u64);
-            format!(
-                "diff · {n} path{}; {other} other",
-                if n == 1 { "" } else { "s" }
-            )
-        }
+        ("diff", n, Some(other)) => format!(
+            "diff · {n} path{}; {other} other",
+            if n == 1 { "" } else { "s" }
+        ),
         (_, 0, _) => card.scope.mode.clone(),
         (_, 1, _) => format!("{} · 1 path", card.scope.mode),
         (_, n, _) => format!("{} · {n} paths", card.scope.mode),
@@ -519,9 +516,8 @@ pub(crate) fn rest_of_tree(card: &Scorecard) -> Option<String> {
     if card.scope.mode != "diff" {
         return None;
     }
-    let tree = card.scope.tree_paths?;
+    let other = card.scope.other_paths?;
     let scored = card.scope.paths.len() as u64;
-    let other = tree.saturating_sub(scored);
     Some(format!(
         "{} in this diff; {} other {} in the tree",
         plural(scored as usize, "path", "paths"),
@@ -535,9 +531,8 @@ pub(crate) fn rest_of_tree_short(card: &Scorecard) -> Option<String> {
     if card.scope.mode != "diff" {
         return None;
     }
-    let tree = card.scope.tree_paths?;
+    let other = card.scope.other_paths?;
     let scored = card.scope.paths.len() as u64;
-    let other = tree.saturating_sub(scored);
     Some(format!(
         "{scored} path{} in this diff; {other} other in the tree",
         if scored == 1 { "" } else { "s" }
@@ -1328,13 +1323,13 @@ mod tests {
         let mut c = card();
         c.scope.mode = "diff".into();
         c.scope.paths = vec!["src/a.rs".into(), "src/b.rs".into()];
-        c.scope.tree_paths = Some(40);
+        c.scope.other_paths = Some(38);
         c.scope.base = Some("origin/develop".into());
         let html = to_html(&c);
         assert!(html.contains("2 paths in this diff; 38 other paths in the tree"));
         assert!(html.contains("diff · 2 paths; 38 other"));
         c.scope.mode = "tree".into();
-        c.scope.tree_paths = None;
+        c.scope.other_paths = None;
         let html = to_html(&c);
         assert!(!html.contains("other paths in the tree"));
     }
