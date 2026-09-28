@@ -47,16 +47,35 @@ pub struct CoverageData {
 
 impl CoverageData {
     pub fn for_function(&self, file: &str, symbol: &str) -> Option<f64> {
-        let mut best: Option<f64> = None;
+        self.for_function_known(file, symbol, &[])
+    }
+
+    /// Like `for_function`, but a coverage path is not shared with a shorter
+    /// path when a longer known file is the real suffix. Among remaining
+    /// matches, the tightest path wins. A higher number from another file
+    /// does not replace it.
+    pub fn for_function_known(&self, file: &str, symbol: &str, known: &[&str]) -> Option<f64> {
+        let mut best: Option<(usize, f64)> = None;
         for function in &self.functions {
-            if file_matches(&function.file, file) && symbol_matches(&function.demangled, symbol) {
-                best = Some(
-                    best.map(|current| current.max(function.coverage))
-                        .unwrap_or(function.coverage),
-                );
+            if !symbol_matches(&function.demangled, symbol) {
+                continue;
             }
+            if !path_owned(&function.file, file, known.iter().copied()) {
+                continue;
+            }
+            let Some(prefix) = path_prefix_len(&function.file, file) else {
+                continue;
+            };
+            best = Some(match best {
+                None => (prefix, function.coverage),
+                Some((best_prefix, _)) if prefix < best_prefix => (prefix, function.coverage),
+                Some((best_prefix, coverage)) if prefix == best_prefix => {
+                    (prefix, coverage.max(function.coverage))
+                }
+                Some(kept) => kept,
+            });
         }
-        best
+        best.map(|(_, coverage)| coverage)
     }
 }
 
@@ -219,10 +238,41 @@ pub fn symbol_matches(demangled: &str, symbol: &str) -> bool {
     path_after_crate(demangled) == symbol
 }
 
-pub fn file_matches(cov_file: &str, rel: &str) -> bool {
-    let cov_file = cov_file.replace('\\', "/");
-    let rel = rel.replace('\\', "/");
-    cov_file == rel || cov_file.ends_with(&format!("/{rel}"))
+/// True when `cov_file` is `rel`, or ends at a path boundary with `rel`,
+/// and no longer known file is a better suffix of `cov_file`.
+pub fn path_owned<'a>(cov_file: &str, rel: &str, known: impl IntoIterator<Item = &'a str>) -> bool {
+    if path_prefix_len(cov_file, rel).is_none() {
+        return false;
+    }
+    let rel_len = normalize_path(rel).len();
+    for other in known {
+        let other = normalize_path(other);
+        if other.len() > rel_len && path_prefix_len(cov_file, &other).is_some() {
+            return false;
+        }
+    }
+    true
+}
+
+fn path_prefix_len(cov_file: &str, rel: &str) -> Option<usize> {
+    let cov_file = normalize_path(cov_file);
+    let rel = normalize_path(rel);
+    if rel.is_empty() {
+        return None;
+    }
+    if cov_file == rel {
+        return Some(0);
+    }
+    let suffix = format!("/{rel}");
+    if cov_file.ends_with(&suffix) {
+        Some(cov_file.len() - suffix.len())
+    } else {
+        None
+    }
+}
+
+fn normalize_path(path: &str) -> String {
+    path.replace('\\', "/")
 }
 
 #[cfg(test)]
@@ -257,6 +307,46 @@ mod tests {
         let cov = data.for_function("src/lib.rs", "classify").unwrap();
         assert!((cov - (2.0 / 3.0)).abs() < 1e-9);
         assert!((data.line_rate - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_longer_path_does_not_cover_a_shorter_one() {
+        let data = CoverageData {
+            functions: vec![
+                CovFunction {
+                    file: "/repo/src/lib.rs".into(),
+                    demangled: "app::classify".into(),
+                    coverage: 0.0,
+                },
+                CovFunction {
+                    file: "/repo/helper/src/lib.rs".into(),
+                    demangled: "helper::classify".into(),
+                    coverage: 1.0,
+                },
+            ],
+            line_rate: 0.5,
+        };
+        let known = ["src/lib.rs", "helper/src/lib.rs"];
+        assert_eq!(
+            data.for_function_known("src/lib.rs", "classify", &known),
+            Some(0.0)
+        );
+        assert_eq!(
+            data.for_function_known("helper/src/lib.rs", "classify", &known),
+            Some(1.0)
+        );
+        let helper_only = CoverageData {
+            functions: vec![CovFunction {
+                file: "/repo/helper/src/lib.rs".into(),
+                demangled: "helper::classify".into(),
+                coverage: 1.0,
+            }],
+            line_rate: 1.0,
+        };
+        assert_eq!(
+            helper_only.for_function_known("src/lib.rs", "classify", &known),
+            None
+        );
     }
 
     #[test]

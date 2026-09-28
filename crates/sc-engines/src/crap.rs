@@ -24,11 +24,12 @@ pub fn evaluate(
     untested_cc: u32,
     untested: impl Fn(&FunctionInfo) -> bool,
 ) -> CrapOutcome {
+    let files: Vec<&str> = functions.iter().map(|item| item.file.as_str()).collect();
     let mut rows: Vec<CrapFunction> = functions
         .iter()
         .filter_map(|function| {
             let cov = coverage
-                .and_then(|data| data.for_function(&function.file, &function.symbol))?
+                .and_then(|data| data.for_function_known(&function.file, &function.symbol, &files))?
                 .clamp(0.0, 1.0);
             let crap = crap_score(function.cc, cov);
             Some(CrapFunction {
@@ -51,7 +52,7 @@ pub fn evaluate(
 
     let coverage_complete = functions.iter().all(|function| {
         coverage
-            .and_then(|data| data.for_function(&function.file, &function.symbol))
+            .and_then(|data| data.for_function_known(&function.file, &function.symbol, &files))
             .is_some()
     });
     let crap_max = rows.first().map(|row| row.crap).unwrap_or(0.0);

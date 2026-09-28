@@ -71,7 +71,7 @@ pub fn istanbul(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> 
     Some(from_hits(functions, |function| {
         let file = files
             .iter()
-            .find(|(name, _)| file_match(name, &function.file))?;
+            .find(|(name, _)| file_match(name, &function.file, functions))?;
         let map = file.1.get("statementMap")?.as_object()?;
         let hits = file.1.get("s")?.as_object()?;
         let mut hit = 0u32;
@@ -120,7 +120,9 @@ pub fn jacoco(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
     }
     Some(from_hits(functions, |function| {
         rows.iter()
-            .find(|(file, name, _, _)| file_match(file, &function.file) && *name == function.symbol)
+            .find(|(file, name, _, _)| {
+                file_match(file, &function.file, functions) && *name == function.symbol
+            })
             .map(|(_, _, covered, missed)| (*covered, covered + missed))
     }))
 }
@@ -155,7 +157,7 @@ pub fn cobertura(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData>
         let mut hit = 0u32;
         let mut total = 0u32;
         for (name, line, hits) in &lines {
-            if !file_match(name, &function.file) {
+            if !file_match(name, &function.file, functions) {
                 continue;
             }
             if *line < function.span.start_line || *line > function.span.end_line {
@@ -199,7 +201,7 @@ pub fn clover(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
             let mut hit = 0u32;
             let mut total = 0u32;
             for (name, line, count) in &lines {
-                if !file_match(name, &function.file)
+                if !file_match(name, &function.file, functions)
                     || *line < function.span.start_line
                     || *line > function.span.end_line
                 {
@@ -237,7 +239,7 @@ pub fn lcov(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
         let mut hit = 0u32;
         let mut total = 0u32;
         for (name, line, hits) in &lines {
-            if !file_match(name, &function.file)
+            if !file_match(name, &function.file, functions)
                 || *line < function.span.start_line
                 || *line > function.span.end_line
             {
@@ -284,19 +286,38 @@ fn from_hits(
     }
 }
 
-fn file_match(report: &str, function_file: &str) -> bool {
-    let report = report.replace('\\', "/");
-    let function_file = function_file.replace('\\', "/");
-    if report == function_file || report.ends_with(&format!("/{function_file}")) {
+fn file_match(report: &str, function_file: &str, functions: &[FunctionInfo]) -> bool {
+    let known: Vec<&str> = functions.iter().map(|item| item.file.as_str()).collect();
+    if crate::coverage::path_owned(report, function_file, known.iter().copied()) {
         return true;
     }
-    // JaCoCo records the source basename. Cobertura sometimes does too.
-    let report_base = report.rsplit('/').next().unwrap_or(report.as_str());
+    // JaCoCo records only the source basename. A path with a directory is a
+    // different file, even when the basename matches.
+    let report = report.replace('\\', "/");
+    if report.contains('/') {
+        return false;
+    }
     let function_base = function_file
+        .replace('\\', "/")
         .rsplit('/')
         .next()
-        .unwrap_or(function_file.as_str());
-    !report_base.is_empty() && report_base == function_base
+        .unwrap_or("")
+        .to_string();
+    if report.is_empty() || report != function_base {
+        return false;
+    }
+    functions
+        .iter()
+        .filter(|item| {
+            item.file
+                .replace('\\', "/")
+                .rsplit('/')
+                .next()
+                .unwrap_or("")
+                == function_base
+        })
+        .count()
+        == 1
 }
 
 fn xml_lines(text: &str) -> String {
@@ -357,6 +378,22 @@ mod tests {
         let data = istanbul(text, &[sample()]).unwrap();
         let cov = data.for_function("src/app.js", "choose").unwrap();
         assert!((cov - 0.5).abs() < 1e-9, "{cov}");
+    }
+
+    #[test]
+    fn two_index_js_files_do_not_share_coverage() {
+        let other = FunctionInfo {
+            file: "other/index.js".into(),
+            ..sample()
+        };
+        let pkg = FunctionInfo {
+            file: "pkg/index.js".into(),
+            ..sample()
+        };
+        let text = r#"{"pkg/index.js":{"statementMap":{"0":{"start":{"line":2}},"1":{"start":{"line":3}}},"s":{"0":1,"1":1}}}"#;
+        let data = istanbul(text, &[pkg, other]).unwrap();
+        assert!(data.for_function("pkg/index.js", "choose").is_some());
+        assert!(data.for_function("other/index.js", "choose").is_none());
     }
 
     #[test]

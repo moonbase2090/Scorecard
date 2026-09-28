@@ -1236,9 +1236,9 @@ fn read_coverage(
     let files = value.get("files")?.as_object()?;
     let mut covered = Vec::new();
     for function in functions {
+        let known: Vec<&str> = functions.iter().map(|item| item.file.as_str()).collect();
         let Some((_, file)) = files.iter().find(|(name, _)| {
-            let name = name.replace('\\', "/");
-            name == function.file || name.ends_with(&format!("/{}", function.file))
+            crate::coverage::path_owned(name, &function.file, known.iter().copied())
         }) else {
             continue;
         };

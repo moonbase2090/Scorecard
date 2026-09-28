@@ -2135,9 +2135,12 @@ fn mean_coverage(
     if functions.is_empty() {
         return coverage.line_rate;
     }
+    let files: Vec<&str> = functions.iter().map(|item| item.file.as_str()).collect();
     let measured: Vec<f64> = functions
         .iter()
-        .filter_map(|function| coverage.for_function(&function.file, &function.symbol))
+        .filter_map(|function| {
+            coverage.for_function_known(&function.file, &function.symbol, &files)
+        })
         .collect();
     if measured.is_empty() {
         0.0

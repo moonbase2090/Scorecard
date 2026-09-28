@@ -17,7 +17,11 @@ pub fn go_coverage(profile: &str, functions: &[FunctionInfo]) -> crate::coverage
         let mut hit = 0u32;
         let mut total = 0u32;
         for stmt in &stmts {
-            if !crate::coverage::file_matches(&stmt.file, &function.file) {
+            if !crate::coverage::path_owned(
+                &stmt.file,
+                &function.file,
+                functions.iter().map(|item| item.file.as_str()),
+            ) {
                 continue;
             }
             if stmt.start_line < function.span.start_line
