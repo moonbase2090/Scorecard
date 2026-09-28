@@ -18,7 +18,7 @@ Provide relevant evidence: test output, a CI link, a screenshot, or a recording.
 
 - [ ] Common case works with no flags and no config
 - [ ] Every new error or skip message says what, why, and the exact fix
-- [ ] README, reference, and examples updated; `scripts/check-docs.py` passes
+- [ ] Changes CLI surface, defaults, output, or config? README, reference, and examples updated in this PR; `scripts/check-docs.py` passes
 - [ ] Before and after terminal output (and report screenshots) from a real project run are above
 - [ ] First-run path walked end to end, if this touches it
 - [ ] No unmeasured number is shown as measured

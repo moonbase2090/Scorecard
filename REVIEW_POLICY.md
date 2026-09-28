@@ -44,7 +44,7 @@ Every PR meets these. Reviewers block on any miss.
 
 1. Simple by default: the common case works with no flags and no config. No step needs reading source code or hand-creating files.
 2. Every error or skip message says what happened, why, and the exact command or config line that fixes it.
-3. Docs ship in the same PR: a user-facing change updates the README quickstart, the reference, and the examples. Examples are runnable and tested in CI (`scripts/check-docs.py`).
+3. Docs ship in the same PR: any PR that changes CLI surface, defaults, output, or config updates the README, the reference, and the examples in that PR. `scripts/check-docs.py` runs the examples and fails on commands or flags that no longer exist.
 4. UX proof in the PR body: terminal output before and after, and report screenshots if the report changed, from a real project run.
 5. The first-run path (install, `sc setup`, `sc analyze`, reading the report) is walked end to end before merge for any change that touches it.
 6. Output is honest: never show a number `sc` did not measure, such as 0% for unmeasured coverage. Say "not measured".
