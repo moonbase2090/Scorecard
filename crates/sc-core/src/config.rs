@@ -209,16 +209,20 @@ pub fn resolve_config_path(explicit: Option<&Path>, project_root: &Path) -> Opti
     if local.is_file() {
         return Some(local);
     }
-    if let Some(home) = std::env::var_os("HOME") {
-        let home_cfg = PathBuf::from(home)
-            .join(".config")
-            .join("sc")
-            .join("analyzer.toml");
+    if let Some(home_cfg) = user_config_path() {
         if home_cfg.is_file() {
             return Some(home_cfg);
         }
     }
     None
+}
+
+pub fn user_config_file(home: &Path) -> PathBuf {
+    home.join(".config").join("sc").join("analyzer.toml")
+}
+
+pub fn user_config_path() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(|home| user_config_file(Path::new(&home)))
 }
 
 pub fn load_config_file(path: Option<&Path>) -> Result<Config, String> {
