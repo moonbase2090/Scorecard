@@ -465,7 +465,7 @@ fn analyze_unsupported(
     } else {
         Some(clippy_workspace(
             request.config.commands.lint.trim(),
-            crate::facts::is_workspace_root(&request.root),
+            crate::facts::is_workspace_root(&request.root, &request.config.toolchain),
         ))
     };
     let started = crate::pack_cov::run_start();
@@ -743,13 +743,14 @@ fn analyze_rust(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         request.diff_base.as_deref(),
         request.diff_head.as_deref(),
         &request.path_list,
+        &request.config.toolchain,
     ) {
         Ok(selection) => (selection, None),
         Err(err) => (empty_selection(), Some(err)),
     };
 
     let workspace_root = if select_error.is_some() {
-        crate::facts::is_workspace_root(root)
+        crate::facts::is_workspace_root(root, &request.config.toolchain)
     } else {
         selection.workspace_root
     };
@@ -1910,8 +1911,8 @@ fn run_shell(
         .stderr(std::process::Stdio::piped())
         .env("CARGO_TERM_COLOR", "never")
         .env("CARGO_TARGET_DIR", root.join("target"));
-    let pin = crate::rust_toolchain::resolve(root, toolchain_pin);
-    crate::rust_toolchain::apply(&mut cmd, pin.as_deref());
+    let policy = crate::rust_toolchain::resolve(root, toolchain_pin);
+    crate::rust_toolchain::apply(&mut cmd, &policy);
     run_cmd(&mut cmd, timeout)
 }
 
@@ -2398,6 +2399,7 @@ fn mutation_engine(
         resolved.as_deref(),
         request.config.mutation.max_mutants,
         Duration::from_secs(request.config.mutation.budget_seconds).min(request.budget),
+        &request.config.toolchain,
     );
     if outcome.ran {
         ran.push("mutation".into());

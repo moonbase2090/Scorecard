@@ -31,15 +31,20 @@ pub struct AnalyzedFile {
 pub(crate) fn analyze_tree_with_workspace(
     root: &Path,
     exclude: &[String],
+    toolchain_pin: &str,
 ) -> (Vec<AnalyzedFile>, bool) {
-    let (rels, workspace_root) = tree_source_rels(root, exclude);
+    let (rels, workspace_root) = tree_source_rels(root, exclude, toolchain_pin);
     (analyze_rels(root, &rels), workspace_root)
 }
 
 /// Count (and list) the same source paths a tree-scope run would analyze,
 /// without parsing them. Diff reports use the count for the rest-of-tree line.
-pub(crate) fn tree_source_rels(root: &Path, exclude: &[String]) -> (Vec<String>, bool) {
-    let metadata = cargo_metadata(root);
+pub(crate) fn tree_source_rels(
+    root: &Path,
+    exclude: &[String],
+    toolchain_pin: &str,
+) -> (Vec<String>, bool) {
+    let metadata = cargo_metadata(root, toolchain_pin);
     let workspace_root = metadata
         .as_ref()
         .is_some_and(|meta| metadata_is_workspace_root(root, meta));
@@ -111,8 +116,8 @@ fn member_src_dirs(meta: Option<&CargoMetadata>) -> Vec<PathBuf> {
     dirs
 }
 
-pub(crate) fn is_workspace_root(root: &Path) -> bool {
-    let Some(meta) = cargo_metadata(root) else {
+pub(crate) fn is_workspace_root(root: &Path, toolchain_pin: &str) -> bool {
+    let Some(meta) = cargo_metadata(root, toolchain_pin) else {
         return false;
     };
     metadata_is_workspace_root(root, &meta)
@@ -126,11 +131,11 @@ fn metadata_is_workspace_root(root: &Path, meta: &CargoMetadata) -> bool {
     }
 }
 
-fn cargo_metadata(root: &Path) -> Option<CargoMetadata> {
+fn cargo_metadata(root: &Path, toolchain_pin: &str) -> Option<CargoMetadata> {
     if !root.join("Cargo.toml").is_file() {
         return None;
     }
-    let mut cmd = crate::command::cargo_command(root, "");
+    let mut cmd = crate::command::cargo_command(root, toolchain_pin);
     cmd.args([
         "metadata",
         "--no-deps",
@@ -278,14 +283,14 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("src")).unwrap();
         fs::write(dir.join("src/lib.rs"), "pub fn cached() -> i32 { 1 }\n").unwrap();
-        let first = analyze_tree_with_workspace(&dir, &[]).0;
+        let first = analyze_tree_with_workspace(&dir, &[], "").0;
         assert_eq!(first[0].functions[0].symbol, "cached");
         fs::write(
             dir.join(".sc/cache/parse-v2.json"),
             fs::read_to_string(dir.join(".sc/cache/parse-v2.json")).unwrap(),
         )
         .unwrap();
-        let second = analyze_tree_with_workspace(&dir, &[]).0;
+        let second = analyze_tree_with_workspace(&dir, &[], "").0;
         assert_eq!(second[0].functions[0].symbol, "cached");
         let _ = fs::remove_dir_all(&dir);
     }
@@ -296,7 +301,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("sc-ws-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         copy_fixture(&src, &dir);
-        let files = analyze_tree_with_workspace(&dir, &[]).0;
+        let files = analyze_tree_with_workspace(&dir, &[], "").0;
         let rels: Vec<&str> = files.iter().map(|file| file.rel.as_str()).collect();
         assert!(
             rels.iter()

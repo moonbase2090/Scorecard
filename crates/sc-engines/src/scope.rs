@@ -36,6 +36,7 @@ pub fn select(
     diff_base: Option<&str>,
     diff_head: Option<&str>,
     path_list: &[String],
+    toolchain_pin: &str,
 ) -> Result<Selection, String> {
     if diff_base.is_some() && !path_list.is_empty() {
         return Err("pass either --diff or --paths, not both".into());
@@ -46,17 +47,19 @@ pub fn select(
             exclude,
             base,
             diff_head,
-            crate::facts::is_workspace_root(root),
+            crate::facts::is_workspace_root(root, toolchain_pin),
+            toolchain_pin,
         );
     }
     if !path_list.is_empty() {
         return Ok(select_paths(
             root,
             path_list,
-            crate::facts::is_workspace_root(root),
+            crate::facts::is_workspace_root(root, toolchain_pin),
         ));
     }
-    let (files, workspace_root) = crate::facts::analyze_tree_with_workspace(root, exclude);
+    let (files, workspace_root) =
+        crate::facts::analyze_tree_with_workspace(root, exclude, toolchain_pin);
     Ok(tree_like("tree", files, workspace_root))
 }
 
@@ -98,6 +101,7 @@ fn select_diff(
     base: &str,
     head: Option<&str>,
     workspace_root: bool,
+    toolchain_pin: &str,
 ) -> Result<Selection, String> {
     let base = resolve_base(root, base)?;
     let deltas = diff_files(root, &base, head)?;
@@ -138,7 +142,7 @@ fn select_diff(
     }
     let files_changed = files.len() as u64;
     let paths: Vec<String> = files.iter().map(|file| file.rel.clone()).collect();
-    let (tree_rels, _) = crate::facts::tree_source_rels(root, exclude);
+    let (tree_rels, _) = crate::facts::tree_source_rels(root, exclude, toolchain_pin);
     // Diff paths can include src/ files outside the cargo tree scan (deleted
     // members, non-member crates). Count tree paths that are not in the diff,
     // not `tree_len - diff_len`.
@@ -355,7 +359,7 @@ mod tests {
             "pub fn old() -> i32 { 1 }\npub fn added() -> i32 { 2 }\n",
         )
         .unwrap();
-        let selection = select(&dir, &[], Some("HEAD"), None, &[]).unwrap();
+        let selection = select(&dir, &[], Some("HEAD"), None, &[], "").unwrap();
         assert_eq!(selection.mode, "diff");
         let symbols: Vec<_> = selection
             .crap_functions

@@ -30,7 +30,7 @@ Until coverage runs, CRAP scores are an upper bound and CRAP failures do not fai
 
 ## `types: compiler errors` with a rustup message
 
-When `rust-toolchain.toml` or `analyzer.toml` names a channel, `sc` sets that channel for Cargo check, test, coverage, and lint. Install the channel with `rustup toolchain install`, or set `toolchain` in `analyzer.toml`.
+When `analyzer.toml` sets `toolchain`, Cargo check, test, coverage, and lint use that channel. When a `rust-toolchain.toml` or `rust-toolchain` is at or above the project, `sc` clears an inherited `RUSTUP_TOOLCHAIN` so rustup reads the file (including components). With no pin, an inherited `RUSTUP_TOOLCHAIN` is left alone. Install the channel with `rustup toolchain install`. The `scorecard-tools` Docker image only has stable; a non-stable `analyzer.toml` pin fails there until that channel is in the image.
 
 `rustup could not choose a version of cargo to run` means no default Rust toolchain:
 

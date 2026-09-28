@@ -79,8 +79,8 @@ pub fn cargo_command(root: &Path, config_pin: &str) -> Command {
         .env_remove("CARGO_MANIFEST_DIR")
         .env_remove("CARGO_MANIFEST_PATH");
     strip_parent_llvm_cov(&mut cmd);
-    let pin = crate::rust_toolchain::resolve(root, config_pin);
-    crate::rust_toolchain::apply(&mut cmd, pin.as_deref());
+    let policy = crate::rust_toolchain::resolve(root, config_pin);
+    crate::rust_toolchain::apply(&mut cmd, &policy);
     cmd
 }
 
@@ -192,9 +192,11 @@ pub fn run_cargo(
             script.push(' ');
             script.push_str(&shell_quote_arg(arg));
         }
-        // Docker image only has stable; still pass the pin so the failure names it.
-        if let Some(pin) = crate::rust_toolchain::resolve(root, config_pin) {
-            script = format!("RUSTUP_TOOLCHAIN={} {script}", shell_quote_arg(&pin));
+        // Docker image only has stable. A config pin is passed through so a
+        // missing channel fails clearly; a file pin is left to rustup in the image.
+        let policy = crate::rust_toolchain::resolve(root, config_pin);
+        if let Some(pin) = crate::rust_toolchain::docker_env_prefix(&policy) {
+            script = format!("RUSTUP_TOOLCHAIN={} {script}", shell_quote_arg(pin));
         }
         return crate::toolchain::run_script(root, &script, deadline);
     }

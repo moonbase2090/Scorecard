@@ -22,6 +22,7 @@ pub fn run_mutation(
     base: Option<&str>,
     max_mutants: u32,
     budget: Duration,
+    toolchain_pin: &str,
 ) -> MutationOutcome {
     let mode = mode.trim().to_ascii_lowercase();
     if mode.is_empty() || mode == "off" {
@@ -33,7 +34,7 @@ pub fn run_mutation(
         };
     }
     if mode == "full" {
-        return execute(root, None, max_mutants, budget);
+        return execute(root, None, max_mutants, budget, toolchain_pin);
     }
     let Some(base) = base else {
         return unavailable_outcome("mutation mode diff needs a git base; pass --diff or set one");
@@ -59,7 +60,7 @@ pub fn run_mutation(
     if let Err(err) = std::fs::write(&patch_path, patch) {
         return unavailable_outcome(&err.to_string());
     }
-    execute(root, Some(&patch_path), max_mutants, budget)
+    execute(root, Some(&patch_path), max_mutants, budget, toolchain_pin)
 }
 
 fn execute(
@@ -67,8 +68,16 @@ fn execute(
     patch: Option<&Path>,
     max_mutants: u32,
     budget: Duration,
+    toolchain_pin: &str,
 ) -> MutationOutcome {
-    execute_with(root, patch, max_mutants, budget, cargo)
+    let pin = toolchain_pin.to_string();
+    execute_with(
+        root,
+        patch,
+        max_mutants,
+        budget,
+        move |root, args, timeout| cargo(root, args, timeout, &pin),
+    )
 }
 
 #[inline(never)]
@@ -159,6 +168,7 @@ fn cargo(
     root: &Path,
     args: &[String],
     timeout: Duration,
+    toolchain_pin: &str,
 ) -> Result<crate::command::Captured, CommandError> {
     let mut cmd = Command::new("cargo");
     cmd.current_dir(root)
@@ -167,8 +177,8 @@ fn cargo(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .env("CARGO_TERM_COLOR", "never");
-    let pin = crate::rust_toolchain::resolve(root, "");
-    crate::rust_toolchain::apply(&mut cmd, pin.as_deref());
+    let policy = crate::rust_toolchain::resolve(root, toolchain_pin);
+    crate::rust_toolchain::apply(&mut cmd, &policy);
     run_cmd(&mut cmd, timeout)
 }
 
@@ -329,10 +339,10 @@ mod tests {
     #[test]
     fn off_skips_and_diff_without_a_base_is_unavailable() {
         let root = Path::new(".");
-        let off = run_mutation(root, "off", None, 1, Duration::from_secs(1));
+        let off = run_mutation(root, "off", None, 1, Duration::from_secs(1), "");
         assert!(!off.ran);
         assert_eq!(off.section.status, "skipped");
-        let missing = run_mutation(root, "diff", None, 1, Duration::from_secs(1));
+        let missing = run_mutation(root, "diff", None, 1, Duration::from_secs(1), "");
         assert!(missing.unavailable.unwrap().contains("base"));
     }
 
