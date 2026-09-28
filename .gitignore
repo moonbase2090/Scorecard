@@ -6,6 +6,7 @@
 testdata/**/bin/
 testdata/**/obj/
 testdata/**/__pycache__/
+scripts/**/__pycache__/
 testdata/**/.phpunit.result.cache
 testdata/go_pack/go_pack
 .grok/
