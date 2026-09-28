@@ -73,8 +73,13 @@ fn node_plan(root: &Path) -> Vec<Step> {
     let compile = if files.is_empty() {
         None
     } else if ts {
-        via("tsc", "tsc --noEmit".into())
-            .or_else(|| which("node").then(|| check_chain("node --check", &files)))
+        let ts_files = filter_ext(&files, &[".ts", ".tsx"]);
+        let js_files = filter_ext(&files, &[".js", ".mjs", ".cjs"]);
+        via(
+            "tsc",
+            tsc_and_node(root.join("tsconfig.json").is_file(), &ts_files, &js_files),
+        )
+        .or_else(|| which("node").then(|| check_chain("node --check", &files)))
     } else if which("node") {
         Some(check_chain("node --check", &files))
     } else {
@@ -574,6 +579,47 @@ fn walk(root: &Path, dir: &Path, depth: u32, exts: &[&str], out: &mut Vec<String
     }
 }
 
+fn filter_ext(files: &[String], exts: &[&str]) -> Vec<String> {
+    files
+        .iter()
+        .filter(|file| exts.iter().any(|ext| file.ends_with(ext)))
+        .cloned()
+        .collect()
+}
+
+/// `tsc --noEmit` with no files obeys tsconfig `include` and skips the rest.
+/// Current `tsc` also refuses file arguments when `tsconfig.json` is present,
+/// so that case extends the project config and lists every TypeScript file.
+/// JavaScript is syntax-checked separately.
+fn tsc_and_node(has_tsconfig: bool, ts: &[String], js: &[String]) -> String {
+    let tsc = if has_tsconfig {
+        let include = ts
+            .iter()
+            .map(|file| format!("\"../{}\"", json_escape(file)))
+            .collect::<Vec<_>>()
+            .join(",");
+        let overlay = format!("{{\"extends\":\"../tsconfig.json\",\"include\":[{include}]}}");
+        format!(
+            "mkdir -p .sc && printf '%s\\n' {} > .sc/tsconfig.sc.json && tsc --noEmit -p .sc/tsconfig.sc.json",
+            shell_quote(&overlay)
+        )
+    } else {
+        format!("tsc --noEmit {}", shell_join(ts))
+    };
+    if js.is_empty() {
+        tsc
+    } else {
+        let node = check_chain("node --check", js);
+        format!(
+            "{{ {tsc}; _sc_tsc=$?; {node}; _sc_node=$?; [ \"$_sc_tsc\" -eq 0 ] && [ \"$_sc_node\" -eq 0 ]; }}"
+        )
+    }
+}
+
+fn json_escape(text: &str) -> String {
+    text.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 fn check_chain(bin: &str, files: &[String]) -> String {
     files
         .iter()
@@ -788,6 +834,25 @@ mod tests {
         assert!(steps
             .iter()
             .any(|step| step.command.as_deref() == Some("go vet ./...")));
+    }
+
+    #[test]
+    fn tsc_names_typescript_files_and_node_checks_javascript() {
+        let cmd = tsc_and_node(
+            true,
+            &["src/ok.ts".into(), "src/bad.ts".into()],
+            &["src/bad.js".into()],
+        );
+        assert!(
+            cmd.contains("tsc --noEmit -p .sc/tsconfig.sc.json"),
+            "{cmd}"
+        );
+        assert!(cmd.contains("../src/bad.ts"), "{cmd}");
+        assert!(cmd.contains("../src/ok.ts"), "{cmd}");
+        assert!(cmd.contains("node --check 'src/bad.js'"), "{cmd}");
+        assert!(!cmd.contains("tsc --noEmit 'src/bad.ts'"), "{cmd}");
+        let bare = tsc_and_node(false, &["src/bad.ts".into()], &[]);
+        assert_eq!(bare, "tsc --noEmit 'src/bad.ts'");
     }
 
     #[test]
