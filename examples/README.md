@@ -13,6 +13,10 @@ exclude = ["assets/generated.bin"]
 
 The [secrets rules](../docs/reference/rules.md#rules) reference describes `secrets.partial`.
 
+## Python source layout
+
+For a project with `src/my_package/` and tests that import `my_package`, `sc analyze .` puts `src/` first on `PYTHONPATH` while it runs pytest and collects coverage. Coverage then refers to the package files in the checkout, even when another copy is installed.
+
 ## Passing fixture
 
 From a checkout of this repository, with `sc` on `PATH`:

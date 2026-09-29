@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - Enforced gate failures remain visible as a `FAIL` verdict in JSON, Markdown, HTML, SARIF, and terminal output when `--fail-on` suppresses exit 1. SARIF now includes the scorecard verdict; `--fail-on` selects the process exit code without hiding failures from gates that remain enforced.
+- Python coverage now runs against the checkout's `src/` files when another package copy is installed. `sc` prepends each `src` root to `PYTHONPATH` for pytest and the `coverage.py` fallback, so tests and coverage use the same files.
 - `sc analyze --diff` scores a project that lives in a subdirectory of its git repository. Changed paths are relative to that project (`src/a.rs`), so the complexity and CRAP gates see the change. Before, the diff was empty and those gates passed without scoring it.
 - Only `secrets.*` findings upload to code scanning at SARIF error level. Every other rule (`test.failed`, `coverage.missing`, lint, CRAP) uploads at warning, so a failing test or missing coverage report never counts as a security vulnerability. Finding severity in the JSON report is unchanged.
 - A tracked file over 1 MiB that starts with NUL bytes is scanned for secrets instead of being skipped as binary. A secret in that file is reported; gitignored build output is still skipped.
