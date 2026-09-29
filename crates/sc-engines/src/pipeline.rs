@@ -465,7 +465,7 @@ fn analyze_unsupported(
     } else {
         Some(clippy_workspace(
             request.config.commands.lint.trim(),
-            crate::facts::is_workspace_root(&request.root),
+            crate::facts::is_workspace_root(&request.root, &request.config.toolchain),
         ))
     };
     let started = crate::pack_cov::run_start();
@@ -743,17 +743,18 @@ fn analyze_rust(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         request.diff_base.as_deref(),
         request.diff_head.as_deref(),
         &request.path_list,
+        &request.config.toolchain,
     ) {
         Ok(selection) => (selection, None),
         Err(err) => (empty_selection(), Some(err)),
     };
 
     let workspace_root = if select_error.is_some() {
-        crate::facts::is_workspace_root(root)
+        crate::facts::is_workspace_root(root, &request.config.toolchain)
     } else {
         selection.workspace_root
     };
-    let mut state = RustState::new(workspace_root);
+    let mut state = RustState::new(workspace_root, request.config.toolchain.clone());
     if let Some(err) = &select_error {
         state.findings.push(unavailable("scope", err));
     }
@@ -792,10 +793,12 @@ struct RustState {
     coverage_data: Option<crate::coverage::CoverageData>,
     line_rate: f64,
     workspace_root: bool,
+    /// From `analyzer.toml` `toolchain` (empty means use the project file pin).
+    toolchain_pin: String,
 }
 
 impl RustState {
-    fn new(workspace_root: bool) -> Self {
+    fn new(workspace_root: bool, toolchain_pin: String) -> Self {
         Self {
             findings: Vec::new(),
             runs: Vec::new(),
@@ -809,6 +812,7 @@ impl RustState {
             coverage_data: None,
             line_rate: 0.0,
             workspace_root,
+            toolchain_pin,
         }
     }
 }
@@ -833,7 +837,13 @@ fn missing_manifest(state: &mut RustState) {
 }
 
 fn compile_phase(root: &Path, manifest: &Path, deadline: Instant, state: &mut RustState) {
-    match run_check(root, manifest, deadline, state.workspace_root) {
+    match run_check(
+        root,
+        manifest,
+        deadline,
+        state.workspace_root,
+        &state.toolchain_pin,
+    ) {
         Ok(captured) => {
             note_run(
                 &mut state.runs,
@@ -920,6 +930,7 @@ fn test_phase(
         deadline,
         state.workspace_root,
         &targeted,
+        &state.toolchain_pin,
         &mut state.runs,
     ) {
         Ok(captured) => {
@@ -1007,6 +1018,7 @@ fn coverage_phase(
         manifest,
         deadline,
         state.workspace_root,
+        &state.toolchain_pin,
         &mut state.runs,
     ) {
         Ok(data) => {
@@ -1134,6 +1146,7 @@ fn assemble_rust_report(
         state.workspace_root,
         state.types_pass,
         deadline,
+        &request.config.toolchain,
         LintSink {
             ran: &mut state.ran,
             skipped: &mut state.skipped,
@@ -1390,11 +1403,12 @@ fn run_test_set(
     deadline: Instant,
     workspace_root: bool,
     names: &[String],
+    toolchain_pin: &str,
     runs: &mut Vec<RunRecord>,
 ) -> Result<TestCapture, CommandError> {
     if names.is_empty() {
         let started = Instant::now();
-        let result = run_tests(root, manifest, deadline, workspace_root);
+        let result = run_tests(root, manifest, deadline, workspace_root, toolchain_pin);
         match &result {
             Ok(captured) => note_run(
                 runs,
@@ -1424,7 +1438,14 @@ fn run_test_set(
     for name in names {
         let started = Instant::now();
         let command = format!("{} {name}", cargo_gate_command("test", workspace_root, ""));
-        let result = run_one_test(root, manifest, deadline, workspace_root, name);
+        let result = run_one_test(
+            root,
+            manifest,
+            deadline,
+            workspace_root,
+            name,
+            toolchain_pin,
+        );
         match &result {
             Ok(captured) => note_run(
                 runs,
@@ -1453,12 +1474,13 @@ fn run_one_test(
     deadline: Instant,
     workspace_root: bool,
     name: &str,
+    toolchain_pin: &str,
 ) -> Result<crate::command::Captured, CommandError> {
     let manifest = manifest.to_string_lossy().to_string();
     let mut args = vec!["test"];
     add_workspace_arg(&mut args, workspace_root);
     args.extend([name, "--manifest-path", &manifest, "--color", "never"]);
-    run_cargo(root, &args, deadline)
+    run_cargo(root, &args, deadline, toolchain_pin)
 }
 
 struct LintSink<'a> {
@@ -1780,6 +1802,7 @@ fn run_lint_engine(
     workspace_root: bool,
     types_pass: bool,
     deadline: Instant,
+    toolchain_pin: &str,
     sink: LintSink<'_>,
 ) -> bool {
     if !types_pass {
@@ -1793,7 +1816,7 @@ fn run_lint_engine(
     }
     let script = script.as_str();
     let started = Instant::now();
-    match run_shell(root, script, deadline) {
+    match run_shell(root, script, deadline, toolchain_pin) {
         Ok(captured) => {
             note_run(
                 sink.runs,
@@ -1874,6 +1897,7 @@ fn run_shell(
     root: &Path,
     script: &str,
     deadline: Instant,
+    toolchain_pin: &str,
 ) -> Result<crate::command::Captured, CommandError> {
     let script = crate::toolchain::prepare(script);
     let timeout = crate::command::budget_left(deadline)?;
@@ -1887,6 +1911,8 @@ fn run_shell(
         .stderr(std::process::Stdio::piped())
         .env("CARGO_TERM_COLOR", "never")
         .env("CARGO_TARGET_DIR", root.join("target"));
+    let policy = crate::rust_toolchain::resolve(root, toolchain_pin);
+    crate::rust_toolchain::apply(&mut cmd, &policy);
     run_cmd(&mut cmd, timeout)
 }
 
@@ -1895,6 +1921,7 @@ fn run_check(
     manifest: &Path,
     deadline: Instant,
     workspace_root: bool,
+    toolchain_pin: &str,
 ) -> Result<crate::command::Captured, CommandError> {
     let manifest = manifest.to_string_lossy().to_string();
     let mut args = vec!["check"];
@@ -1906,7 +1933,7 @@ fn run_check(
         "--color",
         "never",
     ]);
-    run_cargo(root, &args, deadline)
+    run_cargo(root, &args, deadline, toolchain_pin)
 }
 
 fn run_tests(
@@ -1914,12 +1941,13 @@ fn run_tests(
     manifest: &Path,
     deadline: Instant,
     workspace_root: bool,
+    toolchain_pin: &str,
 ) -> Result<crate::command::Captured, CommandError> {
     let manifest = manifest.to_string_lossy().to_string();
     let mut args = vec!["test"];
     add_workspace_arg(&mut args, workspace_root);
     args.extend(["--manifest-path", &manifest, "--color", "never"]);
-    run_cargo(root, &args, deadline)
+    run_cargo(root, &args, deadline, toolchain_pin)
 }
 
 fn run_coverage(
@@ -1927,6 +1955,7 @@ fn run_coverage(
     manifest: &Path,
     deadline: Instant,
     workspace_root: bool,
+    toolchain_pin: &str,
     runs: &mut Vec<RunRecord>,
 ) -> Result<crate::coverage::CoverageData, String> {
     let out_path = root.join("target").join("sc-coverage.json");
@@ -1946,7 +1975,7 @@ fn run_coverage(
         "--manifest-path",
         &manifest_s,
     ]);
-    let captured = run_cargo(root, &args, deadline);
+    let captured = run_cargo(root, &args, deadline, toolchain_pin);
     match &captured {
         Ok(captured) => note_run_with_budget(
             runs,
@@ -2370,6 +2399,7 @@ fn mutation_engine(
         resolved.as_deref(),
         request.config.mutation.max_mutants,
         Duration::from_secs(request.config.mutation.budget_seconds).min(request.budget),
+        &request.config.toolchain,
     );
     if outcome.ran {
         ran.push("mutation".into());
@@ -3026,6 +3056,7 @@ mod tests {
             false,
             true,
             Instant::now() + Duration::from_secs(5),
+            "",
             LintSink {
                 ran: &mut ran,
                 skipped: &mut skipped,

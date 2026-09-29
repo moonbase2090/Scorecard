@@ -57,6 +57,12 @@ enforce = false
 enforce = false
 disable = []
 
+# Rustup channel for check, test, coverage, and lint. When set, Cargo
+# uses this channel. Empty: a rust-toolchain.toml / rust-toolchain at or
+# above the project wins over an inherited RUSTUP_TOOLCHAIN; with no
+# file, the inherited variable is left alone.
+# toolchain = "1.85.0"
+
 [commands]
 # Empty skips lint. Non-zero exit is `lint.failed`.
 # At a workspace root this runs `cargo clippy --workspace`; a member analysis

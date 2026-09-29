@@ -15,6 +15,7 @@ Only the first file found is read. Command-line flags override the matching keys
 | Key | Default | Meaning |
 |---|---|---|
 | `pack` | detected | Language pack when the tree has more than one marker. Same values as `--pack`. |
+| `toolchain` | empty | Rustup channel for check, test, coverage, and lint (`1.85.0`, `stable`, …). When set, Cargo uses that channel. When empty, a `rust-toolchain.toml` / `rust-toolchain` at or above the project clears an inherited `RUSTUP_TOOLCHAIN` so rustup reads the file; with no file, the inherited variable is left alone. |
 
 ### `[gates]`
 

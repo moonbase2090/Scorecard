@@ -17,6 +17,7 @@ mod pack_cov;
 mod pipeline;
 mod poly_cc;
 mod python;
+mod rust_toolchain;
 mod scope;
 mod secrets;
 mod spec_check;

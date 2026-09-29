@@ -65,7 +65,7 @@ pub fn budget_left(deadline: Instant) -> Result<Duration, CommandError> {
     }
 }
 
-pub fn cargo_command(root: &Path) -> Command {
+pub fn cargo_command(root: &Path, config_pin: &str) -> Command {
     let mut cmd = Command::new("cargo");
     cmd.current_dir(root)
         .stdin(Stdio::null())
@@ -79,6 +79,8 @@ pub fn cargo_command(root: &Path) -> Command {
         .env_remove("CARGO_MANIFEST_DIR")
         .env_remove("CARGO_MANIFEST_PATH");
     strip_parent_llvm_cov(&mut cmd);
+    let policy = crate::rust_toolchain::resolve(root, config_pin);
+    crate::rust_toolchain::apply(&mut cmd, &policy);
     cmd
 }
 
@@ -194,17 +196,28 @@ pub fn run_cmd_input(
     })
 }
 
-pub fn run_cargo(root: &Path, args: &[&str], deadline: Instant) -> Result<Captured, CommandError> {
+pub fn run_cargo(
+    root: &Path,
+    args: &[&str],
+    deadline: Instant,
+    config_pin: &str,
+) -> Result<Captured, CommandError> {
     if !crate::toolchain::host_has("cargo") {
         let mut script = String::from("cargo");
         for arg in args {
             script.push(' ');
             script.push_str(&shell_quote_arg(arg));
         }
+        // Docker image only has stable. A config pin is passed through so a
+        // missing channel fails clearly; a file pin is left to rustup in the image.
+        let policy = crate::rust_toolchain::resolve(root, config_pin);
+        if let Some(pin) = crate::rust_toolchain::docker_env_prefix(&policy) {
+            script = format!("RUSTUP_TOOLCHAIN={} {script}", shell_quote_arg(pin));
+        }
         return crate::toolchain::run_script(root, &script, deadline);
     }
     let timeout = budget_left(deadline)?;
-    let mut cmd = cargo_command(root);
+    let mut cmd = cargo_command(root, config_pin);
     cmd.args(args);
     run_cmd(&mut cmd, timeout)
 }
