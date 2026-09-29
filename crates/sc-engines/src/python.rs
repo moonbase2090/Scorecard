@@ -83,6 +83,7 @@ pub fn run(
         &mut runs,
         &mut ran,
         &mut skipped,
+        coverage_enabled,
     );
     let (lint_pass, lint_reason) = run_ruff(
         root,
@@ -331,6 +332,7 @@ fn coverage_tests_skip_reason(
 }
 
 #[inline(never)]
+#[allow(clippy::too_many_arguments)]
 fn run_pytest(
     root: &Path,
     deadline: Instant,
@@ -339,6 +341,7 @@ fn run_pytest(
     runs: &mut Vec<RunRecord>,
     ran: &mut Vec<String>,
     skipped: &mut Vec<String>,
+    coverage_enabled: bool,
 ) -> (bool, bool, String) {
     if !has_tests(root) {
         skipped.push("tests".into());
@@ -354,15 +357,7 @@ fn run_pytest(
         let _ = std::fs::create_dir_all(parent);
     }
     let _ = std::fs::remove_file(&cov_file);
-    let cov: Vec<String> = sources
-        .iter()
-        .map(|dir| format!("--cov={}", crate::command::shell_quote_arg(dir)))
-        .collect();
-    let command = format!(
-        "{base} {} --cov-report=json:{}",
-        cov.join(" "),
-        cov_file.display()
-    );
+    let command = pytest_command(&base, sources, &cov_file, coverage_enabled);
     let command = if base.starts_with("uv ") || host_pytest() {
         command
     } else {
@@ -453,6 +448,29 @@ fn coverage_source_flags(sources: &[String]) -> String {
         .map(|dir| format!("--source={}", crate::command::shell_quote_arg(dir)))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// The pytest invocation before any missing-pytest retry: with coverage on,
+/// `--cov` per source plus a JSON report; with coverage off, the bare base
+/// command. Pure constructor so tests assert the built string directly.
+fn pytest_command(
+    base: &str,
+    sources: &[String],
+    cov_file: &Path,
+    coverage_enabled: bool,
+) -> String {
+    if !coverage_enabled {
+        return base.to_string();
+    }
+    let cov: Vec<String> = sources
+        .iter()
+        .map(|dir| format!("--cov={}", crate::command::shell_quote_arg(dir)))
+        .collect();
+    format!(
+        "{base} {} --cov-report=json:{}",
+        cov.join(" "),
+        cov_file.display()
+    )
 }
 
 /// `uv run` when the project has `uv.lock` or a `.venv` directory.
@@ -1827,6 +1845,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn pytest_command_omits_cov_flags_when_coverage_is_disabled() {
+        let cov_file = std::path::PathBuf::from("/tmp/sc-pytest.json");
+        let sources = vec![".".to_string(), "src/app".to_string()];
+        let off = pytest_command("python3 -m pytest -q", &sources, &cov_file, false);
+        assert_eq!(off, "python3 -m pytest -q", "{off}");
+        assert!(!off.contains("--cov"), "{off}");
+        let on = pytest_command("python3 -m pytest -q", &sources, &cov_file, true);
+        assert!(on.contains("--cov='.'"), "{on}");
+        assert!(on.contains("--cov='src/app'"), "{on}");
+        assert!(on.contains("--cov-report=json:"), "{on}");
+    }
+
+    #[test]
     fn coverage_disabled_skips_collection_and_names_the_flag() {
         let root = std::env::temp_dir().join(format!("sc-py-nocov-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -1903,6 +1934,7 @@ mod tests {
             &mut Vec::new(),
             &mut Vec::new(),
             &mut Vec::new(),
+            true,
         );
         assert!(enforced);
         assert!(!pass);
@@ -1924,6 +1956,7 @@ mod tests {
             &mut Vec::new(),
             &mut Vec::new(),
             &mut Vec::new(),
+            true,
         );
         assert!(!enforced);
         assert!(pass);
@@ -1999,6 +2032,7 @@ mod tests {
             &mut runs,
             &mut ran,
             &mut skipped,
+            true,
         );
         let _ = run_pytest(
             &root,
@@ -2008,6 +2042,7 @@ mod tests {
             &mut runs,
             &mut ran,
             &mut skipped,
+            true,
         );
         let _ = std::fs::remove_dir_all(&root);
     }
