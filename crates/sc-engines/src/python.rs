@@ -83,6 +83,7 @@ pub fn run(
         &mut runs,
         &mut ran,
         &mut skipped,
+        coverage_enabled,
     );
     let (lint_pass, lint_reason) = run_ruff(
         root,
@@ -331,6 +332,7 @@ fn coverage_tests_skip_reason(
 }
 
 #[inline(never)]
+#[allow(clippy::too_many_arguments)]
 fn run_pytest(
     root: &Path,
     deadline: Instant,
@@ -339,6 +341,7 @@ fn run_pytest(
     runs: &mut Vec<RunRecord>,
     ran: &mut Vec<String>,
     skipped: &mut Vec<String>,
+    coverage_enabled: bool,
 ) -> (bool, bool, String) {
     if !has_tests(root) {
         skipped.push("tests".into());
@@ -354,15 +357,19 @@ fn run_pytest(
         let _ = std::fs::create_dir_all(parent);
     }
     let _ = std::fs::remove_file(&cov_file);
-    let cov: Vec<String> = sources
-        .iter()
-        .map(|dir| format!("--cov={}", crate::command::shell_quote_arg(dir)))
-        .collect();
-    let command = format!(
-        "{base} {} --cov-report=json:{}",
-        cov.join(" "),
-        cov_file.display()
-    );
+    let command = if coverage_enabled {
+        let cov: Vec<String> = sources
+            .iter()
+            .map(|dir| format!("--cov={}", crate::command::shell_quote_arg(dir)))
+            .collect();
+        format!(
+            "{base} {} --cov-report=json:{}",
+            cov.join(" "),
+            cov_file.display()
+        )
+    } else {
+        base.clone()
+    };
     let command = if base.starts_with("uv ") || host_pytest() {
         command
     } else {
@@ -1827,6 +1834,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn pytest_command_omits_cov_flags_when_coverage_is_disabled() {
+        let root = std::env::temp_dir().join(format!("sc-py-nocov-cmd-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("test")).unwrap();
+        std::fs::write(root.join("app.py"), "def wide(n):\n    return n\n").unwrap();
+        std::fs::write(
+            root.join("test/test_app.py"),
+            "from app import wide\ndef test_wide():\n    assert wide(1) == 1\n",
+        )
+        .unwrap();
+        let mut runs = Vec::new();
+        let _ = run_pytest(
+            &root,
+            std::time::Instant::now() + std::time::Duration::from_secs(60),
+            &[".".to_string()],
+            &mut Vec::new(),
+            &mut runs,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            false,
+        );
+        let test_run = runs
+            .iter()
+            .find(|run| run.engine == "tests")
+            .expect("tests engine records a run");
+        assert!(!test_run.command.contains("--cov"), "{}", test_run.command);
+        assert!(
+            !test_run.command.contains("--cov-report"),
+            "{}",
+            test_run.command
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn coverage_disabled_skips_collection_and_names_the_flag() {
         let root = std::env::temp_dir().join(format!("sc-py-nocov-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -1903,6 +1945,7 @@ mod tests {
             &mut Vec::new(),
             &mut Vec::new(),
             &mut Vec::new(),
+            true,
         );
         assert!(enforced);
         assert!(!pass);
@@ -1924,6 +1967,7 @@ mod tests {
             &mut Vec::new(),
             &mut Vec::new(),
             &mut Vec::new(),
+            true,
         );
         assert!(!enforced);
         assert!(pass);
@@ -1999,6 +2043,7 @@ mod tests {
             &mut runs,
             &mut ran,
             &mut skipped,
+            true,
         );
         let _ = run_pytest(
             &root,
@@ -2008,6 +2053,7 @@ mod tests {
             &mut runs,
             &mut ran,
             &mut skipped,
+            true,
         );
         let _ = std::fs::remove_dir_all(&root);
     }
