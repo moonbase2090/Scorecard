@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use sc_core::{Finding, Gate, RunRecord};
 
-use crate::command::{brief, run_cmd, CommandError};
+use crate::command::{brief, run_cmd, run_cmd_input, CommandError};
 use crate::pack::PackId;
 
 pub struct ToolReport {
@@ -26,8 +26,11 @@ struct Step {
     engine: &'static str,
     command: Option<String>,
     absent: String,
-    /// A failing command with `enforce: false` is reported and does not fail the run.
+    /// A failing command with `enforce: false` is reported and does not fail the run
+    /// when every error is a missing header. Any other error still fails the run.
     enforce: bool,
+    /// A failed command is reported and does not fail the run, whatever the error.
+    advisory_failure: bool,
 }
 
 pub fn run(pack: PackId, root: &Path, deadline: Instant, user_lint: Option<&str>) -> ToolReport {
@@ -40,6 +43,7 @@ pub fn run(pack: PackId, root: &Path, deadline: Instant, user_lint: Option<&str>
             command: Some(lint.to_string()),
             absent: "lint command is empty".into(),
             enforce: true,
+            advisory_failure: false,
         });
     }
     let mut report = ToolReport {
@@ -100,6 +104,7 @@ fn node_plan(root: &Path) -> Vec<Step> {
             command: compile,
             absent: "node is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "tests",
@@ -107,6 +112,7 @@ fn node_plan(root: &Path) -> Vec<Step> {
             command: test,
             absent: "package.json has no test script".into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "lint",
@@ -119,6 +125,7 @@ fn node_plan(root: &Path) -> Vec<Step> {
             },
             absent: "eslint is not configured".into(),
             enforce: true,
+            advisory_failure: false,
         },
     ]
 }
@@ -136,6 +143,7 @@ fn bash_plan(root: &Path) -> Vec<Step> {
             },
             absent: "bash is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "tests",
@@ -143,6 +151,7 @@ fn bash_plan(root: &Path) -> Vec<Step> {
             command: bash_tests(root),
             absent: "bats is not installed or no .bats suite exists".into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "lint",
@@ -154,6 +163,7 @@ fn bash_plan(root: &Path) -> Vec<Step> {
             },
             absent: "shellcheck is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
     ]
 }
@@ -171,6 +181,7 @@ fn go_plan(root: &Path) -> Vec<Step> {
             command: via("go", "go build ./...".into()),
             absent: "go is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "tests",
@@ -181,6 +192,7 @@ fn go_plan(root: &Path) -> Vec<Step> {
             ),
             absent: "go is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "lint",
@@ -188,6 +200,7 @@ fn go_plan(root: &Path) -> Vec<Step> {
             command: via("go", "go vet ./...".into()),
             absent: "go is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
     ]
 }
@@ -241,6 +254,7 @@ fn java_plan(root: &Path) -> Vec<Step> {
             command: compile,
             absent: "javac, mvn, or gradle is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "tests",
@@ -248,6 +262,7 @@ fn java_plan(root: &Path) -> Vec<Step> {
             command: test,
             absent: test_absent.into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "lint",
@@ -255,6 +270,7 @@ fn java_plan(root: &Path) -> Vec<Step> {
             command: None,
             absent: "no Java linter is configured".into(),
             enforce: true,
+            advisory_failure: false,
         },
     ]
 }
@@ -268,6 +284,7 @@ fn csharp_plan() -> Vec<Step> {
             command: via("dotnet", format!("{prefix} dotnet build --nologo -v q")),
             absent: "dotnet is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "tests",
@@ -275,6 +292,7 @@ fn csharp_plan() -> Vec<Step> {
             command: via("dotnet", format!("{prefix} {CSHARP_TEST}")),
             absent: "dotnet is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "lint",
@@ -282,6 +300,7 @@ fn csharp_plan() -> Vec<Step> {
             command: None,
             absent: "C# analyzers run as part of dotnet build".into(),
             enforce: true,
+            advisory_failure: false,
         },
     ]
 }
@@ -299,6 +318,7 @@ fn php_plan(root: &Path) -> Vec<Step> {
             },
             absent: "php is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "tests",
@@ -312,6 +332,7 @@ fn php_plan(root: &Path) -> Vec<Step> {
             },
             absent: "phpunit is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "lint",
@@ -333,6 +354,7 @@ fn php_plan(root: &Path) -> Vec<Step> {
             },
             absent: "phpstan is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
     ]
 }
@@ -340,13 +362,20 @@ fn php_plan(root: &Path) -> Vec<Step> {
 fn cpp_plan(root: &Path) -> Vec<Step> {
     let files = list_files(root, &["c", "cc", "cpp", "cxx"]);
     let (c_files, cxx_files) = split_c_family(&files);
+    let flags = if c_files.is_empty() && cxx_files.is_empty() {
+        MakefileFlags::none()
+    } else {
+        MakefileFlags::read(root)
+    };
+    let build_db = types_enforced(root);
     vec![
         Step {
             gate: "types",
             engine: "compile",
-            command: cpp_compile(root, &c_files, &cxx_files),
+            command: cpp_compile(root, &c_files, &cxx_files, &flags),
             absent: cpp_absent(&c_files, &cxx_files),
-            enforce: types_enforced(root),
+            enforce: build_db,
+            advisory_failure: flags.uncertain && !build_db,
         },
         Step {
             gate: "tests",
@@ -358,6 +387,7 @@ fn cpp_plan(root: &Path) -> Vec<Step> {
             },
             absent: "CTest suite is not present".into(),
             enforce: true,
+            advisory_failure: false,
         },
         Step {
             gate: "lint",
@@ -369,6 +399,7 @@ fn cpp_plan(root: &Path) -> Vec<Step> {
             },
             absent: "clang-tidy is not installed".into(),
             enforce: true,
+            advisory_failure: false,
         },
     ]
 }
@@ -405,7 +436,15 @@ fn apply(root: &Path, deadline: Instant, step: Step, report: &mut ToolReport) {
                 } else {
                     format!("{} failed: {detail}", step.engine)
                 };
-                if step.enforce {
+                // Without a build database, only missing headers stay advisory.
+                // An undeclared name or a syntax error still fails the gate.
+                // A Makefile stays advisory unless it is plainly understood:
+                // global flags, recipes that use only the known compiler
+                // variables, and no include, shell, eval, file, or nested make.
+                let output = format!("{}\n{}", captured.stdout, captured.stderr);
+                let advisory =
+                    step.advisory_failure || (!step.enforce && include_only_failure(&output));
+                if !advisory {
                     let rule = match step.engine {
                         "tests" => "test.failed",
                         "lint" => "lint.failed",
@@ -430,9 +469,15 @@ fn apply(root: &Path, deadline: Instant, step: Step, report: &mut ToolReport) {
                         &format!("{} failed", step.engine),
                     ));
                 } else {
-                    let reason = format!(
-                        "{failed}. Include paths and generated headers are not known without CMakeLists.txt or compile_commands.json, so this types check is not enforced."
-                    );
+                    let reason = if step.advisory_failure {
+                        format!(
+                            "{failed}. The types check does not see every flag this Makefile uses, so it is not enforced. Put -I and -D in a global CFLAGS, CPPFLAGS, or CXXFLAGS assignment."
+                        )
+                    } else {
+                        format!(
+                            "{failed}. Include paths and generated headers are not known without CMakeLists.txt or compile_commands.json, so this types check is not enforced."
+                        )
+                    };
                     report.findings.push(Finding {
                         id: format!("{}:failed", step.engine),
                         rule: "compile.failed".into(),
@@ -444,8 +489,13 @@ fn apply(root: &Path, deadline: Instant, step: Step, report: &mut ToolReport) {
                         message: reason.clone(),
                         evidence: serde_json::json!({"command": command}),
                         suggested_action: Some(
-                            "Fix the compiler error, or pass --pack if this tree is not C or C++."
-                                .into(),
+                            if step.advisory_failure {
+                                "Put -I and -D in a global CFLAGS, CPPFLAGS, or CXXFLAGS assignment. Recipes may use only CC, CXX, CFLAGS, CPPFLAGS, CXXFLAGS, LDFLAGS, LDLIBS, and TARGET_ARCH. Do not include a file, use $(shell), $(eval), $(file), or !=, recurse with make, or set a target-specific variable."
+                                    .into()
+                            } else {
+                                "Fix the compiler error, or pass --pack if this tree is not C or C++."
+                                    .into()
+                            },
                         ),
                         disposition: String::new(),
                     });
@@ -550,6 +600,25 @@ fn types_enforced(root: &Path) -> bool {
     root.join("CMakeLists.txt").is_file() || root.join("compile_commands.json").is_file()
 }
 
+/// True when every compiler error is a missing header or file.
+/// An undeclared identifier or a syntax error returns false.
+fn include_only_failure(text: &str) -> bool {
+    let mut saw_error = false;
+    for line in text.lines() {
+        let lower = line.to_ascii_lowercase();
+        if !lower.contains("error:") {
+            continue;
+        }
+        saw_error = true;
+        let missing =
+            lower.contains("file not found") || lower.contains("no such file or directory");
+        if !missing {
+            return false;
+        }
+    }
+    saw_error
+}
+
 fn split_c_family(files: &[String]) -> (Vec<String>, Vec<String>) {
     let mut c_files = Vec::new();
     let mut cxx_files = Vec::new();
@@ -593,19 +662,34 @@ fn syntax_group(bin: &str, prefix: &str, files: &[String]) -> Option<String> {
     if files.is_empty() {
         Some(String::new())
     } else {
-        via(bin, check_chain(prefix, files))
+        via(bin, check_each(prefix, files))
     }
 }
 
-fn cpp_compile(root: &Path, c_files: &[String], cxx_files: &[String]) -> Option<String> {
+fn cpp_compile(
+    root: &Path,
+    c_files: &[String],
+    cxx_files: &[String],
+    flags: &MakefileFlags,
+) -> Option<String> {
     if !c_files.is_empty() || !cxx_files.is_empty() {
-        let c = syntax_group("cc", "cc -fsyntax-only -x c", c_files);
-        let cxx = syntax_group("g++", "g++ -fsyntax-only", cxx_files);
+        let c = syntax_group(
+            "cc",
+            &flag_prefix("cc -fsyntax-only -x c", &flags.c),
+            c_files,
+        );
+        let cxx = syntax_group(
+            "g++",
+            &flag_prefix("g++ -fsyntax-only", &flags.cxx),
+            cxx_files,
+        );
         if let (Some(c), Some(cxx)) = (c, cxx) {
             return Some(match (c.is_empty(), cxx.is_empty()) {
                 (false, true) => c,
                 (true, false) => cxx,
-                (false, false) => format!("{c} && {cxx}"),
+                (false, false) => {
+                    format!("{c}; _sc_c=$?; {cxx}; _sc_x=$?; [ \"$_sc_c\" -eq 0 ] && [ \"$_sc_x\" -eq 0 ]")
+                }
                 (true, true) => String::new(),
             });
         }
@@ -751,6 +835,554 @@ fn tsc_and_node(has_tsconfig: bool, ts: &[String], js: &[String]) -> String {
 
 fn json_escape(text: &str) -> String {
     text.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn flag_prefix(base: &str, flags: &[String]) -> String {
+    let mut prefix = base.to_string();
+    for flag in flags {
+        prefix.push(' ');
+        prefix.push_str(&shell_quote(flag));
+    }
+    prefix
+}
+
+/// `-I` and `-D` from global `CFLAGS`, `CPPFLAGS`, and `CXXFLAGS`.
+/// `make` expands a reference such as `$(DEFS)` and leaves out an `ifeq`
+/// branch it does not take. The types gate stays advisory unless every
+/// recipe uses only the known compiler variables and the Makefile does not
+/// include a file, run a shell, call `$(eval)` or `$(file)`, or build a
+/// subdirectory. `make` is not run in those rewrite cases.
+struct MakefileFlags {
+    c: Vec<String>,
+    cxx: Vec<String>,
+    uncertain: bool,
+}
+
+impl MakefileFlags {
+    fn none() -> Self {
+        Self {
+            c: Vec::new(),
+            cxx: Vec::new(),
+            uncertain: false,
+        }
+    }
+
+    fn read(root: &Path) -> Self {
+        let Some((name, text)) = makefile_source(root) else {
+            return Self::none();
+        };
+        let mut shape = makefile_shape(&text);
+        if nested_makefile(root) {
+            shape.partial = true;
+        }
+        if !shape.skip_make {
+            if let Some((cpp, c, cxx)) = flags_from_make(root, name) {
+                let (c, cxx) = combine_flag_text(&cpp, &c, &cxx);
+                return Self {
+                    c,
+                    cxx,
+                    uncertain: shape.partial,
+                };
+            }
+        }
+        let (c, cxx) = flags_from_text(&text);
+        Self {
+            c,
+            cxx,
+            uncertain: shape.skip_make || shape.partial || makefile_text_uncertain(&text),
+        }
+    }
+}
+
+struct MakefileShape {
+    /// An include or a shell command runs when `make` reads the file.
+    skip_make: bool,
+    /// A recipe or target-specific flag is invisible to `$(CFLAGS)`.
+    partial: bool,
+}
+
+fn makefile_shape(text: &str) -> MakefileShape {
+    let mut skip_make = false;
+    let mut partial = false;
+    for line in text.lines() {
+        let code = strip_makefile_comment(line);
+        if calls_make_function(code, "shell")
+            || calls_make_function(code, "eval")
+            || calls_make_function(code, "file")
+        {
+            skip_make = true;
+        }
+        if line.starts_with('\t') {
+            if recipe_is_partial(code) {
+                partial = true;
+            }
+            continue;
+        }
+        if let Some(recipe) = recipe_after_semicolon(code.trim()) {
+            if recipe_is_partial(recipe) {
+                partial = true;
+            }
+        }
+        if is_include_directive(code.trim()) {
+            skip_make = true;
+        }
+        if let Some(parsed) = make_lhs(line) {
+            if parsed.shell {
+                skip_make = true;
+            }
+            if parsed.prefix.contains(':')
+                && matches!(parsed.name, "CFLAGS" | "CXXFLAGS" | "CPPFLAGS")
+            {
+                partial = true;
+            }
+        }
+    }
+    MakefileShape { skip_make, partial }
+}
+
+fn calls_make_function(code: &str, name: &str) -> bool {
+    let bytes = code.as_bytes();
+    let mut index = 0;
+    while index + 2 < bytes.len() {
+        if bytes[index] == b'$' && (bytes[index + 1] == b'(' || bytes[index + 1] == b'{') {
+            let mut start = index + 2;
+            while start < bytes.len() && bytes[start].is_ascii_whitespace() {
+                start += 1;
+            }
+            if code[start..].starts_with(name) {
+                let end = start + name.len();
+                let boundary = code[end..].chars().next();
+                if boundary.is_none_or(|ch| !ch.is_ascii_alphanumeric() && ch != '_') {
+                    return true;
+                }
+            }
+        }
+        index += 1;
+    }
+    false
+}
+
+fn recipe_is_partial(line: &str) -> bool {
+    recipe_compile_flag(line) || recipe_recurses(line) || recipe_uses_unknown_variable(line)
+}
+
+fn recipe_after_semicolon(line: &str) -> Option<&str> {
+    let semi = line.find(';')?;
+    let before = &line[..semi];
+    if before.contains(':') {
+        return Some(line[semi + 1..].trim());
+    }
+    None
+}
+
+fn recipe_recurses(line: &str) -> bool {
+    line.split_whitespace().any(|token| {
+        let token = token.trim_matches(['"', '\'']);
+        token == "make"
+            || token == "-C"
+            || token.starts_with("-C/")
+            || token.starts_with("-C.")
+            || (token.starts_with("-C")
+                && token.len() > 2
+                && token[2..]
+                    .chars()
+                    .next()
+                    .is_some_and(|ch| ch.is_ascii_lowercase()))
+    })
+}
+
+fn recipe_uses_unknown_variable(line: &str) -> bool {
+    let chars: Vec<char> = line.chars().collect();
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index] != '$' {
+            index += 1;
+            continue;
+        }
+        let Some(next) = chars.get(index + 1).copied() else {
+            return true;
+        };
+        if next == '$' || matches!(next, '@' | '<' | '^' | '*' | '?') {
+            index += 2;
+            continue;
+        }
+        if next != '(' && next != '{' {
+            return true;
+        }
+        let close = if next == '(' { ')' } else { '}' };
+        let mut depth = 1;
+        let mut end = index + 2;
+        let start = end;
+        while end < chars.len() {
+            if chars[end] == next {
+                depth += 1;
+            } else if chars[end] == close {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            end += 1;
+        }
+        if end >= chars.len() {
+            return true;
+        }
+        let inner: String = chars[start..end].iter().collect();
+        let inner = inner.trim();
+        if inner.contains(':') || inner.contains('$') || !known_make_variable(inner) {
+            return true;
+        }
+        index = end + 1;
+    }
+    false
+}
+
+fn known_make_variable(name: &str) -> bool {
+    matches!(
+        name,
+        "CC" | "CXX"
+            | "CFLAGS"
+            | "CPPFLAGS"
+            | "CXXFLAGS"
+            | "LDFLAGS"
+            | "LDLIBS"
+            | "TARGET_ARCH"
+            | "@"
+            | "<"
+            | "^"
+            | "*"
+            | "?"
+    )
+}
+
+fn nested_makefile(root: &Path) -> bool {
+    fn walk(dir: &Path, depth: u32) -> bool {
+        if depth > 5 {
+            return false;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return false;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with('.') || name == "node_modules" || name == "target" || name == "dist"
+            {
+                continue;
+            }
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_symlink() {
+                continue;
+            }
+            if kind.is_dir() {
+                if walk(&entry.path(), depth + 1) {
+                    return true;
+                }
+            } else if kind.is_file()
+                && matches!(name.as_ref(), "Makefile" | "makefile" | "GNUmakefile")
+            {
+                return true;
+            }
+        }
+        false
+    }
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with('.') || name == "node_modules" || name == "target" || name == "dist" {
+            continue;
+        }
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        if kind.is_symlink() || !kind.is_dir() {
+            continue;
+        }
+        if walk(&entry.path(), 1) {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_include_directive(line: &str) -> bool {
+    ["-include", "sinclude", "include"]
+        .into_iter()
+        .any(|prefix| {
+            line.strip_prefix(prefix)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
+        })
+}
+
+fn recipe_compile_flag(line: &str) -> bool {
+    line.split_whitespace().any(|token| {
+        let token = token.trim_matches(['"', '\'']);
+        token.starts_with("-D")
+            || token.starts_with("-I")
+            || token.starts_with("-isystem")
+            || token.starts_with("-include")
+    })
+}
+
+fn makefile_source(root: &Path) -> Option<(&str, String)> {
+    ["Makefile", "makefile", "GNUmakefile"]
+        .into_iter()
+        .find_map(|name| {
+            std::fs::read_to_string(root.join(name))
+                .ok()
+                .map(|text| (name, text.replace("\\\n", " ")))
+        })
+}
+
+fn flags_from_make(root: &Path, makefile_name: &str) -> Option<(String, String, String)> {
+    if !which("make") {
+        return None;
+    }
+    // `$(info)` prints the expanded value. GNU make 3.81 has no `--eval`,
+    // so the probe is a makefile on stdin. `-o` treats the project's
+    // makefile as up to date. The goal is not the default target, and its
+    // recipe does not build anything.
+    let body = "\
+$(info __SC_CPPFLAGS__=$(CPPFLAGS))\n\
+$(info __SC_CFLAGS__=$(CFLAGS))\n\
+$(info __SC_CXXFLAGS__=$(CXXFLAGS))\n\
+__sc_flags:\n\
+\t@:\n";
+    let mut cmd = Command::new("make");
+    cmd.current_dir(root)
+        .args(["-s", "--no-print-directory", "-o"])
+        .arg(makefile_name)
+        .arg("-f")
+        .arg(makefile_name)
+        .args(["-f", "-", "__sc_flags"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let captured = run_cmd_input(
+        &mut cmd,
+        std::time::Duration::from_secs(5),
+        Some(body.as_bytes()),
+    )
+    .ok()?;
+    if !captured.status.success() {
+        return None;
+    }
+    Some((
+        marked_make_value(&captured.stdout, "CPPFLAGS")?,
+        marked_make_value(&captured.stdout, "CFLAGS")?,
+        marked_make_value(&captured.stdout, "CXXFLAGS")?,
+    ))
+}
+
+fn marked_make_value(stdout: &str, name: &str) -> Option<String> {
+    let prefix = format!("__SC_{name}__=");
+    stdout
+        .lines()
+        .rev()
+        .find(|line| line.starts_with(&prefix))
+        .map(|line| line[prefix.len()..].to_string())
+}
+
+fn combine_flag_text(cpp: &str, c: &str, cxx: &str) -> (Vec<String>, Vec<String>) {
+    // `make`'s `COMPILE.c` is `$(CC) $(CFLAGS) $(CPPFLAGS)`, and `COMPILE.cc`
+    // is `$(CXX) $(CXXFLAGS) $(CPPFLAGS)`. The last flag wins.
+    let cpp_tokens = compile_flag_tokens(cpp);
+    let mut c_flags = compile_flag_tokens(c);
+    c_flags.extend(cpp_tokens.iter().cloned());
+    let mut cxx_flags = compile_flag_tokens(cxx);
+    cxx_flags.extend(cpp_tokens);
+    (c_flags, cxx_flags)
+}
+
+fn makefile_text_uncertain(text: &str) -> bool {
+    text.contains("$(")
+        || text.contains("${")
+        || text.lines().any(|line| {
+            let line = strip_makefile_comment(line).trim();
+            line.starts_with("ifeq")
+                || line.starts_with("ifneq")
+                || line.starts_with("ifdef")
+                || line.starts_with("ifndef")
+                || line == "else"
+                || line.starts_with("else ")
+                || line == "endif"
+                || line.starts_with("endif ")
+        })
+}
+
+fn flags_from_text(text: &str) -> (Vec<String>, Vec<String>) {
+    let mut cflags = MakeValue::default();
+    let mut cxxflags = MakeValue::default();
+    let mut cppflags = MakeValue::default();
+    for line in text.lines() {
+        let Some((name, op, value)) = makefile_assignment(line) else {
+            continue;
+        };
+        let slot = match name {
+            "CFLAGS" => &mut cflags,
+            "CXXFLAGS" => &mut cxxflags,
+            "CPPFLAGS" => &mut cppflags,
+            _ => continue,
+        };
+        apply_make_value(slot, op, value);
+    }
+    combine_flag_text(&cppflags.text, &cflags.text, &cxxflags.text)
+}
+
+#[derive(Default)]
+struct MakeValue {
+    text: String,
+    set: bool,
+}
+
+enum MakeAssign {
+    Set,
+    Append,
+    IfUnset,
+}
+
+fn apply_make_value(slot: &mut MakeValue, op: MakeAssign, value: &str) {
+    match op {
+        MakeAssign::IfUnset if slot.set => {}
+        MakeAssign::Append => {
+            if slot.set && !slot.text.is_empty() && !value.is_empty() {
+                slot.text.push(' ');
+            }
+            slot.text.push_str(value);
+            slot.set = true;
+        }
+        MakeAssign::Set | MakeAssign::IfUnset => {
+            slot.text = value.to_string();
+            slot.set = true;
+        }
+    }
+}
+
+struct MakeLhs<'a> {
+    prefix: &'a str,
+    name: &'a str,
+    op: MakeAssign,
+    value: &'a str,
+    /// `!=` runs a shell when `make` reads the file.
+    shell: bool,
+}
+
+fn make_lhs(line: &str) -> Option<MakeLhs<'_>> {
+    let line = strip_makefile_comment(line).trim();
+    let eq = line.find('=')?;
+    let before = &line[..eq];
+    let shell = before.ends_with('!') && !before.ends_with("::");
+    let (lhs, op) = if let Some(lhs) = before.strip_suffix("::") {
+        (lhs, MakeAssign::Set)
+    } else if let Some(lhs) = before.strip_suffix(':') {
+        (lhs, MakeAssign::Set)
+    } else if let Some(lhs) = before.strip_suffix('?') {
+        (lhs, MakeAssign::IfUnset)
+    } else if let Some(lhs) = before.strip_suffix('+') {
+        (lhs, MakeAssign::Append)
+    } else if let Some(lhs) = before.strip_suffix('!') {
+        (lhs, MakeAssign::Set)
+    } else {
+        (before, MakeAssign::Set)
+    };
+    let lhs = lhs.trim_end();
+    let (prefix, name) = match lhs.rsplit_once(char::is_whitespace) {
+        Some((prefix, name)) => (prefix, name),
+        None => ("", lhs),
+    };
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    {
+        return None;
+    }
+    Some(MakeLhs {
+        prefix,
+        name,
+        op,
+        value: line[eq + 1..].trim(),
+        shell,
+    })
+}
+
+fn makefile_assignment(line: &str) -> Option<(&str, MakeAssign, &str)> {
+    let parsed = make_lhs(line)?;
+    // `demo: CFLAGS +=` is not a global flag. Applying it would hide a
+    // compile error that the real build does not have.
+    if parsed.shell || parsed.prefix.contains(':') {
+        return None;
+    }
+    Some((parsed.name, parsed.op, parsed.value))
+}
+
+fn strip_makefile_comment(line: &str) -> &str {
+    let mut quote = None;
+    for (index, ch) in line.char_indices() {
+        match ch {
+            '"' | '\'' if quote.is_none() => quote = Some(ch),
+            ch if Some(ch) == quote => quote = None,
+            '#' if quote.is_none() => return &line[..index],
+            _ => {}
+        }
+    }
+    line
+}
+
+fn compile_flag_tokens(value: &str) -> Vec<String> {
+    let chars: Vec<char> = value.chars().collect();
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut index = 0;
+    while index < chars.len() {
+        let ch = chars[index];
+        // `\"` is the quote `make` passes through, and `\ ` is a space that
+        // stays inside the same compiler argument.
+        if ch == '\\' && matches!(chars.get(index + 1), Some('"' | '\'' | ' ')) {
+            current.push(chars[index + 1]);
+            index += 2;
+            continue;
+        }
+        match ch {
+            '"' | '\'' if quote.is_none() => quote = Some(ch),
+            ch if Some(ch) == quote => quote = None,
+            ch if ch.is_whitespace() && quote.is_none() => {
+                if !current.is_empty() {
+                    out.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(ch),
+        }
+        index += 1;
+    }
+    if !current.is_empty() {
+        out.push(current);
+    }
+    out.into_iter()
+        .filter(|token| {
+            token.starts_with("-I")
+                || token.starts_with("-D")
+                || token.starts_with("-U")
+                || token.starts_with("-isystem")
+                || token.starts_with("-include")
+        })
+        .collect()
+}
+
+/// Run the check on every file. A missing header in an earlier file must not
+/// hide a later syntax error.
+fn check_each(prefix: &str, files: &[String]) -> String {
+    let checks = files
+        .iter()
+        .map(|file| format!("{prefix} {} || status=1", shell_quote(file)))
+        .collect::<Vec<_>>()
+        .join("; ");
+    format!("( status=0; {checks}; exit $status )")
 }
 
 fn check_chain(bin: &str, files: &[String]) -> String {
@@ -1140,6 +1772,932 @@ mod tests {
     }
 
     #[test]
+    fn include_errors_are_the_only_advisory_compile_failures() {
+        assert!(include_only_failure(
+            "demo.c:1:10: fatal error: 'missing.h' file not found\n"
+        ));
+        assert!(include_only_failure(
+            "demo.c:1:10: fatal error: missing.h: No such file or directory\n"
+        ));
+        assert!(!include_only_failure(
+            "bad.c:1:25: error: use of undeclared identifier 'x'\n"
+        ));
+        assert!(!include_only_failure(
+            "demo.c:1:20: error: expected ';' after return statement\n"
+        ));
+        assert!(!include_only_failure(
+            "demo.c:1:10: fatal error: 'missing.h' file not found\nbad.c:1:25: error: use of undeclared identifier 'x'\n"
+        ));
+        assert!(!include_only_failure("cc failed\n"));
+        assert!(!include_only_failure(
+            "demo.c:1:10: error: expected \"FILENAME\" or <FILENAME>\n"
+        ));
+        assert!(!include_only_failure(
+            "demo.c:1:2: error: #include expects \"FILENAME\" or <FILENAME>\n"
+        ));
+    }
+
+    #[test]
+    fn undeclared_identifier_on_a_makefile_fails_the_types_gate() {
+        if !which("cc") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-undeclared-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("Makefile"), "all:\n\tcc -o demo demo.c\n").unwrap();
+        std::fs::write(root.join("demo.c"), "int main(void) { return 0; }\n").unwrap();
+        std::fs::write(root.join("bad.c"), "int main(void) { return x; }\n").unwrap();
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(!gate.pass, "{gate:?} {:?}", report.findings);
+        assert!(gate.enforced, "{gate:?} {:?}", report.findings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_missing_header_does_not_hide_a_later_error() {
+        if !which("cc") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-order-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("Makefile"), "all:\n").unwrap();
+        std::fs::write(
+            root.join("a_gen.c"),
+            "#include \"config.h\"\nint main(void) { return 0; }\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("b_bad.c"), "int main(void) { return x; }\n").unwrap();
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(!gate.pass, "{gate:?} {:?}", report.findings);
+        assert!(gate.enforced, "{gate:?} {:?}", report.findings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn makefile_defines_are_passed_to_the_types_check() {
+        if !which("cc") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-flags-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("include")).unwrap();
+        std::fs::write(root.join("include/config.h"), "#define OK 1\n").unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "CFLAGS = -DVERSION=1 -Iinclude\nall:\n\tcc -o demo main.c\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("main.c"),
+            "#include \"config.h\"\nint main(void) { return VERSION + OK; }\n",
+        )
+        .unwrap();
+        let steps = cpp_plan(&root);
+        let command = steps
+            .iter()
+            .find(|step| step.gate == "types")
+            .unwrap()
+            .command
+            .clone()
+            .unwrap_or_default();
+        assert!(command.contains("-DVERSION=1"), "{command}");
+        assert!(command.contains("-Iinclude"), "{command}");
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(gate.pass, "{gate:?} {:?}", report.findings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn quoted_makefile_define_reaches_the_compiler() {
+        if !which("cc") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-quoted-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "CFLAGS = -DVERSION=\\\"1.0\\\"\nall:\n\tcc $(CFLAGS) -o demo main.c\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("main.c"),
+            "#include <stdio.h>\nint main(void) { puts(VERSION); return 0; }\n",
+        )
+        .unwrap();
+        let steps = cpp_plan(&root);
+        let command = steps
+            .iter()
+            .find(|step| step.gate == "types")
+            .unwrap()
+            .command
+            .clone()
+            .unwrap_or_default();
+        assert!(command.contains("-DVERSION=\"1.0\""), "{command}");
+        assert!(!command.contains("\\1.0"), "{command}");
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(gate.pass, "{gate:?} {:?}", report.findings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_bare_include_fails_the_types_gate() {
+        if !which("cc") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-bare-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("Makefile"), "all:\n").unwrap();
+        std::fs::write(
+            root.join("demo.c"),
+            "#include\nint main(void) { return 0; }\n",
+        )
+        .unwrap();
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(!gate.pass, "{gate:?} {:?}", report.findings);
+        assert!(gate.enforced, "{gate:?} {:?}", report.findings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn makefile_flags_follow_make_assignment() {
+        fn flags(makefile: &str) -> (Vec<String>, Vec<String>) {
+            let root = std::env::temp_dir().join(format!(
+                "sc-make-flags-{}-{}",
+                std::process::id(),
+                makefile.len()
+            ));
+            let _ = std::fs::remove_dir_all(&root);
+            std::fs::create_dir_all(&root).unwrap();
+            std::fs::write(root.join("Makefile"), makefile).unwrap();
+            let got = MakefileFlags::read(&root);
+            let _ = std::fs::remove_dir_all(&root);
+            (got.c, got.cxx)
+        }
+
+        let (c, _) = flags("CFLAGS := -DVERSION=\\\"1.0\\\"\n");
+        assert_eq!(c, vec!["-DVERSION=\"1.0\"".to_string()]);
+        let (c, _) = flags("CFLAGS ?= -DVERSION=\\\"1.0\\\"\n");
+        assert_eq!(c, vec!["-DVERSION=\"1.0\"".to_string()]);
+        let (_, cxx) = flags("CXXFLAGS := -DVERSION=\\\"1.0\\\"\n");
+        assert_eq!(cxx, vec!["-DVERSION=\"1.0\"".to_string()]);
+        let (c, _) = flags("CFLAGS = -DHIDE\nCFLAGS =\n");
+        assert!(c.is_empty(), "{c:?}");
+        let (c, _) = flags("CFLAGS = -DKEEP\nCFLAGS ?= -DOTHER\n");
+        assert_eq!(c, vec!["-DKEEP".to_string()]);
+        let (c, _) = flags("CFLAGS =\nCFLAGS ?= -DHIDE\n");
+        assert!(c.is_empty(), "{c:?}");
+        let (c, _) = flags("CFLAGS = -DVERSION=\\\"1.0\\\"\nCFLAGS += -Iinclude\n");
+        assert_eq!(
+            c,
+            vec!["-DVERSION=\"1.0\"".to_string(), "-Iinclude".to_string()]
+        );
+        let (c, _) = flags("CFLAGS = -DMSG=\\\"hello\\ world\\\"\n");
+        assert_eq!(c, vec!["-DMSG=\"hello world\"".to_string()]);
+        let (c, cxx) = flags("CPPFLAGS = -UHIDE\nCFLAGS = -DHIDE\nCXXFLAGS = -DKEEP\n");
+        assert_eq!(c, vec!["-DHIDE".to_string(), "-UHIDE".to_string()]);
+        assert_eq!(cxx, vec!["-DKEEP".to_string(), "-UHIDE".to_string()]);
+    }
+
+    #[test]
+    fn colon_assign_makefile_define_reaches_the_compiler() {
+        if !which("cc") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-colon-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "CFLAGS := -DVERSION=\\\"1.0\\\"\nall:\n\tcc $(CFLAGS) -o demo main.c\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("main.c"),
+            "#include <stdio.h>\nint main(void) { puts(VERSION); return 0; }\n",
+        )
+        .unwrap();
+        let steps = cpp_plan(&root);
+        let command = steps
+            .iter()
+            .find(|step| step.gate == "types")
+            .unwrap()
+            .command
+            .clone()
+            .unwrap_or_default();
+        assert!(command.contains("-DVERSION=\"1.0\""), "{command}");
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(gate.pass, "{gate:?} {:?}", report.findings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn conditional_makefile_define_reaches_the_compiler() {
+        if !which("cc") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-qmark-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "CFLAGS ?= -DVERSION=\\\"1.0\\\"\nall:\n\tcc $(CFLAGS) -o demo main.c\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("main.c"),
+            "#include <stdio.h>\nint main(void) { puts(VERSION); return 0; }\n",
+        )
+        .unwrap();
+        let steps = cpp_plan(&root);
+        let command = steps
+            .iter()
+            .find(|step| step.gate == "types")
+            .unwrap()
+            .command
+            .clone()
+            .unwrap_or_default();
+        assert!(command.contains("-DVERSION=\"1.0\""), "{command}");
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(gate.pass, "{gate:?} {:?}", report.findings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_later_makefile_assignment_drops_the_macro() {
+        if !which("cc") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-replace-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "CFLAGS = -DHIDE\nCFLAGS =\nall:\n\tcc $(CFLAGS) -o demo main.c\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("main.c"),
+            "int main(void) {\n#ifdef HIDE\n    return 0;\n#else\n    return x;\n#endif\n}\n",
+        )
+        .unwrap();
+        let steps = cpp_plan(&root);
+        let command = steps
+            .iter()
+            .find(|step| step.gate == "types")
+            .unwrap()
+            .command
+            .clone()
+            .unwrap_or_default();
+        assert!(!command.contains("-DHIDE"), "{command}");
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(!gate.pass, "{gate:?} {:?}", report.findings);
+        assert!(gate.enforced, "{gate:?} {:?}", report.findings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn escaped_space_in_a_makefile_define_stays_one_flag() {
+        if !which("cc") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-space-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "CFLAGS = -DMSG=\\\"hello\\ world\\\"\nall:\n\tcc $(CFLAGS) -o demo main.c\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("main.c"),
+            "#include <string.h>\nint main(void) { return strcmp(MSG, \"hello world\"); }\n",
+        )
+        .unwrap();
+        let steps = cpp_plan(&root);
+        let command = steps
+            .iter()
+            .find(|step| step.gate == "types")
+            .unwrap()
+            .command
+            .clone()
+            .unwrap_or_default();
+        assert!(command.contains("-DMSG=\"hello world\""), "{command}");
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(gate.pass, "{gate:?} {:?}", report.findings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn make_evaluates_a_variable_and_skips_an_untaken_branch() {
+        if !which("make") {
+            return;
+        }
+        fn flags(makefile: &str) -> Vec<String> {
+            let root = std::env::temp_dir().join(format!(
+                "sc-make-eval-{}-{}",
+                std::process::id(),
+                makefile.len()
+            ));
+            let _ = std::fs::remove_dir_all(&root);
+            std::fs::create_dir_all(&root).unwrap();
+            std::fs::write(root.join("Makefile"), makefile).unwrap();
+            let got = MakefileFlags::read(&root);
+            let _ = std::fs::remove_dir_all(&root);
+            got.c
+        }
+        let c = flags("DEFS = -DVERSION=\\\"1.0\\\"\nCFLAGS = -O2 $(DEFS)\nall:\n\texit 7\n");
+        assert_eq!(c, vec!["-DVERSION=\"1.0\"".to_string()]);
+        let c = flags("ifeq ($(NEVER),1)\nCFLAGS = -DHIDE\nendif\nall:\n\texit 7\n");
+        assert!(c.is_empty(), "{c:?}");
+        assert!(makefile_text_uncertain("CFLAGS = $(DEFS)\n"));
+        assert!(makefile_text_uncertain(
+            "ifeq ($(NEVER),1)\nCFLAGS = -DHIDE\nendif\n"
+        ));
+        assert!(!makefile_text_uncertain("CFLAGS = -DVERSION=1\n"));
+    }
+
+    #[test]
+    fn a_variable_in_cflags_reaches_the_compiler() {
+        if !which("cc") || !which("make") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-defs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "DEFS = -DVERSION=\\\"1.0\\\"\nCFLAGS = -O2 $(DEFS)\nall:\n\tcc $(CFLAGS) -o demo main.c\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("main.c"),
+            "#include <stdio.h>\nint main(void) { puts(VERSION); return 0; }\n",
+        )
+        .unwrap();
+        let steps = cpp_plan(&root);
+        let types = steps.iter().find(|step| step.gate == "types").unwrap();
+        let command = types.command.clone().unwrap_or_default();
+        assert!(command.contains("-DVERSION=\"1.0\""), "{command}");
+        assert!(!types.advisory_failure);
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(gate.pass, "{gate:?} {:?}", report.findings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_untaken_makefile_branch_is_not_passed_to_the_compiler() {
+        if !which("cc") || !which("make") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-ifeq-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "ifeq ($(NEVER),1)\nCFLAGS = -DHIDE\nendif\nall:\n\tcc $(CFLAGS) -o demo main.c\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("main.c"),
+            "int main(void) {\n#ifdef HIDE\n    return 0;\n#else\n    return undefined_thing;\n#endif\n}\n",
+        )
+        .unwrap();
+        let steps = cpp_plan(&root);
+        let types = steps.iter().find(|step| step.gate == "types").unwrap();
+        let command = types.command.clone().unwrap_or_default();
+        assert!(!command.contains("-DHIDE"), "{command}");
+        assert!(!types.advisory_failure);
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(!gate.pass, "{gate:?} {:?}", report.findings);
+        assert!(gate.enforced, "{gate:?} {:?}", report.findings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_later_undef_cancels_the_macro() {
+        if !which("cc") || !which("make") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-undef-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "CFLAGS = -DHIDE -UHIDE\nall:\n\tcc $(CFLAGS) -o demo main.c\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("main.c"),
+            "int main(void) {\n#ifdef HIDE\n    return 0;\n#else\n    return undefined_thing;\n#endif\n}\n",
+        )
+        .unwrap();
+        let built = std::process::Command::new("make")
+            .current_dir(&root)
+            .status()
+            .unwrap();
+        assert!(!built.success());
+        let steps = cpp_plan(&root);
+        let types = steps.iter().find(|step| step.gate == "types").unwrap();
+        let command = types.command.clone().unwrap_or_default();
+        let define = command.find("-DHIDE").expect(&command);
+        let undef = command.find("-UHIDE").expect(&command);
+        assert!(define < undef, "{command}");
+        assert!(!types.advisory_failure);
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(!gate.pass, "{gate:?} {:?}", report.findings);
+        assert!(gate.enforced, "{gate:?} {:?}", report.findings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn hide_unless_defined() -> &'static str {
+        "int main(void) {\n#ifdef HIDE\n    return 0;\n#else\n    return undefined_thing;\n#endif\n}\n"
+    }
+
+    #[test]
+    fn cppflags_undef_after_cflags_define_fails_the_gate() {
+        if !which("cc") || !which("make") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-cpp-undef-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "CPPFLAGS = -UHIDE\nCFLAGS = -DHIDE\nall:\n\t$(CC) $(CFLAGS) $(CPPFLAGS) -o demo main.c\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("main.c"), hide_unless_defined()).unwrap();
+        let built = std::process::Command::new("make")
+            .current_dir(&root)
+            .status()
+            .unwrap();
+        assert!(!built.success());
+        let steps = cpp_plan(&root);
+        let types = steps.iter().find(|step| step.gate == "types").unwrap();
+        let command = types.command.clone().unwrap_or_default();
+        let define = command.find("-DHIDE").expect(&command);
+        let undef = command.find("-UHIDE").expect(&command);
+        assert!(define < undef, "{command}");
+        assert!(!types.advisory_failure);
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(!gate.pass, "{gate:?} {:?}", report.findings);
+        assert!(gate.enforced, "{gate:?} {:?}", report.findings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn cflags_undef_before_cppflags_define_passes() {
+        if !which("cc") || !which("make") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-cpp-def-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "CPPFLAGS = -DHIDE\nCFLAGS = -UHIDE\nall:\n\t$(CC) $(CFLAGS) $(CPPFLAGS) -o demo main.c\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("main.c"), hide_unless_defined()).unwrap();
+        let built = std::process::Command::new("make")
+            .current_dir(&root)
+            .status()
+            .unwrap();
+        assert!(built.success());
+        let steps = cpp_plan(&root);
+        let types = steps.iter().find(|step| step.gate == "types").unwrap();
+        let command = types.command.clone().unwrap_or_default();
+        let undef = command.find("-UHIDE").expect(&command);
+        let define = command.find("-DHIDE").expect(&command);
+        assert!(undef < define, "{command}");
+        assert!(!types.advisory_failure);
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(gate.pass, "{gate:?} {:?}", report.findings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_hidden_makefile_flag_is_not_global() {
+        fn read_flags(makefile: &str) -> MakefileFlags {
+            let root = std::env::temp_dir().join(format!(
+                "sc-make-shape-{}-{}",
+                std::process::id(),
+                makefile.len()
+            ));
+            let _ = std::fs::remove_dir_all(&root);
+            std::fs::create_dir_all(&root).unwrap();
+            std::fs::write(root.join("Makefile"), makefile).unwrap();
+            let got = MakefileFlags::read(&root);
+            let _ = std::fs::remove_dir_all(&root);
+            got
+        }
+
+        let recipe = read_flags("all:\n\tcc -DVERSION=\\\"1.0\\\" -o demo main.c\n");
+        assert!(recipe.uncertain);
+        assert!(recipe.c.is_empty(), "{:?}", recipe.c);
+        let target = read_flags("demo: CFLAGS += -DVERSION=\\\"1.0\\\"\n");
+        assert!(target.uncertain);
+        assert!(target.c.is_empty(), "{:?}", target.c);
+        let pattern = read_flags("%.o: CXXFLAGS += -Iinc\n");
+        assert!(pattern.uncertain);
+        assert!(pattern.cxx.is_empty(), "{:?}", pattern.cxx);
+        let both = read_flags("CFLAGS = -DKEEP\nall:\n\tcc -DVERSION=\\\"1.0\\\" main.c\n");
+        assert!(both.uncertain);
+        assert_eq!(both.c, vec!["-DKEEP".to_string()]);
+        let included = read_flags("include defs.mk\nCFLAGS = -DKEEP\n");
+        assert!(included.uncertain);
+        assert_eq!(included.c, vec!["-DKEEP".to_string()]);
+        let plain = read_flags("CFLAGS = -DKEEP\nall:\n\tcc $(CFLAGS) -o demo main.c\n");
+        assert!(!plain.uncertain, "{:?}", plain.c);
+        assert_eq!(plain.c, vec!["-DKEEP".to_string()]);
+        let defines =
+            read_flags("DEFINES = -DVERSION=\\\"1.0\\\"\nall:\n\tcc $(DEFINES) -o demo main.c\n");
+        assert!(defines.uncertain);
+        assert!(defines.c.is_empty(), "{:?}", defines.c);
+        let recurse = read_flags("all: ; $(MAKE) -C src\n");
+        assert!(recurse.uncertain);
+    }
+
+    #[test]
+    fn a_define_in_the_recipe_stays_advisory() {
+        if !which("cc") || !which("make") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-recipe-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "all:\n\tcc -DVERSION=\\\"1.0\\\" -o demo main.c\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("main.c"),
+            "#include <stdio.h>\nint main(void) { puts(VERSION); return 0; }\n",
+        )
+        .unwrap();
+        let built = std::process::Command::new("make")
+            .current_dir(&root)
+            .status()
+            .unwrap();
+        assert!(built.success());
+        let steps = cpp_plan(&root);
+        let types = steps.iter().find(|step| step.gate == "types").unwrap();
+        let command = types.command.clone().unwrap_or_default();
+        assert!(!command.contains("-DVERSION"), "{command}");
+        assert!(types.advisory_failure);
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(!gate.pass, "{gate:?} {:?}", report.findings);
+        assert!(!gate.enforced, "{gate:?} {:?}", report.findings);
+        let reason = gate.reason.clone().unwrap_or_default();
+        assert!(reason.contains("does not see every flag"), "{reason}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_target_specific_define_stays_advisory() {
+        if !which("cc") || !which("make") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-target-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "demo: CFLAGS += -DVERSION=\\\"1.0\\\"\nall: demo\ndemo: main.c\n\tcc $(CFLAGS) -o demo main.c\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("main.c"),
+            "#include <stdio.h>\nint main(void) { puts(VERSION); return 0; }\n",
+        )
+        .unwrap();
+        let built = std::process::Command::new("make")
+            .current_dir(&root)
+            .status()
+            .unwrap();
+        assert!(built.success());
+        let steps = cpp_plan(&root);
+        let types = steps.iter().find(|step| step.gate == "types").unwrap();
+        let command = types.command.clone().unwrap_or_default();
+        assert!(!command.contains("-DVERSION"), "{command}");
+        assert!(types.advisory_failure);
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(!gate.pass, "{gate:?} {:?}", report.findings);
+        assert!(!gate.enforced, "{gate:?} {:?}", report.findings);
+        let reason = gate.reason.clone().unwrap_or_default();
+        assert!(reason.contains("does not see every flag"), "{reason}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_included_makefile_is_not_remade() {
+        if !which("make") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-make-include-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "-include deps.mk\ndeps.mk:\n\techo \"# generated\" > deps.mk; touch SIDE_EFFECT\nall:\n\tcc -o demo main.c\n",
+        )
+        .unwrap();
+        let flags = MakefileFlags::read(&root);
+        assert!(flags.uncertain);
+        assert!(!root.join("SIDE_EFFECT").exists());
+        assert!(!root.join("deps.mk").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_shell_function_in_the_makefile_is_not_run() {
+        if !which("make") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-make-shell-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "CFLAGS = $(shell touch SIDE_EFFECT && echo -DKEEP)\nall:\n\t@true\n",
+        )
+        .unwrap();
+        let flags = MakefileFlags::read(&root);
+        assert!(flags.uncertain);
+        assert!(!root.join("SIDE_EFFECT").exists());
+        // The unexpanded text is not the value `echo` would have printed.
+        assert_ne!(flags.c, vec!["-DKEEP".to_string()]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_shell_assignment_in_the_makefile_is_not_run() {
+        if !which("make") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-make-bang-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "CFLAGS != touch SIDE_EFFECT && echo -DKEEP\nall:\n\t@true\n",
+        )
+        .unwrap();
+        let flags = MakefileFlags::read(&root);
+        assert!(flags.uncertain);
+        assert!(
+            !flags.c.iter().any(|flag| flag.contains("KEEP")),
+            "{:?}",
+            flags.c
+        );
+        assert!(!root.join("SIDE_EFFECT").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_makefile_self_rule_is_not_run() {
+        if !which("make") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-make-self-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "Makefile:\n\ttouch SIDE_EFFECT\nCFLAGS = -DKEEP\nall:\n\t@true\n",
+        )
+        .unwrap();
+        let flags = MakefileFlags::read(&root);
+        assert!(!flags.uncertain);
+        assert_eq!(flags.c, vec!["-DKEEP".to_string()]);
+        assert!(!root.join("SIDE_EFFECT").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_define_variable_in_the_recipe_stays_advisory() {
+        if !which("cc") || !which("make") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-defines-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "DEFINES = -DVERSION=\\\"1.0\\\"\nall:\n\tcc $(DEFINES) -o demo main.c\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("main.c"),
+            "#include <stdio.h>\nint main(void) { puts(VERSION); return 0; }\n",
+        )
+        .unwrap();
+        let built = std::process::Command::new("make")
+            .current_dir(&root)
+            .status()
+            .unwrap();
+        assert!(built.success());
+        let steps = cpp_plan(&root);
+        let types = steps.iter().find(|step| step.gate == "types").unwrap();
+        let command = types.command.clone().unwrap_or_default();
+        assert!(!command.contains("-DVERSION"), "{command}");
+        assert!(types.advisory_failure);
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(!gate.pass, "{gate:?} {:?}", report.findings);
+        assert!(!gate.enforced, "{gate:?} {:?}", report.findings);
+        let reason = gate.reason.clone().unwrap_or_default();
+        assert!(reason.contains("does not see every flag"), "{reason}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_recursive_makefile_stays_advisory() {
+        if !which("cc") || !which("make") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-cc-recurse-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("Makefile"), "all: ; $(MAKE) -C src\n").unwrap();
+        std::fs::write(
+            root.join("src/Makefile"),
+            "CFLAGS = -DVERSION=\\\"1.0\\\"\nall:\n\tcc $(CFLAGS) -o demo main.c\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/main.c"),
+            "#include <stdio.h>\nint main(void) { puts(VERSION); return 0; }\n",
+        )
+        .unwrap();
+        let built = std::process::Command::new("make")
+            .current_dir(&root)
+            .status()
+            .unwrap();
+        assert!(built.success());
+        let steps = cpp_plan(&root);
+        let types = steps.iter().find(|step| step.gate == "types").unwrap();
+        let command = types.command.clone().unwrap_or_default();
+        assert!(!command.contains("-DVERSION"), "{command}");
+        assert!(types.advisory_failure);
+        let report = run(
+            PackId::Cpp,
+            &root,
+            Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
+        assert!(!gate.pass, "{gate:?} {:?}", report.findings);
+        assert!(!gate.enforced, "{gate:?} {:?}", report.findings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_eval_include_is_not_remade() {
+        if !which("make") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-make-eval-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "$(eval -include deps.mk)\ndeps.mk:\n\techo \"# generated\" > deps.mk; touch SIDE_EFFECT\nall:\n\tcc -o demo main.c\n",
+        )
+        .unwrap();
+        let flags = MakefileFlags::read(&root);
+        assert!(flags.uncertain);
+        assert!(!root.join("SIDE_EFFECT").exists());
+        assert!(!root.join("deps.mk").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_file_function_is_not_run() {
+        if !which("make") {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("sc-make-file-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("Makefile"),
+            "$(file >SIDE_EFFECT,hello)\nCFLAGS = -DKEEP\n",
+        )
+        .unwrap();
+        let flags = MakefileFlags::read(&root);
+        assert!(flags.uncertain);
+        assert!(!root.join("SIDE_EFFECT").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn cxx_file_uses_gxx() {
         let root = std::env::temp_dir().join(format!("sc-cxx-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -1223,6 +2781,7 @@ mod tests {
                 command: Some("true".into()),
                 absent: "missing".into(),
                 enforce: true,
+                advisory_failure: false,
             },
             &mut report,
         );
@@ -1235,6 +2794,7 @@ mod tests {
                 command: Some("false".into()),
                 absent: "missing".into(),
                 enforce: true,
+                advisory_failure: false,
             },
             &mut report,
         );
@@ -1247,6 +2807,7 @@ mod tests {
                 command: Some("sc-not-a-tool-zz".into()),
                 absent: "lint is not installed".into(),
                 enforce: true,
+                advisory_failure: false,
             },
             &mut report,
         );
@@ -1259,6 +2820,7 @@ mod tests {
                 command: None,
                 absent: "nothing to compile".into(),
                 enforce: true,
+                advisory_failure: false,
             },
             &mut report,
         );
