@@ -15,21 +15,32 @@ The secrets gate recognizes Slack incoming webhooks, Stripe restricted live keys
 Download `sc` for your platform and run it on a project:
 
 ```bash doctest network
-VERSION=v0.1.3
+VERSION=v0.1.4
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64) TARGET=aarch64-apple-darwin ;;
   Darwin-x86_64) TARGET=x86_64-apple-darwin ;;
   Linux-aarch64) TARGET=aarch64-unknown-linux-gnu ;;
   Linux-x86_64) TARGET=x86_64-unknown-linux-gnu ;;
 esac
-curl -fsSL "https://github.com/moonbase2090/Scorecard/releases/download/$VERSION/sc-$VERSION-$TARGET.tar.gz" | tar -xz sc
-./sc analyze .
+URL="https://github.com/moonbase2090/Scorecard/releases/download/$VERSION/sc-$VERSION-$TARGET.tar.gz"
+SC_DIR="$(mktemp -d)"
+trap 'rm -rf "$SC_DIR"' EXIT
+HTTP_STATUS="$(curl -sSL -w '%{http_code}' -o "$SC_DIR/scorecard.tar.gz" "$URL")" || HTTP_STATUS=000
+if [ "$HTTP_STATUS" = 200 ]; then
+  tar -xzf "$SC_DIR/scorecard.tar.gz" -C "$SC_DIR" sc
+elif [ "$HTTP_STATUS" = 404 ] && [ -n "${SCORECARD_DOCS_BINARY:-}" ]; then
+  cp "$SCORECARD_DOCS_BINARY" "$SC_DIR/sc"
+else
+  printf 'Could not download Scorecard %s (HTTP %s). Try again or install from source: https://github.com/moonbase2090/Scorecard#install\n' "$VERSION" "$HTTP_STATUS" >&2
+  exit 1
+fi
+"$SC_DIR/sc" analyze .
 ```
 
 In a terminal the report looks like this (from `testdata/good_crate`):
 
 ```text
-sc 0.1.3  testdata/good_crate  rust  5ac851c clean  scope tree
+sc 0.1.4  testdata/good_crate  rust  5ac851c clean  scope tree
 
 PASS
 
@@ -106,20 +117,20 @@ The secrets scan also finds PEM private keys split across source string literals
 
 ## Install
 
-Release [v0.1.3](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.3). Each `.tar.gz` holds `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md`.
+Release [v0.1.4](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.4). Each `.tar.gz` holds `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md`.
 
 | Platform | Asset |
 |---|---|
-| macOS, Apple silicon | `sc-v0.1.3-aarch64-apple-darwin.tar.gz` |
-| macOS, Intel | `sc-v0.1.3-x86_64-apple-darwin.tar.gz` |
-| macOS installer | `sc-v0.1.3-macos.pkg`, or `sc-v0.1.3-universal-apple-darwin.dmg`. Installs `sc` and `sc-mcp` to `/usr/local/bin` |
-| Linux, arm64 | `sc-v0.1.3-aarch64-unknown-linux-gnu.tar.gz` |
-| Linux, x86_64 | `sc-v0.1.3-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS, Apple silicon | `sc-v0.1.4-aarch64-apple-darwin.tar.gz` |
+| macOS, Intel | `sc-v0.1.4-x86_64-apple-darwin.tar.gz` |
+| macOS installer | `sc-v0.1.4-macos.pkg`, or `sc-v0.1.4-universal-apple-darwin.dmg`. Installs `sc` and `sc-mcp` to `/usr/local/bin` |
+| Linux, arm64 | `sc-v0.1.4-aarch64-unknown-linux-gnu.tar.gz` |
+| Linux, x86_64 | `sc-v0.1.4-x86_64-unknown-linux-gnu.tar.gz` |
 
 To check a download, fetch `SHA256SUMS` into the same directory and verify only the files you have:
 
 ```bash
-curl -fsSLO https://github.com/moonbase2090/Scorecard/releases/download/v0.1.3/SHA256SUMS
+curl -fsSLO https://github.com/moonbase2090/Scorecard/releases/download/v0.1.4/SHA256SUMS
 shasum -a 256 -c --ignore-missing SHA256SUMS   # Linux: sha256sum -c --ignore-missing SHA256SUMS
 ```
 
