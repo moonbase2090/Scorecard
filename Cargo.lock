@@ -867,7 +867,7 @@ dependencies = [
 
 [[package]]
 name = "sc-cli"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anstyle",
  "clap",
@@ -880,7 +880,7 @@ dependencies = [
 
 [[package]]
 name = "sc-core"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "criterion",
  "serde",
@@ -891,7 +891,7 @@ dependencies = [
 
 [[package]]
 name = "sc-engines"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "html5ever",
  "rustc-demangle",
@@ -907,7 +907,7 @@ dependencies = [
 
 [[package]]
 name = "sc-graph"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "proc-macro2",
  "sc-core",
@@ -917,7 +917,7 @@ dependencies = [
 
 [[package]]
 name = "sc-llm"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -926,7 +926,7 @@ dependencies = [
 
 [[package]]
 name = "sc-mcp"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "sc-core",
  "sc-engines",
@@ -935,11 +935,11 @@ dependencies = [
 
 [[package]]
 name = "sc-mutation"
-version = "0.1.3"
+version = "0.1.4"
 
 [[package]]
 name = "sc-sarif"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "sc-core",
  "serde_json",

@@ -5,7 +5,7 @@
 ## Terminal layout
 
 ```text
-sc 0.1.3  .  python  99b879c dirty  scope tree
+sc 0.1.4  .  python  99b879c dirty  scope tree
 changed paths: src/vectorvault/config.py
 ```
 
