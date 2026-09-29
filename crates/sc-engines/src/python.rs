@@ -446,6 +446,23 @@ fn coverage_source_flags(sources: &[String]) -> String {
         .join(" ")
 }
 
+/// `uv run` when the project has `uv.lock` or a `.venv` directory.
+/// Otherwise `python3 -m coverage`.
+fn coverage_fallback_command(root: &Path, cov_file: &Path, sources: &[String]) -> String {
+    let source_flags = coverage_source_flags(sources);
+    let output = cov_file.display();
+    if root.join("uv.lock").is_file() || root.join(".venv").is_dir() {
+        format!(
+            "uv run --extra dev --with coverage coverage run {source_flags} -m pytest -q && uv run --extra dev --with coverage coverage json -o {output}"
+        )
+    } else {
+        format!(
+            "python3 -m coverage run {source_flags} -m pytest -q && python3 -m coverage json -o {output}"
+        )
+    }
+}
+
+#[inline(never)]
 fn run_coverage_fallback(
     root: &Path,
     deadline: Instant,
@@ -458,18 +475,7 @@ fn run_coverage_fallback(
     }
     // Match pytest-cov's --cov sources so a never-imported file is still
     // measured at 0% instead of left out of the report (#120 / #79).
-    let source_flags = coverage_source_flags(sources);
-    let command = if root.join("uv.lock").is_file() || root.join(".venv").is_dir() {
-        format!(
-            "uv run --extra dev --with coverage coverage run {source_flags} -m pytest -q && uv run --extra dev --with coverage coverage json -o {}",
-            cov_file.display()
-        )
-    } else {
-        format!(
-            "python3 -m coverage run {source_flags} -m pytest -q && python3 -m coverage json -o {}",
-            cov_file.display()
-        )
-    };
+    let command = coverage_fallback_command(root, &cov_file, sources);
     let result = shell(root, &command, deadline).map_err(|err| err.message("coverage.py"))?;
     note(
         runs,
@@ -2338,6 +2344,70 @@ dev = ["pytest>=8"]
         let flags = coverage_source_flags(&[".".into(), "src/app".into(), "tools".into()]);
         assert_eq!(flags, "--source='.' --source='src/app' --source='tools'");
         assert!(flags.contains("--source='src/app'"));
+    }
+
+    #[test]
+    fn coverage_fallback_uses_uv_only_when_the_project_has_a_lock_or_venv() {
+        let dir = scratch("cov-cmd");
+        let cov_file = dir.join(".sc/coverage/pytest.json");
+        let sources = ["src".to_string(), ".".to_string()];
+        let python3 = coverage_fallback_command(&dir, &cov_file, &sources);
+        assert!(python3
+            .starts_with("python3 -m coverage run --source='src' --source='.' -m pytest -q && "));
+        assert!(python3.contains(&format!(
+            "python3 -m coverage json -o {}",
+            cov_file.display()
+        )));
+        assert!(!python3.contains("uv run"));
+
+        std::fs::write(dir.join(".venv"), "not a directory\n").unwrap();
+        assert!(
+            coverage_fallback_command(&dir, &cov_file, &sources).starts_with("python3 -m coverage")
+        );
+        std::fs::remove_file(dir.join(".venv")).unwrap();
+
+        std::fs::create_dir(dir.join(".venv")).unwrap();
+        let venv = coverage_fallback_command(&dir, &cov_file, &sources);
+        assert!(venv.starts_with(
+            "uv run --extra dev --with coverage coverage run --source='src' --source='.' -m pytest -q && "
+        ));
+        assert!(venv.contains(&format!(
+            "uv run --extra dev --with coverage coverage json -o {}",
+            cov_file.display()
+        )));
+        let _ = std::fs::remove_dir(dir.join(".venv"));
+
+        std::fs::write(dir.join("uv.lock"), "").unwrap();
+        assert_eq!(coverage_fallback_command(&dir, &cov_file, &sources), venv);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn coverage_fallback_reports_a_failed_python3_run() {
+        let dir = scratch("cov-run");
+        let cov_file = dir.join(".sc/coverage/pytest.json");
+        let mut runs = Vec::new();
+        let err = run_coverage_fallback(
+            &dir,
+            Instant::now() + Duration::from_secs(20),
+            &["src".into()],
+            &mut runs,
+        )
+        .expect_err("an empty tree does not produce coverage");
+        assert!(err.starts_with("coverage.py failed"), "{err}");
+        assert_ne!(err, "coverage.py failed", "{err}");
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].engine, "coverage");
+        assert_eq!(
+            runs[0].command,
+            coverage_fallback_command(&dir, &cov_file, &["src".into()])
+        );
+        assert!(runs[0]
+            .command
+            .starts_with("python3 -m coverage run --source='src' "));
+        assert_ne!(runs[0].exit_code, Some(0));
+        assert!(dir.join(".sc/coverage").is_dir());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
