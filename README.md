@@ -83,6 +83,8 @@ Next:
 - Run `sc setup` so coding agents on this machine can use `sc` ([agents](docs/how-to/agents.md)).
 - Write a user config with `sc config init`, or put `analyzer.toml` at the project root ([configure](docs/how-to/config.md)).
 
+The secrets scan also finds PEM private keys split across source string literals, including Go or Java concatenations and YAML lists. See [PEM examples](examples/README.md#pem-keys-in-source-files).
+
 ## Docs
 
 | I want to | Read |

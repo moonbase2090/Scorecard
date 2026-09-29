@@ -50,3 +50,26 @@ test.failed | warning
 ```
 
 The failing test is level `warning` in SARIF, so GitHub code scanning does not count it as a security vulnerability. Only `secrets.*` findings are level `error`. The JSON report still gives `test.failed` severity `error`, and the tests gate still fails the run.
+
+## PEM keys in source files
+
+The secrets scan reports `secrets.private_key` when PEM markers and key material are split across string lines. It handles Go and Java concatenation, backtick strings, Python string prefixes, and YAML lists.
+
+For example, the PEM body can appear in a Go string concatenation:
+
+```go
+key := "-----BEGIN RSA PRIVATE KEY-----\n" +
+    "<base64 key data>\n" +
+    "-----END RSA PRIVATE KEY-----\n"
+```
+
+It can also appear in a YAML list:
+
+```yaml
+private_key:
+  - "-----BEGIN RSA PRIVATE KEY-----"
+  - "<base64 key data>"
+  - "-----END RSA PRIVATE KEY-----"
+```
+
+Run `sc analyze .` to report these as `secrets.private_key`. See the [rules reference](../docs/reference/rules.md#rules) for the finding and fix.
