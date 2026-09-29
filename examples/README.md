@@ -1,5 +1,18 @@
 # Examples
 
+## Large files and NUL bytes
+
+The secrets scan checks files up to 64 MiB, including large files with NUL bytes. Gitignored large files are skipped. A non-ignored file over 64 MiB produces a `secrets.partial` finding because the scan cannot read the whole file.
+
+If a generated file should not be scanned, exclude its path in `analyzer.toml`:
+
+```toml
+[scope]
+exclude = ["assets/generated.bin"]
+```
+
+The [secrets rules](../docs/reference/rules.md#rules) reference describes `secrets.partial`.
+
 ## Passing fixture
 
 From a checkout of this repository, with `sc` on `PATH`:

@@ -6,6 +6,8 @@
 
 `sc` is a local code-quality gate. In one run it checks that a project builds, its tests pass, complex code is covered by tests ([CRAP](docs/crap.md)), no secrets are committed, the linter is clean, and every import is a declared dependency. It prints a verdict for people and a JSON scorecard for agents and CI. Ten language packs are built in. Project site: [scorecardcli.com](https://scorecardcli.com).
 
+The secrets scan checks files up to 64 MiB even when they contain NUL bytes. It skips gitignored large files. A non-ignored file over 64 MiB produces `secrets.partial`.
+
 ## Quickstart
 
 Download `sc` for your platform and run it on a project:
