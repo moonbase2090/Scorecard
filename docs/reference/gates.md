@@ -7,7 +7,7 @@ A gate is a pass or fail check. Any failed enforced gate makes the report verdic
 | `types` | yes | The project does not build or type-check | `compile.error`, `compile.failed` |
 | `tests` | yes | A test fails | `test.failed` |
 | `crap` | yes | A function's CRAP score is over `gates.crap_threshold`, or a complex function has 0% coverage | `crap.over_threshold`, `complexity.untested` |
-| `secrets` | yes | A token or private key is in the tree | `secrets.*` |
+| `secrets` | yes | A token or private key is in the tree, including a PEM written as one string literal per line | `secrets.*` |
 | `lint` | yes | The linter reports problems | `lint.failed` |
 | `sca` | no | An import is undeclared, hallucinated, or not classified | `sca.undeclared_dependency`, `sca.hallucinated_import`, `sca.import_unresolved` |
 | `spec` | only with `--spec` | A file or public item named in the spec is missing | `spec.missing_file`, `spec.missing_item`, `spec.llm_gap` |

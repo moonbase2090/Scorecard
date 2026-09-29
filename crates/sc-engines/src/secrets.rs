@@ -136,22 +136,46 @@ fn has_inline_pem_material(line: &str) -> bool {
 fn pem_block_has_body(lines: &[&str], header_idx: usize) -> bool {
     let mut material = String::new();
     for line in lines.iter().skip(header_idx + 1).take(64) {
-        let trimmed = line.trim();
-        if trimmed.starts_with("-----END ") && trimmed.contains(pem_end()) {
+        let payload = pem_line_payload(line);
+        if payload.starts_with("-----END ") && payload.contains(pem_end()) {
             break;
         }
-        if trimmed.starts_with("-----") {
+        if payload.starts_with("-----") {
             break;
         }
-        if trimmed.len() >= 16
-            && trimmed
+        if payload.len() >= 16
+            && payload
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
         {
-            material.push_str(trimmed);
+            material.push_str(&payload);
         }
     }
     material.len() >= 32 && shannon(&material) >= 3.0
+}
+
+/// Drop a surrounding string-literal wrapper so a PEM body line written as
+/// `"base64\n"` or `'base64',` still counts as key material.
+fn pem_line_payload(line: &str) -> String {
+    let mut s = line.trim();
+    if let Some(stripped) = s.strip_suffix(',') {
+        s = stripped.trim_end();
+    }
+    let bytes = s.as_bytes();
+    if bytes.len() >= 2 {
+        let open = bytes[0];
+        let close = bytes[bytes.len() - 1];
+        if (open == b'"' && close == b'"') || (open == b'\'' && close == b'\'') {
+            s = &s[1..s.len() - 1];
+        }
+    }
+    if let Some(stripped) = s.strip_suffix("\\n") {
+        s = stripped;
+    }
+    if let Some(stripped) = s.strip_suffix("\\r") {
+        s = stripped;
+    }
+    s.trim().to_string()
 }
 
 /// The two PEM markers live on separate lines so this file does not match itself.
@@ -585,5 +609,43 @@ mod tests {
         assert_eq!(findings.len(), 1, "{findings:?}");
         assert_eq!(findings[0].rule, "secrets.private_key");
         assert_eq!(findings[0].span.as_ref().unwrap().start_line, 1);
+    }
+
+    #[test]
+    fn flags_pem_written_as_python_string_literals() {
+        let body = ["MIIEowIBAAKCAQEA0Z3VS5J4", "Ab3kQm9ZnR4pLx7wKq9ZmN4p"].concat();
+        assert!(body.len() >= 32);
+        let mid = body.len() / 2;
+        let text = format!(
+            "KEY = (\n    \"{}RSA {}\\n\"\n    \"{}\\n\"\n    \"{}\\n\"\n    \"-----END RSA {}\\n\"\n)\n",
+            super::pem_begin(),
+            super::pem_end(),
+            &body[..mid],
+            &body[mid..],
+            super::pem_end()
+        );
+        let findings = secrets_in_text(&text, "src/config.py");
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].rule, "secrets.private_key");
+        assert_eq!(findings[0].span.as_ref().unwrap().start_line, 2);
+    }
+
+    #[test]
+    fn flags_pem_written_as_javascript_string_array() {
+        let body = ["MIIEowIBAAKCAQEA0Z3VS5J4", "Ab3kQm9ZnR4pLx7wKq9ZmN4p"].concat();
+        assert!(body.len() >= 32);
+        let mid = body.len() / 2;
+        let text = format!(
+            "const key = [\n  '{}{}',\n  '{}',\n  '{}',\n  '-----END {}',\n].join('\\n');\n",
+            super::pem_begin(),
+            super::pem_end(),
+            &body[..mid],
+            &body[mid..],
+            super::pem_end()
+        );
+        let findings = secrets_in_text(&text, "src/key.js");
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].rule, "secrets.private_key");
+        assert_eq!(findings[0].span.as_ref().unwrap().start_line, 2);
     }
 }
