@@ -286,7 +286,13 @@ fn provided(gate: &sc_core::Gate) -> bool {
 }
 
 fn git(card: &Scorecard) -> String {
-    let state = if card.git.dirty { "dirty" } else { "clean" };
+    let state = esc(&card.git.status_label());
+    let changed_paths = card.git.changed_paths_label();
+    let changed_paths = if changed_paths.is_empty() {
+        String::new()
+    } else {
+        format!("<br/>changed: {}", esc(&changed_paths))
+    };
     match card.git.head.as_deref().filter(|head| !head.is_empty()) {
         // Long SHAs overflow the header meta column, so show a short SHA
         // with the full one on hover. The <code> wrapper keeps the cell
@@ -294,13 +300,13 @@ fn git(card: &Scorecard) -> String {
         Some(head) => {
             let short: String = head.chars().take(12).collect();
             format!(
-                "<code title=\"{}\">{} ({})</code>",
+                "<code title=\"{}\">{} ({})</code>{changed_paths}",
                 esc(head),
                 esc(&short),
                 state
             )
         }
-        _ => format!("<code>none ({state})</code>"),
+        _ => format!("<code>none ({state})</code>{changed_paths}"),
     }
 }
 

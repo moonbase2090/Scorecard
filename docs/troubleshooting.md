@@ -44,7 +44,7 @@ Exit 2 when more than one language marker matches and more than one of those lan
 
 ## The header says `dirty`
 
-The tree has uncommitted or untracked files. After the first run this includes `.sc/`, where `sc` keeps its report. Add `.sc/` to `.gitignore`.
+The report names up to three uncommitted or untracked paths below the Git status; the JSON lists them in `git.dirty_paths`. Scorecard's saved report, cache and coverage files under `.sc/`, and files selected by `--out`, are excluded. Add `.sc/` to `.gitignore` to keep Scorecard's generated files out of Git status too.
 
 ## `N more, see --out report`
 

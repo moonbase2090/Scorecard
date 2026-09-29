@@ -1,5 +1,19 @@
 # Examples
 
+## Git status
+
+A clean checkout stays clean after Scorecard writes its report. When the tree has changes, the human-readable reports name up to three paths. JSON lists every changed path:
+
+```json
+{
+  "git": {
+    "dirty": true,
+    "dirty_paths": ["src/main.rs"]
+  }
+}
+```
+
+## Large files and NUL bytes
 ## Large files and NUL bytes
 
 The secrets scan checks files up to 64 MiB, including large files with NUL bytes. Gitignored large files are skipped. A non-ignored file over 64 MiB produces a `secrets.partial` finding because the scan cannot read the whole file.

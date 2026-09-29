@@ -6,9 +6,10 @@
 
 ```text
 sc 0.1.3  .  python  99b879c dirty  scope tree
+changed paths: src/vectorvault/config.py
 ```
 
-The header: `sc` version, analyzed path, [pack](packs.md), git commit, `clean` or `dirty`, and scope. Scope is `tree` (everything), `diff` (`--diff`), or `paths` (`--paths`). A `diff` report lists the changed paths, relative to the project directory, and a one-line count of the other source paths still in the tree. A crate in a subdirectory of the repository is scored the same way as a crate at the repository root.
+The header: `sc` version, analyzed path, [pack](packs.md), git commit, and Git state. A dirty report names up to three changed paths on the next line; JSON includes every path in `git.dirty_paths`. Dirty paths are relative to the repository root, matching `git status`, including when the analyzed project is in a subdirectory. Scorecard's saved report, parse cache, coverage output, and earlier outputs from `--out` do not make a clean checkout dirty. Scope is `tree` (everything), `diff` (`--diff`), or `paths` (`--paths`). A `diff` report lists the changed paths, relative to the project directory, and a one-line count of the other source paths still in the tree. A crate in a subdirectory of the repository is scored the same way as a crate at the repository root.
 
 ```text
 PASS  2 advisory gates failing
@@ -85,7 +86,8 @@ Top-level fields of `.sc/last-scorecard.json` and `--format json`:
 | Field | Contents |
 |---|---|
 | `verdict` | `pass` or `fail` |
-| `pack`, `repo`, `git`, `scope` | What was analyzed |
+| `pack`, `repo`, `scope` | What was analyzed |
+| `git` | `head`, `dirty`, and `dirty_paths` (all changed paths relative to the repository root; omitted when clean) |
 | `gates` | `id`, `pass`, `enforced`, and `reason` per gate |
 | `scores` | The score rows above |
 | `metrics` | Changed lines and files, `coverage_changed`, `crap_max`, `crap_over_threshold`, `hallucinated_imports` |

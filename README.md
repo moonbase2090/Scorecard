@@ -62,6 +62,8 @@ exit 0: enforced gates passed
 
 Exit status: `1` a gate selected by `--fail-on` failed; `0` none did; `2` `sc` could not run. The report still shows `FAIL` when any enforced gate fails, even if `--fail-on` keeps the process exit code at 0. [Reading the report](docs/report.md) explains every section.
 
+A dirty report lists up to three changed paths. JSON includes every path in `git.dirty_paths`. Scorecard's saved report, cache and coverage files under `.sc/`, and files selected by `--out` do not make a clean checkout dirty.
+
 `sc analyze . --diff BASE` scores only what changed against that git ref. When the project is a subdirectory of a larger repository, the changed paths are still relative to the project (`src/a.rs`).
 
 `sc analyze . --format sarif` writes SARIF for GitHub code scanning. Only `secrets.*` findings are level `error`, which code scanning counts as a security vulnerability. Every other rule, including a failing test or missing coverage, is level `warning` and still fails its gate ([CI](docs/how-to/ci.md)).

@@ -4,7 +4,7 @@
 //! Engines return structured findings. Nothing in this crate writes user-facing
 //! diagnostics; the CLI formats the scorecard.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -63,10 +63,16 @@ pub struct AnalyzeOutput {
 }
 
 pub fn analyze(request: AnalyzeRequest) -> AnalyzeOutput {
-    // Snapshot git status before any engine runs. Engines create files under
-    // the root (target/, coverage artifacts, .sc/last-scorecard.json), so a
-    // probe at the end of analysis flags sc's own outputs as a dirty tree.
-    let git = git_info(&request.root);
+    analyze_with_generated_paths(request, &[])
+}
+
+pub fn analyze_with_generated_paths(
+    request: AnalyzeRequest,
+    generated_paths: &[PathBuf],
+) -> AnalyzeOutput {
+    // Snapshot Git state before any engine runs and exclude Scorecard's saved
+    // report and requested output files from earlier runs.
+    let git = git_info(&request.root, generated_paths);
     match crate::pack::detect(&request.root, &request.config.pack) {
         Ok(crate::pack::Detected::Pack(crate::pack::PackId::Rust)) => analyze_rust(request, git),
         Ok(crate::pack::Detected::Pack(crate::pack::PackId::Python)) => {
@@ -2097,7 +2103,7 @@ fn coverage_fix_hint(pack: crate::pack::PackId) -> &'static str {
     }
 }
 
-fn git_info(root: &Path) -> GitInfo {
+fn git_info(root: &Path, generated_paths: &[PathBuf]) -> GitInfo {
     let head = run_git(root, &["rev-parse", "HEAD"]).ok().and_then(|text| {
         let trimmed = text.trim();
         if trimmed.is_empty() {
@@ -2106,10 +2112,99 @@ fn git_info(root: &Path) -> GitInfo {
             Some(trimmed.to_string())
         }
     });
-    let dirty = run_git(root, &["status", "--porcelain"])
-        .map(|text| !text.trim().is_empty())
-        .unwrap_or(false);
-    GitInfo { head, dirty }
+    let analysis_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let report_path = analysis_root.join(".sc/last-scorecard.json");
+    let cache_dir = analysis_root.join(".sc/cache");
+    let coverage_dir = analysis_root.join(".sc/coverage");
+    let status_root = run_git(root, &["rev-parse", "--show-toplevel"])
+        .map(|path| PathBuf::from(path.trim()))
+        .and_then(|path| std::fs::canonicalize(path).map_err(|_| ()))
+        .unwrap_or_else(|_| analysis_root.clone());
+    let generated_paths: Vec<PathBuf> = generated_paths
+        .iter()
+        .map(|path| canonical_git_path(&analysis_root, path))
+        .collect();
+    let dirty_paths: Vec<String> = run_git(
+        root,
+        &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    )
+    .map(|status| {
+        parse_git_status_paths(&status)
+            .into_iter()
+            .filter(|path| {
+                // `git status` reports paths from the worktree root, even when
+                // analysis starts in a project subdirectory.
+                let status_path = normalize_git_path(&status_root.join(path));
+                status_path != report_path
+                    && !status_path.starts_with(&cache_dir)
+                    && !status_path.starts_with(&coverage_dir)
+                    && !generated_paths
+                        .iter()
+                        .any(|generated| generated == &status_path)
+            })
+            .collect()
+    })
+    .unwrap_or_default();
+    let dirty = !dirty_paths.is_empty();
+    GitInfo {
+        head,
+        dirty,
+        dirty_paths,
+    }
+}
+
+fn normalize_git_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            component => normalized.push(component.as_os_str()),
+        }
+    }
+    normalized
+}
+
+fn canonical_git_path(root: &Path, path: &Path) -> PathBuf {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    };
+    let normalized = normalize_git_path(&absolute);
+    normalized
+        .parent()
+        .and_then(|parent| std::fs::canonicalize(parent).ok())
+        .and_then(|parent| {
+            normalized
+                .file_name()
+                .map(|file_name| parent.join(file_name))
+        })
+        .unwrap_or(normalized)
+}
+
+fn parse_git_status_paths(status: &str) -> Vec<String> {
+    let mut records = status.split('\0').peekable();
+    let mut paths = Vec::new();
+    while let Some(record) = records.next() {
+        let bytes = record.as_bytes();
+        if bytes.len() < 4 {
+            continue;
+        }
+        let code = &bytes[..2];
+        let path = String::from_utf8_lossy(&bytes[3..]).into_owned();
+        if !path.is_empty() {
+            paths.push(path);
+        }
+        // Porcelain v1 -z adds the old path as a separate record for renames
+        // and copies. The destination above is the useful changed path.
+        if code.contains(&b'R') || code.contains(&b'C') {
+            records.next();
+        }
+    }
+    paths
 }
 
 fn run_git(root: &Path, args: &[&str]) -> Result<String, ()> {
@@ -3374,6 +3469,7 @@ mod tests {
                 GitInfo {
                     head: None,
                     dirty: true,
+                    dirty_paths: Vec::new(),
                 },
             )
         };
@@ -3589,26 +3685,60 @@ mod tests {
     #[test]
     fn git_probe_sees_clean_tree_and_later_modifications() {
         let dir = git_repo("sc-git-probe");
-        let clean = git_info(&dir);
+        let clean = git_info(&dir, &[]);
         assert_eq!(clean.head.as_ref().unwrap().len(), 40);
         assert!(!clean.dirty);
         std::fs::write(dir.join("note.txt"), "x").unwrap();
-        assert!(git_info(&dir).dirty);
+        let dirty = git_info(&dir, &[]);
+        assert!(dirty.dirty);
+        assert_eq!(dirty.dirty_paths, ["note.txt"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn analyzer_own_outputs_trip_a_late_probe() {
-        // Dogfood root cause: files sc itself creates read as a dirty tree
-        // once written, so the probe must run before the engines, not after.
+    fn git_probe_ignores_generated_reports_and_names_other_changes() {
+        let dir = git_repo("sc-git-report-outputs");
+        let generated = [
+            dir.join("scorecard.json"),
+            dir.join("scorecard.md"),
+            dir.join("scorecard.sarif"),
+            dir.join("scorecard.html"),
+        ];
+        let last_report = dir.join(".sc/last-scorecard.json");
+        let cache = dir.join(".sc/cache/parse-v2.json");
+        let coverage = dir.join(".sc/coverage/rust.info");
+        std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(coverage.parent().unwrap()).unwrap();
+        std::fs::write(&last_report, "generated by sc").unwrap();
+        std::fs::write(&cache, "generated by sc").unwrap();
+        std::fs::write(&coverage, "generated by sc").unwrap();
+        for path in &generated {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "generated by sc").unwrap();
+        }
+        let clean = git_info(&dir, &generated);
+        assert!(!clean.dirty, "generated reports were counted: {clean:?}");
+        assert!(clean.dirty_paths.is_empty());
+
+        std::fs::write(dir.join("note.txt"), "user change").unwrap();
+        let dirty = git_info(&dir, &generated);
+        assert!(dirty.dirty);
+        assert_eq!(dirty.dirty_paths, ["note.txt"]);
+        assert_eq!(dirty.status_label(), "dirty");
+        assert_eq!(dirty.changed_paths_label(), "note.txt");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn git_probe_filters_report_outputs_from_earlier_runs() {
         let dir = git_repo("sc-git-own-outputs");
-        assert!(!git_info(&dir).dirty);
         std::fs::create_dir_all(dir.join(".sc")).unwrap();
         std::fs::write(dir.join(".sc").join("last-scorecard.json"), "{}").unwrap();
-        std::fs::write(dir.join("scorecard.html"), "x").unwrap();
+        let report = dir.join("scorecard.html");
+        std::fs::write(&report, "x").unwrap();
         assert!(
-            git_info(&dir).dirty,
-            "own outputs look dirty after the fact"
+            !git_info(&dir, &[report]).dirty,
+            "earlier reports should not make a clean tree dirty"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

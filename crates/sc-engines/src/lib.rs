@@ -23,4 +23,6 @@ mod secrets;
 mod spec_check;
 mod toolchain;
 
-pub use pipeline::{analyze, AnalyzeOutput, AnalyzeRequest, RunStatus};
+pub use pipeline::{
+    analyze, analyze_with_generated_paths, AnalyzeOutput, AnalyzeRequest, RunStatus,
+};

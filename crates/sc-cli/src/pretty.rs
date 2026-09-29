@@ -78,7 +78,7 @@ pub fn to_pretty(card: &Scorecard, opts: &PrettyOpts) -> String {
 }
 
 fn push_header(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize) {
-    let state = if card.git.dirty { "dirty" } else { "clean" };
+    let state = card.git.status_label();
     let line = format!(
         "sc {}  {}  {}  {} {}  scope {}",
         opts.version,
@@ -90,6 +90,10 @@ fn push_header(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usi
     );
     out.push_str(&fit(&line, width, opts.color));
     out.push('\n');
+    let changed_paths = card.git.changed_paths_label();
+    if !changed_paths.is_empty() {
+        out.push_str(&format!("changed paths: {changed_paths}\n"));
+    }
     out.push('\n');
 }
 
