@@ -74,7 +74,7 @@ pub fn to_markdown(card: &Scorecard) -> String {
 
 fn push_markdown_header(out: &mut String, card: &Scorecard) {
     let head = card.git.head.as_deref().unwrap_or("none");
-    let dirty = if card.git.dirty { "dirty" } else { "clean" };
+    let dirty = escape_markdown(&card.git.status_label());
     out.push_str("# scorecard\n\n");
     let outcome = Outcome::of(card);
     let verdict = sc_core::report_verdict(card);
@@ -88,6 +88,13 @@ fn push_markdown_header(out: &mut String, card: &Scorecard) {
     }
     out.push_str(&format!("**Repo:** {}\n\n", card.repo));
     out.push_str(&format!("**Git:** {head} ({dirty})\n\n"));
+    let changed_paths = card.git.changed_paths_label();
+    if !changed_paths.is_empty() {
+        out.push_str(&format!(
+            "**Changed paths:** {}\n\n",
+            escape_markdown(&changed_paths)
+        ));
+    }
     let paths = match card.scope.paths.len() {
         0 => String::new(),
         1 => ", 1 path".into(),
@@ -116,6 +123,17 @@ fn push_markdown_header(out: &mut String, card: &Scorecard) {
             card.engines_skipped.join(", ")
         ));
     }
+}
+
+fn escape_markdown(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for ch in text.chars() {
+        if matches!(ch, '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' | '|') {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
 }
 
 fn push_markdown_gates(out: &mut String, card: &Scorecard) {

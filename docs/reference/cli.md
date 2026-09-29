@@ -58,6 +58,8 @@ Every run also writes `.sc/last-scorecard.json`.
 
 SARIF stores the report verdict in `runs[0].properties.scorecardVerdict` and each gate's `pass` and `enforced` flags in `runs[0].properties.scorecardGates`.
 
+Scorecard excludes its saved report, cache and coverage files under `.sc/`, and report files selected by `--out` from the dirty-tree check. Other changes set `git.dirty` and appear in `git.dirty_paths`.
+
 ## Exit status
 
 | Status | Meaning |

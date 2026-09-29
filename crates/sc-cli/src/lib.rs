@@ -11,7 +11,7 @@ mod user_config;
 
 use std::fs;
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
@@ -19,7 +19,7 @@ use sc_core::{
     apply_disposition, compute_scores, load_config_file, normalize_gates, resolve_config_path,
     Finding, Gate, Scorecard, SCORECARD_VERSION,
 };
-use sc_engines::{analyze, AnalyzeRequest, RunStatus};
+use sc_engines::{analyze_with_generated_paths, AnalyzeRequest, RunStatus};
 
 pub use format::{to_json, to_markdown};
 use report::to_html;
@@ -260,20 +260,24 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
         },
         None => Vec::new(),
     };
-    let output = analyze(AnalyzeRequest {
-        root,
-        repo,
-        fail_on,
-        budget: Duration::from_secs(budget_seconds),
-        config: loaded,
-        diff_base: diff,
-        diff_head,
-        path_list,
-        spec_path: spec,
-        mutation_override: mutation,
-        llm_override: llm.map(|value| value == "on"),
-        intent,
-    });
+    let generated_paths = generated_output_paths(&root, out.as_deref(), &file_format);
+    let output = analyze_with_generated_paths(
+        AnalyzeRequest {
+            root,
+            repo,
+            fail_on,
+            budget: Duration::from_secs(budget_seconds),
+            config: loaded,
+            diff_base: diff,
+            diff_head,
+            path_list,
+            spec_path: spec,
+            mutation_override: mutation,
+            llm_override: llm.map(|value| value == "on"),
+            intent,
+        },
+        &generated_paths,
+    );
     emit(
         &mut stdout,
         &view,
@@ -376,6 +380,56 @@ fn json_target(path: &Path) -> PathBuf {
         Some("md") => path.with_extension("json"),
         _ => path.with_extension("json"),
     }
+}
+
+fn generated_output_paths(root: &Path, out: Option<&Path>, format: &str) -> Vec<PathBuf> {
+    let mut paths = vec![root.join(".sc/last-scorecard.json")];
+    let Some(out) = out else {
+        return paths;
+    };
+    let report_paths = if format == "all" {
+        vec![
+            json_target(out),
+            md_target(out),
+            sarif_target(out),
+            html_target(out),
+        ]
+    } else {
+        vec![out.to_path_buf()]
+    };
+    let Ok(current_dir) = std::env::current_dir() else {
+        return paths;
+    };
+    let current_dir = fs::canonicalize(&current_dir).unwrap_or(current_dir);
+    for path in report_paths {
+        let absolute = if path.is_absolute() {
+            path
+        } else {
+            current_dir.join(path)
+        };
+        let absolute = normalize_path(&absolute);
+        let normalized = absolute
+            .parent()
+            .and_then(|parent| fs::canonicalize(parent).ok())
+            .and_then(|parent| absolute.file_name().map(|name| parent.join(name)))
+            .unwrap_or(absolute);
+        paths.push(normalized);
+    }
+    paths
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            component => normalized.push(component.as_os_str()),
+        }
+    }
+    normalized
 }
 
 fn md_target(path: &Path) -> PathBuf {

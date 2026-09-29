@@ -58,6 +58,37 @@ pub fn apply_disposition(findings: &mut [Finding]) {
 pub struct GitInfo {
     pub head: Option<String>,
     pub dirty: bool,
+    /// Changed paths, relative to the analyzed directory. Omitted when clean.
+    /// Older scorecards without this field still deserialize.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dirty_paths: Vec<String>,
+}
+
+impl GitInfo {
+    pub fn status_label(&self) -> String {
+        if self.dirty { "dirty" } else { "clean" }.into()
+    }
+
+    /// A compact list for human-readable reports. JSON retains every path.
+    pub fn changed_paths_label(&self) -> String {
+        let mut label = String::new();
+        for (index, path) in self.dirty_paths.iter().take(3).enumerate() {
+            if index > 0 {
+                label.push_str(", ");
+            }
+            for ch in path.chars() {
+                label.extend(ch.escape_default());
+            }
+        }
+        let remaining = self.dirty_paths.len().saturating_sub(3);
+        if remaining > 0 {
+            if !label.is_empty() {
+                label.push_str(", ");
+            }
+            label.push_str(&format!("+{remaining} more"));
+        }
+        label
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -309,6 +340,7 @@ impl Scorecard {
             git: GitInfo {
                 head: None,
                 dirty: false,
+                dirty_paths: Vec::new(),
             },
             scope: Scope {
                 mode: "tree".to_string(),
@@ -406,6 +438,7 @@ mod tests {
             git: GitInfo {
                 head: Some("abc123".into()),
                 dirty: true,
+                dirty_paths: Vec::new(),
             },
             scope: Scope {
                 mode: "tree".into(),
