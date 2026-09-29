@@ -50,6 +50,60 @@ pub fn out_of_line_cfg_test_paths_from_source(text: &str, declaring_rel: &str) -
     out_of_line_cfg_test_paths(&file, declaring_rel)
 }
 
+/// Directory prefix that holds children of a module file (`src/helpers/` for
+/// both `src/helpers.rs` and `src/helpers/mod.rs`).
+pub fn module_subtree_prefix(rel: &str) -> String {
+    let rel = normalize_rel(rel);
+    let file_name = rel.rsplit('/').next().unwrap_or(rel.as_str());
+    let parent = parent_dir(&rel);
+    if file_name == "mod.rs" {
+        return if parent.is_empty() {
+            String::new()
+        } else {
+            format!("{parent}/")
+        };
+    }
+    let stem = file_name
+        .rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(file_name);
+    format!("{}/", join_rel(&parent, stem))
+}
+
+/// True when `rel` is a declared cfg(test) module file or lives under one.
+pub fn is_cfg_test_only(
+    rel: &str,
+    declared: &std::collections::BTreeSet<String>,
+    prefixes: &std::collections::BTreeSet<String>,
+) -> bool {
+    let rel = normalize_rel(rel);
+    if is_test_path(&rel) || declared.contains(&rel) {
+        return true;
+    }
+    prefixes
+        .iter()
+        .any(|prefix| rel.starts_with(prefix.as_str()))
+}
+
+/// Expand declared module files with the directory prefixes of their children.
+pub fn cfg_test_coverage(
+    declared: impl IntoIterator<Item = String>,
+) -> (
+    std::collections::BTreeSet<String>,
+    std::collections::BTreeSet<String>,
+) {
+    let mut files = std::collections::BTreeSet::new();
+    let mut prefixes = std::collections::BTreeSet::new();
+    for path in declared {
+        let prefix = module_subtree_prefix(&path);
+        if !prefix.is_empty() {
+            prefixes.insert(prefix);
+        }
+        files.insert(path);
+    }
+    (files, prefixes)
+}
+
 fn collect_out_of_line_cfg_test(items: &[Item], declaring_rel: &str, out: &mut Vec<String>) {
     for item in items {
         let Item::Mod(module) = item else {
@@ -452,6 +506,21 @@ mod helpers;
         let foo = syn::parse_file("#[cfg(test)]\nmod helpers;\n").unwrap();
         let paths = out_of_line_cfg_test_paths(&foo, "src/foo.rs");
         assert!(paths.contains(&"src/foo/helpers.rs".into()), "{paths:?}");
+    }
+
+    #[test]
+    fn module_subtree_covers_children() {
+        assert_eq!(module_subtree_prefix("src/helpers.rs"), "src/helpers/");
+        assert_eq!(module_subtree_prefix("src/helpers/mod.rs"), "src/helpers/");
+        let (files, prefixes) = cfg_test_coverage(["src/helpers.rs".into()]);
+        assert!(files.contains("src/helpers.rs"));
+        assert!(prefixes.contains("src/helpers/"));
+        assert!(is_cfg_test_only(
+            "src/helpers/fixtures.rs",
+            &files,
+            &prefixes
+        ));
+        assert!(!is_cfg_test_only("src/lib.rs", &files, &prefixes));
     }
 
     #[test]

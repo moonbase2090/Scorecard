@@ -59,6 +59,8 @@ pub fn select(
             path_list,
             crate::facts::is_workspace_root(root, toolchain_pin),
             perf_enabled,
+            exclude,
+            toolchain_pin,
         ));
     }
     let (files, workspace_root) =
@@ -94,6 +96,8 @@ fn select_paths(
     path_list: &[String],
     workspace_root: bool,
     perf_enabled: bool,
+    exclude: &[String],
+    toolchain_pin: &str,
 ) -> Selection {
     let rels: Vec<String> = path_list
         .iter()
@@ -102,7 +106,7 @@ fn select_paths(
         .collect();
     tree_like(
         "paths",
-        analyze_rels(root, &rels, perf_enabled),
+        analyze_rels(root, &rels, perf_enabled, exclude, toolchain_pin),
         workspace_root,
     )
 }
@@ -124,7 +128,7 @@ fn select_diff(
         .filter(|delta| !exclude_hit(&delta.rel) && delta.rel.contains("src/"))
         .collect();
     let rels: Vec<String> = deltas.iter().map(|delta| delta.rel.clone()).collect();
-    let files = analyze_rels(root, &rels, perf_enabled);
+    let files = analyze_rels(root, &rels, perf_enabled, exclude, toolchain_pin);
     let mut crap_functions = Vec::new();
     let mut new_symbols = BTreeSet::new();
     let mut loc_changed = 0u64;
