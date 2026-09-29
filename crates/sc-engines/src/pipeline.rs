@@ -973,44 +973,11 @@ fn coverage_phase(
     state: &mut RustState,
 ) {
     if !state.tests_pass {
-        if !state.skipped.iter().any(|engine| engine == "coverage") {
-            state.skipped.push("coverage".into());
-        }
-        // Only when the test command ran and failed. A missing toolchain or
-        // compile-blocked skip must not read as "tests gate failed".
-        if state.ran.iter().any(|engine| engine == "tests") {
-            let failed_test = state
-                .runs
-                .iter()
-                .rev()
-                .find(|run| run.engine == "tests" && run.exit_code != Some(0));
-            let reason = match failed_test {
-                Some(run) => format!(
-                    "coverage skipped: tests gate failed (test command exit code {})",
-                    run.exit_code
-                        .map(|code| code.to_string())
-                        .unwrap_or_else(|| "unavailable".into())
-                ),
-                None => format!(
-                    "coverage skipped: tests gate failed ({})",
-                    if state.tests_reason.is_empty() {
-                        "test command was not run"
-                    } else {
-                        &state.tests_reason
-                    }
-                ),
-            };
-            state.findings.push(crate::coverage::missing_finding(
-                &reason,
-                "Fix the failing tests and re-run to collect coverage",
-            ));
-        }
+        skip_coverage_when_tests_failed(state);
         return;
     }
     if !coverage_enabled {
-        if !state.skipped.iter().any(|engine| engine == "coverage") {
-            state.skipped.push("coverage".into());
-        }
+        skip_engine(&mut state.skipped, "coverage");
         return;
     }
     match run_coverage(
@@ -1021,58 +988,108 @@ fn coverage_phase(
         &state.toolchain_pin,
         &mut state.runs,
     ) {
-        Ok(data) => {
-            state.ran.push("coverage".into());
-            let unmatched = unmatched_functions(&selection.crap_functions, &data);
-            if !unmatched.is_empty() {
-                let mut finding = Finding {
-                    id: "coverage:unmatched".into(),
-                    rule: "coverage.unmatched".into(),
-                    engine: "coverage".into(),
-                    severity: "warning".into(),
-                    file: ".".into(),
-                    span: None,
-                    symbol: None,
-                    message: format!(
-                        "coverage was not measured for {} analyzed function(s) without llvm-cov records",
-                        unmatched.len()
-                    ),
-                    evidence: serde_json::json!({
-                        "unmatched": unmatched.len(),
-                        "functions": unmatched
-                            .iter()
-                            .take(MAX_UNMATCHED_FUNCTION_EVIDENCE)
-                            .map(|function| UnmatchedFunctionEvidence {
-                                file: &function.file,
-                                symbol: &function.symbol,
-                                line: function.span.start_line,
-                            })
-                            .collect::<Vec<_>>(),
-                    }),
-                    suggested_action: Some(
-                        "Check that the function is compiled into the test binary".into(),
-                    ),
-                    disposition: String::new(),
-                };
-                if let [function] = unmatched.as_slice() {
-                    finding.file = function.file.clone();
-                    finding.symbol = Some(function.symbol.clone());
-                    finding.span = Some(function.span.clone());
-                }
-                state.findings.push(finding);
-            }
-            state.line_rate = data.line_rate;
-            state.coverage_data = Some(data);
-        }
-        Err(err) => {
-            state.skipped.push("coverage".into());
-            let detail = rust_coverage_detail(&err);
-            state.findings.push(crate::coverage::missing_finding(
-                &format!("coverage tooling unavailable: {}", detail.reason),
-                detail.fix,
-            ));
-        }
+        Ok(data) => record_coverage_success(selection, data, state),
+        Err(err) => record_coverage_tool_missing(err, state),
     }
+}
+
+fn skip_engine(skipped: &mut Vec<String>, engine: &str) {
+    if !skipped.iter().any(|name| name == engine) {
+        skipped.push(engine.into());
+    }
+}
+
+/// Coverage is skipped when tests did not pass. Only blame the tests gate when
+/// the test command actually ran.
+fn skip_coverage_when_tests_failed(state: &mut RustState) {
+    skip_engine(&mut state.skipped, "coverage");
+    if !state.ran.iter().any(|engine| engine == "tests") {
+        return;
+    }
+    let failed_test = state
+        .runs
+        .iter()
+        .rev()
+        .find(|run| run.engine == "tests" && run.exit_code != Some(0));
+    let reason = match failed_test {
+        Some(run) => format!(
+            "coverage skipped: tests gate failed (test command exit code {})",
+            run.exit_code
+                .map(|code| code.to_string())
+                .unwrap_or_else(|| "unavailable".into())
+        ),
+        None => format!(
+            "coverage skipped: tests gate failed ({})",
+            if state.tests_reason.is_empty() {
+                "test command was not run"
+            } else {
+                &state.tests_reason
+            }
+        ),
+    };
+    state.findings.push(crate::coverage::missing_finding(
+        &reason,
+        "Fix the failing tests and re-run to collect coverage",
+    ));
+}
+
+fn record_coverage_success(
+    selection: &Selection,
+    data: crate::coverage::CoverageData,
+    state: &mut RustState,
+) {
+    state.ran.push("coverage".into());
+    let unmatched = unmatched_functions(&selection.crap_functions, &data);
+    if !unmatched.is_empty() {
+        state.findings.push(unmatched_coverage_finding(&unmatched));
+    }
+    state.line_rate = data.line_rate;
+    state.coverage_data = Some(data);
+}
+
+fn unmatched_coverage_finding(unmatched: &[&FunctionInfo]) -> Finding {
+    let mut finding = Finding {
+        id: "coverage:unmatched".into(),
+        rule: "coverage.unmatched".into(),
+        engine: "coverage".into(),
+        severity: "warning".into(),
+        file: ".".into(),
+        span: None,
+        symbol: None,
+        message: format!(
+            "coverage was not measured for {} analyzed function(s) without llvm-cov records",
+            unmatched.len()
+        ),
+        evidence: serde_json::json!({
+            "unmatched": unmatched.len(),
+            "functions": unmatched
+                .iter()
+                .take(MAX_UNMATCHED_FUNCTION_EVIDENCE)
+                .map(|function| UnmatchedFunctionEvidence {
+                    file: &function.file,
+                    symbol: &function.symbol,
+                    line: function.span.start_line,
+                })
+                .collect::<Vec<_>>(),
+        }),
+        suggested_action: Some("Check that the function is compiled into the test binary".into()),
+        disposition: String::new(),
+    };
+    if let [function] = unmatched {
+        finding.file = function.file.clone();
+        finding.symbol = Some(function.symbol.clone());
+        finding.span = Some(function.span.clone());
+    }
+    finding
+}
+
+fn record_coverage_tool_missing(err: String, state: &mut RustState) {
+    state.skipped.push("coverage".into());
+    let detail = rust_coverage_detail(&err);
+    state.findings.push(crate::coverage::missing_finding(
+        &format!("coverage tooling unavailable: {}", detail.reason),
+        detail.fix,
+    ));
 }
 
 fn lint_gate(findings: &[Finding], fail_on: &[String]) -> Option<Gate> {
