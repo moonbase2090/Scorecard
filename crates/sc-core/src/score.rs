@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Dimension scores and the CRAP formula.
 //!
-//! Dimension scores are in `0.0..=1.0`. Each score starts at 1.0. An error
-//! finding subtracts 0.25 and a warning subtracts 0.05, then the result is
+//! Dimension scores are in `0.0..=1.0`. Each score starts at 1.0. Most
+//! warnings subtract 0.05 and errors subtract 0.25, then the result is
 //! clamped to 0.0.
 //!
 //! - correctness: `compile`, `tests`, `config`, `lint`, and `html` findings
 //! - maintainability: `complexity`, `crap`, and `coverage` findings
 //! - efficiency: `perf` findings (none in M1, so this stays 1.0)
-//! - security: `secrets` and `sca` findings (none in M1, so this stays 1.0)
+//! - security: `secrets` and `sca` findings (`sca` warnings subtract 0.01)
 //! - a11y: `a11y` findings
 
 use crate::{Finding, Gate, Scores};
@@ -21,11 +21,7 @@ pub fn compute_scores(findings: &[Finding]) -> Scores {
     let mut a11y: f64 = 1.0;
 
     for finding in findings {
-        let penalty = match finding.severity.as_str() {
-            "error" => 0.25,
-            "warning" => 0.05,
-            _ => 0.0,
-        };
+        let penalty = penalty_for(finding);
         if penalty == 0.0 {
             continue;
         }
@@ -45,6 +41,18 @@ pub fn compute_scores(findings: &[Finding]) -> Scores {
         maintainability: maintainability.max(0.0),
         security: security.max(0.0),
         a11y: a11y.max(0.0),
+    }
+}
+
+fn penalty_for(finding: &Finding) -> f64 {
+    match (finding.engine.as_str(), finding.severity.as_str()) {
+        // Undeclared dependencies are advisory (`sca` gate is never enforced by
+        // default), so they weigh in proportionally instead of drowning out the
+        // dimension score.
+        ("sca", "warning") => 0.01,
+        (_, "error") => 0.25,
+        (_, "warning") => 0.05,
+        _ => 0.0,
     }
 }
 
@@ -152,6 +160,13 @@ mod tests {
 
         let many: Vec<_> = (0..10).map(|_| finding("compile", "error")).collect();
         assert_eq!(compute_scores(&many).correctness, 0.0);
+    }
+
+    #[test]
+    fn advisory_sca_warnings_have_a_smaller_security_penalty() {
+        let findings: Vec<_> = (0..16).map(|_| finding("sca", "warning")).collect();
+        let scores = compute_scores(&findings);
+        assert!((scores.security - 0.84).abs() < 1e-9, "{scores:?}");
     }
 
     fn finding(engine: &str, severity: &str) -> Finding {

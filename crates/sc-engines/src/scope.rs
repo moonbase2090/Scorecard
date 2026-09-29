@@ -7,7 +7,7 @@ use std::time::Duration;
 use sc_graph::FunctionInfo;
 
 use crate::command::{run_cmd, CommandError};
-use crate::facts::{analyze_rels, analyze_tree, AnalyzedFile};
+use crate::facts::{analyze_rels, AnalyzedFile};
 
 #[derive(Debug, Clone)]
 pub struct Selection {
@@ -19,10 +19,15 @@ pub struct Selection {
     pub paths: Vec<String>,
     pub loc_changed: u64,
     pub files_changed: u64,
+    /// Resolved diff base, only in diff mode.
+    pub base: Option<String>,
+    /// Tree source paths that are not in this diff, only in diff mode.
+    pub other_paths: Option<u64>,
+    pub workspace_root: bool,
 }
 
 pub fn empty_selection() -> Selection {
-    tree_like("tree", Vec::new())
+    tree_like("tree", Vec::new(), false)
 }
 
 pub fn select(
@@ -31,21 +36,34 @@ pub fn select(
     diff_base: Option<&str>,
     diff_head: Option<&str>,
     path_list: &[String],
+    toolchain_pin: &str,
 ) -> Result<Selection, String> {
     if diff_base.is_some() && !path_list.is_empty() {
         return Err("pass either --diff or --paths, not both".into());
     }
     if let Some(base) = diff_base {
-        return select_diff(root, exclude, base, diff_head);
+        return select_diff(
+            root,
+            exclude,
+            base,
+            diff_head,
+            crate::facts::is_workspace_root(root, toolchain_pin),
+            toolchain_pin,
+        );
     }
     if !path_list.is_empty() {
-        return Ok(select_paths(root, path_list));
+        return Ok(select_paths(
+            root,
+            path_list,
+            crate::facts::is_workspace_root(root, toolchain_pin),
+        ));
     }
-    let files = analyze_tree(root, exclude);
-    Ok(tree_like("tree", files))
+    let (files, workspace_root) =
+        crate::facts::analyze_tree_with_workspace(root, exclude, toolchain_pin);
+    Ok(tree_like("tree", files, workspace_root))
 }
 
-fn tree_like(mode: &str, files: Vec<AnalyzedFile>) -> Selection {
+fn tree_like(mode: &str, files: Vec<AnalyzedFile>, workspace_root: bool) -> Selection {
     let crap_functions = files
         .iter()
         .flat_map(|file| file.functions.clone())
@@ -62,16 +80,19 @@ fn tree_like(mode: &str, files: Vec<AnalyzedFile>) -> Selection {
         paths,
         loc_changed,
         files_changed,
+        base: None,
+        other_paths: None,
+        workspace_root,
     }
 }
 
-fn select_paths(root: &Path, path_list: &[String]) -> Selection {
+fn select_paths(root: &Path, path_list: &[String], workspace_root: bool) -> Selection {
     let rels: Vec<String> = path_list
         .iter()
         .map(|path| normalize_rel(root, path))
         .filter(|rel| rel.ends_with(".rs"))
         .collect();
-    tree_like("paths", analyze_rels(root, &rels))
+    tree_like("paths", analyze_rels(root, &rels), workspace_root)
 }
 
 fn select_diff(
@@ -79,6 +100,8 @@ fn select_diff(
     exclude: &[String],
     base: &str,
     head: Option<&str>,
+    workspace_root: bool,
+    toolchain_pin: &str,
 ) -> Result<Selection, String> {
     let base = resolve_base(root, base)?;
     let deltas = diff_files(root, &base, head)?;
@@ -118,7 +141,18 @@ fn select_diff(
         };
     }
     let files_changed = files.len() as u64;
-    let paths = files.iter().map(|file| file.rel.clone()).collect();
+    let paths: Vec<String> = files.iter().map(|file| file.rel.clone()).collect();
+    let (tree_rels, _) = crate::facts::tree_source_rels(root, exclude, toolchain_pin);
+    // Diff paths can include src/ files outside the cargo tree scan (deleted
+    // members, non-member crates). Count tree paths that are not in the diff,
+    // not `tree_len - diff_len`.
+    let path_set: std::collections::BTreeSet<&str> = paths.iter().map(String::as_str).collect();
+    let other_paths = Some(
+        tree_rels
+            .iter()
+            .filter(|rel| !path_set.contains(rel.as_str()))
+            .count() as u64,
+    );
     Ok(Selection {
         mode: "diff".into(),
         files,
@@ -128,6 +162,9 @@ fn select_diff(
         paths,
         loc_changed,
         files_changed,
+        base: Some(base),
+        other_paths,
+        workspace_root,
     })
 }
 
@@ -322,7 +359,7 @@ mod tests {
             "pub fn old() -> i32 { 1 }\npub fn added() -> i32 { 2 }\n",
         )
         .unwrap();
-        let selection = select(&dir, &[], Some("HEAD"), None, &[]).unwrap();
+        let selection = select(&dir, &[], Some("HEAD"), None, &[], "").unwrap();
         assert_eq!(selection.mode, "diff");
         let symbols: Vec<_> = selection
             .crap_functions
@@ -352,5 +389,13 @@ mod tests {
         };
         assert!(overlaps(&function, &[5]));
         assert!(!overlaps(&function, &[1, 2]));
+    }
+    #[test]
+    fn other_paths_counts_tree_paths_not_in_the_diff() {
+        let tree = ["src/a.rs", "src/b.rs", "src/lib.rs"];
+        let paths = ["src/a.rs", "src/lib.rs", "tools/src/main.rs"];
+        let path_set: std::collections::BTreeSet<&str> = paths.iter().copied().collect();
+        let other = tree.iter().filter(|rel| !path_set.contains(*rel)).count();
+        assert_eq!(other, 1);
     }
 }

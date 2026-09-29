@@ -10,14 +10,20 @@ use std::process::Command;
 use sc_core::Span;
 use sc_graph::FunctionInfo;
 
-pub fn go_coverage(profile: &str, functions: &[FunctionInfo]) -> crate::coverage::CoverageData {
+pub fn go_coverage(
+    profile: &str,
+    functions: &[FunctionInfo],
+    extra: &[String],
+) -> crate::coverage::CoverageData {
+    let known =
+        crate::coverage::merge_known(functions.iter().map(|item| item.file.as_str()), extra);
     let mut covered = Vec::new();
     let stmts = parse_go_cover(profile);
     for function in functions {
         let mut hit = 0u32;
         let mut total = 0u32;
         for stmt in &stmts {
-            if !crate::coverage::file_matches(&stmt.file, &function.file) {
+            if !crate::coverage::path_owned(&stmt.file, &function.file, known.iter().copied()) {
                 continue;
             }
             if stmt.start_line < function.span.start_line
@@ -30,11 +36,10 @@ pub fn go_coverage(profile: &str, functions: &[FunctionInfo]) -> crate::coverage
                 hit += 1;
             }
         }
-        let coverage = if total == 0 {
-            0.0
-        } else {
-            f64::from(hit) / f64::from(total)
-        };
+        if total == 0 {
+            continue;
+        }
+        let coverage = f64::from(hit) / f64::from(total);
         covered.push(crate::coverage::CovFunction {
             file: function.file.clone(),
             demangled: function.symbol.clone(),
@@ -133,6 +138,34 @@ pub fn functions_for_pack(root: &Path, pack: &str) -> Vec<FunctionInfo> {
     }
 }
 
+/// Paths a coverage report may name, including `vendor/`, `dist/`, and
+/// dot-directories. Those files own their hits. They are not scored.
+pub fn coverage_paths(root: &Path, pack: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let exts: &[&str] = match pack {
+        "python" => &["py"],
+        "node" => &["js", "jsx", "mjs", "cjs", "ts", "tsx"],
+        "go" => &["go"],
+        "java" => &["java"],
+        "csharp" => &["cs"],
+        "php" => &["php"],
+        "cpp" => &["c", "cc", "cpp", "cxx", "h", "hh", "hpp", "hxx"],
+        "bash" => &["sh", "bash"],
+        "command" => {
+            let mut all = Vec::new();
+            for name in [
+                "python", "node", "go", "java", "csharp", "php", "cpp", "bash",
+            ] {
+                all.extend(coverage_paths(root, name));
+            }
+            return all;
+        }
+        _ => return Vec::new(),
+    };
+    collect(root, root, 0, exts, &mut out);
+    out
+}
+
 enum Lang {
     C,
     Go,
@@ -156,6 +189,7 @@ fn python_functions(root: &Path) -> Vec<FunctionInfo> {
         return Vec::new();
     };
     rows.into_iter()
+        .filter(|row| product_file(&row.file))
         .map(|row| FunctionInfo {
             file: row.file,
             symbol: row.symbol,
@@ -222,6 +256,9 @@ fn files_with(root: &Path, exts: &[&str], lang: Lang) -> Vec<FunctionInfo> {
     collect(root, root, 0, exts, &mut paths);
     let mut functions = Vec::new();
     for rel in paths {
+        if !product_file(&rel) {
+            continue;
+        }
         let Ok(text) = std::fs::read_to_string(root.join(&rel)) else {
             continue;
         };
@@ -230,8 +267,17 @@ fn files_with(root: &Path, exts: &[&str], lang: Lang) -> Vec<FunctionInfo> {
     functions
 }
 
+/// `vendor/`, `dist/`, and dot-directories are third-party trees. Scoring
+/// them makes one missing coverage record turn a measured CRAP failure advisory.
+fn product_file(rel: &str) -> bool {
+    !rel.split('/')
+        .rev()
+        .skip(1)
+        .any(|part| part == "vendor" || part == "dist" || part.starts_with('.'))
+}
+
 fn collect(root: &Path, dir: &Path, depth: u32, exts: &[&str], out: &mut Vec<String>) {
-    if depth > 6 || out.len() >= 400 {
+    if depth > 32 {
         return;
     }
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -243,28 +289,70 @@ fn collect(root: &Path, dir: &Path, depth: u32, exts: &[&str], out: &mut Vec<Str
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("");
-        if name.starts_with('.')
+        if name == ".git"
+            || name == ".sc"
+            || name == ".venv"
             || name == "node_modules"
             || name == "target"
-            || name == "dist"
             || name == "__pycache__"
-            || name == ".venv"
-            || name == "vendor"
         {
             continue;
         }
         if path.is_dir() {
-            collect(root, &path, depth + 1, exts, out);
-        } else if path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| exts.contains(&ext))
+            if path
+                .symlink_metadata()
+                .map(|meta| meta.file_type().is_symlink())
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            if !test_dir(name) {
+                collect(root, &path, depth + 1, exts, out);
+            }
+        } else if !test_file(name)
+            && path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| exts.contains(&ext))
         {
             if let Ok(rel) = path.strip_prefix(root) {
                 out.push(rel.to_string_lossy().replace('\\', "/"));
             }
         }
     }
+}
+
+/// Test code is not scored for CRAP. A test helper is not product code that
+/// failed a coverage gate.
+fn test_dir(name: &str) -> bool {
+    matches!(name, "test" | "tests" | "__tests__" | "spec" | "testdata")
+        || name.ends_with(".Tests")
+        || name.ends_with(".Test")
+}
+
+fn test_file(name: &str) -> bool {
+    if name == "conftest.py" {
+        return true;
+    }
+    let stem = Path::new(name)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("");
+    stem.starts_with("test_")
+        || [
+            "_test",
+            "_tests",
+            "_spec",
+            "_unittest",
+            "-test",
+            "-spec",
+            ".test",
+            ".spec",
+            "Test",
+            "Tests",
+        ]
+        .iter()
+        .any(|suffix| stem.ends_with(suffix))
 }
 
 fn scan_text(rel: &str, text: &str, lang: &Lang) -> Vec<FunctionInfo> {
@@ -529,6 +617,159 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_helpers_are_not_scored_for_crap() {
+        let dir = std::env::temp_dir().join(format!("sc-cc-tests-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let six = "function pick(v) {\n  if (v === 1) return 1;\n  if (v === 2) return 2;\n  if (v === 3) return 3;\n  if (v === 4) return 4;\n  if (v === 5) return 5;\n  return 0;\n}\n";
+        for rel in [
+            "src/pick.js",
+            "src/latest.js",
+            "tests/helpers.js",
+            "test/unit/helpers.js",
+            "src/__tests__/pick.js",
+            "spec/pick.js",
+            "src/pick.test.js",
+            "src/pick.spec.ts",
+        ] {
+            let path = dir.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, six).unwrap();
+        }
+        let functions = functions_for_pack(&dir, "node");
+        let mut files: Vec<&str> = functions.iter().map(|item| item.file.as_str()).collect();
+        files.sort();
+        assert_eq!(files, ["src/latest.js", "src/pick.js"]);
+        assert!(functions.iter().all(|item| item.cc >= 6), "{functions:?}");
+
+        let coverage = crate::coverage::CoverageData {
+            functions: ["src/pick.js", "tests/helpers.js"]
+                .iter()
+                .map(|file| crate::coverage::CovFunction {
+                    file: (*file).into(),
+                    demangled: "pick".into(),
+                    coverage: 0.0,
+                })
+                .collect(),
+            line_rate: 0.0,
+        };
+        let outcome = crate::crap::evaluate(&functions, Some(&coverage), 30, 15, |_| true);
+        let flagged: Vec<&str> = outcome
+            .findings
+            .iter()
+            .filter(|finding| finding.rule == "crap.over_threshold")
+            .map(|finding| finding.file.as_str())
+            .collect();
+        assert_eq!(flagged, ["src/pick.js"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn vendor_dist_and_dot_dirs_are_walked_but_not_scored() {
+        let dir = std::env::temp_dir().join(format!("sc-score-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let six = "function pick(v) {\n  if (v === 1) return 1;\n  if (v === 2) return 2;\n  if (v === 3) return 3;\n  if (v === 4) return 4;\n  if (v === 5) return 5;\n  return 0;\n}\n";
+        for rel in [
+            "index.js",
+            "vendor/index.js",
+            "dist/bundle.js",
+            ".yarn/releases/yarn.js",
+        ] {
+            let path = dir.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, six).unwrap();
+        }
+        let functions = functions_for_pack(&dir, "node");
+        let mut files: Vec<&str> = functions.iter().map(|item| item.file.as_str()).collect();
+        files.sort();
+        assert_eq!(files, ["index.js"]);
+
+        let known = coverage_paths(&dir, "node");
+        for rel in [
+            "vendor/index.js",
+            "dist/bundle.js",
+            ".yarn/releases/yarn.js",
+            "index.js",
+        ] {
+            assert!(known.iter().any(|path| path == rel), "{known:?}");
+        }
+        let refs: Vec<&str> = known.iter().map(|path| path.as_str()).collect();
+        let owners = crate::coverage::file_owners(["vendor/index.js", "index.js"], &refs);
+        assert!(crate::coverage::report_owns(
+            &owners,
+            "vendor/index.js",
+            "vendor/index.js"
+        ));
+        assert!(!crate::coverage::report_owns(
+            &owners,
+            "vendor/index.js",
+            "index.js"
+        ));
+
+        let coverage = crate::coverage::CoverageData {
+            functions: vec![crate::coverage::CovFunction {
+                file: "index.js".into(),
+                demangled: "pick".into(),
+                coverage: 0.0,
+            }],
+            line_rate: 0.0,
+        };
+        let outcome = crate::crap::evaluate(&functions, Some(&coverage), 30, 15, |_| true);
+        assert!(
+            outcome.coverage_complete,
+            "an unscored vendor file made coverage incomplete"
+        );
+        assert!(
+            outcome.over >= 1,
+            "measured 0% coverage was not over threshold"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn function_walk_includes_vendor_and_a_deep_file() {
+        let dir = std::env::temp_dir().join(format!("sc-walk-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("vendor")).unwrap();
+        std::fs::write(dir.join("vendor/index.js"), "function choose(){return 1}\n").unwrap();
+        let deep = dir.join("a/b/c/d/e/f/g");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("deep.js"), "function choose(){return 1}\n").unwrap();
+        let mut out = Vec::new();
+        collect(&dir, &dir, 0, &["js"], &mut out);
+        assert!(out.iter().any(|path| path == "vendor/index.js"), "{out:?}");
+        assert!(out.iter().any(|path| path.ends_with("deep.js")), "{out:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_file_names_by_pack() {
+        for name in [
+            "test_app.py",
+            "app_test.py",
+            "conftest.py",
+            "app_test.go",
+            "AppTest.java",
+            "AppTests.cs",
+            "AppTest.php",
+            "parser_unittest.cc",
+            "app.test.tsx",
+        ] {
+            assert!(test_file(name), "{name}");
+        }
+        for name in [
+            "app.py",
+            "contest.py",
+            "Latest.java",
+            "attest.go",
+            "manifest.js",
+        ] {
+            assert!(!test_file(name), "{name}");
+        }
+        assert!(test_dir("App.Tests"));
+        assert!(!test_dir("src"));
+    }
+
+    #[test]
     fn python_ast_counts_a_branch() {
         let dir = std::env::temp_dir().join(format!("sc-cc-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -587,8 +828,8 @@ mod tests {
         };
         let profile =
             "mode: set\nexample.com/p/main.go:4.2,5.3 1 1\nexample.com/p/main.go:5.3,6.2 1 0\n";
-        let data = go_coverage(profile, &[function]);
-        let cov = data.for_function("main.go", "main").unwrap();
+        let data = go_coverage(profile, &[function], &[]);
+        let cov = data.for_function_known("main.go", "main", &[]).unwrap();
         assert!((cov - 0.5).abs() < 1e-9, "{cov}");
     }
 

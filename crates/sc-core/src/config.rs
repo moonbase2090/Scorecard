@@ -26,6 +26,9 @@ pub struct Config {
     pub a11y: A11yConfig,
     /// Empty detects a pack from the tree: `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, `web`, or `command`.
     pub pack: String,
+    /// Rustup channel for check, test, coverage, and lint. Empty uses
+    /// `rust-toolchain.toml` / `rust-toolchain` in the project root.
+    pub toolchain: String,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -56,6 +59,17 @@ pub struct LlmConfig {
     pub enabled: bool,
     pub endpoint: String,
     pub model: String,
+    /// `ollama` (default), `cursor`, or `openai-compatible`.
+    /// `cursor` sends the spec and the files the agent reads to Cursor.
+    /// `openai-compatible` sends the spec and tool-read file text to `base_url`.
+    pub backend: String,
+    /// Used when `backend` is `openai-compatible`.
+    pub base_url: String,
+    /// Name of the environment variable that holds the API key. The key
+    /// itself is never stored here.
+    pub api_key_env: String,
+    /// Tool-using turns before the model must return a spec-gap verdict.
+    pub max_tool_rounds: u32,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -112,6 +126,10 @@ impl Default for LlmConfig {
             enabled: false,
             endpoint: "http://127.0.0.1:11434/v1".into(),
             model: "qwen2.5-coder".into(),
+            backend: "ollama".into(),
+            base_url: "https://openrouter.ai/api/v1".into(),
+            api_key_env: "OPENROUTER_API_KEY".into(),
+            max_tool_rounds: 36,
         }
     }
 }
@@ -153,7 +171,7 @@ impl Default for HtmlConfig {
 impl Default for CommandsConfig {
     fn default() -> Self {
         Self {
-            lint: "cargo clippy -- -D warnings".into(),
+            lint: "cargo clippy --workspace".into(),
         }
     }
 }
@@ -194,16 +212,20 @@ pub fn resolve_config_path(explicit: Option<&Path>, project_root: &Path) -> Opti
     if local.is_file() {
         return Some(local);
     }
-    if let Some(home) = std::env::var_os("HOME") {
-        let home_cfg = PathBuf::from(home)
-            .join(".config")
-            .join("sc")
-            .join("analyzer.toml");
+    if let Some(home_cfg) = user_config_path() {
         if home_cfg.is_file() {
             return Some(home_cfg);
         }
     }
     None
+}
+
+pub fn user_config_file(home: &Path) -> PathBuf {
+    home.join(".config").join("sc").join("analyzer.toml")
+}
+
+pub fn user_config_path() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(|home| user_config_file(Path::new(&home)))
 }
 
 pub fn load_config_file(path: Option<&Path>) -> Result<Config, String> {
@@ -221,6 +243,14 @@ pub fn load_config_file(path: Option<&Path>) -> Result<Config, String> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn toolchain_from_analyzer_toml() {
+        let config: Config = toml::from_str("toolchain = \"1.85.0\"\n").unwrap();
+        assert_eq!(config.toolchain, "1.85.0");
+        let empty: Config = toml::from_str("").unwrap();
+        assert_eq!(empty.toolchain, "");
+    }
     use super::*;
 
     #[test]
@@ -237,6 +267,8 @@ mod tests {
         assert_eq!(config.gates.new_fn_untested_cc, 15);
         assert!(!config.llm.enabled);
         assert_eq!(config.mutation.mode, "off");
+        assert_eq!(config.commands.lint, "cargo clippy --workspace");
+        assert!(!config.commands.lint.contains("-D warnings"));
     }
 
     #[test]
@@ -258,6 +290,7 @@ mod tests {
         assert_eq!(config.gates.crap_threshold, 30);
         assert_eq!(config.gates.new_fn_untested_cc, 15);
         assert!(config.gates.fail_on.iter().any(|gate| gate == "crap"));
+        assert_eq!(config.pack, "rust");
     }
 
     #[test]

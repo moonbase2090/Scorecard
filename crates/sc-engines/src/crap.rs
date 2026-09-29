@@ -6,10 +6,12 @@ use crate::coverage::CoverageData;
 
 pub struct CrapOutcome {
     pub findings: Vec<Finding>,
+    /// True when every analyzed function has a coverage record.
+    pub coverage_complete: bool,
     pub worst: Vec<CrapFunction>,
     pub crap_max: f64,
     pub over: u64,
-    /// Functions with CC at or above `new_fn_untested_cc` and coverage 0.
+    /// Measured functions with CC at or above `new_fn_untested_cc` and coverage 0.
     pub untested: u64,
 }
 
@@ -22,21 +24,21 @@ pub fn evaluate(
     untested_cc: u32,
     untested: impl Fn(&FunctionInfo) -> bool,
 ) -> CrapOutcome {
+    let files: Vec<&str> = functions.iter().map(|item| item.file.as_str()).collect();
     let mut rows: Vec<CrapFunction> = functions
         .iter()
-        .map(|function| {
+        .filter_map(|function| {
             let cov = coverage
-                .and_then(|data| data.for_function(&function.file, &function.symbol))
-                .unwrap_or(0.0)
+                .and_then(|data| data.for_function_known(&function.file, &function.symbol, &files))?
                 .clamp(0.0, 1.0);
             let crap = crap_score(function.cc, cov);
-            CrapFunction {
+            Some(CrapFunction {
                 symbol: function.symbol.clone(),
                 file: function.file.clone(),
                 cc: function.cc,
                 coverage: cov,
                 crap,
-            }
+            })
         })
         .collect();
 
@@ -46,6 +48,12 @@ pub fn evaluate(
             .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| a.file.cmp(&b.file))
             .then_with(|| a.symbol.cmp(&b.symbol))
+    });
+
+    let coverage_complete = functions.iter().all(|function| {
+        coverage
+            .and_then(|data| data.for_function_known(&function.file, &function.symbol, &files))
+            .is_some()
     });
 
     let crap_max = rows.first().map(|row| row.crap).unwrap_or(0.0);
@@ -63,34 +71,21 @@ pub fn evaluate(
         else {
             continue;
         };
-        // Coverage we never measured reads as 0% in the CRAP number (kept
-        // as-is), but the finding must not claim measured failure: warning
-        // plus an explicit note instead of error-level red.
-        let measured = coverage
-            .and_then(|data| data.for_function(&function.file, &function.symbol))
-            .is_some();
-        let severity = if measured { "error" } else { "warning" };
-        let unknown = if measured {
-            ""
-        } else {
-            "; coverage not measured"
-        };
         if exceeds_threshold(row.crap, threshold) {
             findings.push(Finding {
                 id: format!("crap:{}:{}", function.file, function.symbol),
                 rule: "crap.over_threshold".into(),
                 engine: "crap".into(),
-                severity: severity.into(),
+                severity: "error".into(),
                 file: function.file.clone(),
                 span: Some(function.span.clone()),
                 symbol: Some(function.symbol.clone()),
                 message: format!(
-                    "CRAP {} (CC={}, cov={}%) exceeds threshold {}{}",
+                    "CRAP {} (CC={}, cov={}%) exceeds threshold {}",
                     fmt_num(row.crap),
                     row.cc,
                     pct(row.coverage),
                     threshold,
-                    unknown,
                 ),
                 evidence: serde_json::json!({
                     "cc": row.cc,
@@ -107,13 +102,13 @@ pub fn evaluate(
                 id: format!("complexity:{}:{}", function.file, function.symbol),
                 rule: "complexity.untested".into(),
                 engine: "complexity".into(),
-                severity: severity.into(),
+                severity: "error".into(),
                 file: function.file.clone(),
                 span: Some(function.span.clone()),
                 symbol: Some(function.symbol.clone()),
                 message: format!(
-                    "CC {} with 0% coverage meets new_fn_untested_cc {}{}",
-                    row.cc, untested_cc, unknown,
+                    "CC {} with 0% coverage meets new_fn_untested_cc {}",
+                    row.cc, untested_cc,
                 ),
                 evidence: serde_json::json!({
                     "cc": row.cc,
@@ -129,6 +124,7 @@ pub fn evaluate(
     let worst: Vec<_> = rows.into_iter().take(10).collect();
     CrapOutcome {
         findings,
+        coverage_complete,
         worst,
         crap_max,
         over,
@@ -137,14 +133,22 @@ pub fn evaluate(
 }
 
 pub fn unmatched_count(functions: &[FunctionInfo], coverage: &CoverageData) -> u64 {
+    unmatched_functions(functions, coverage).len() as u64
+}
+
+pub fn unmatched_functions<'a>(
+    functions: &'a [FunctionInfo],
+    coverage: &'a CoverageData,
+) -> Vec<&'a FunctionInfo> {
+    let files: Vec<&str> = functions.iter().map(|item| item.file.as_str()).collect();
     functions
         .iter()
         .filter(|function| {
             coverage
-                .for_function(&function.file, &function.symbol)
+                .for_function_known(&function.file, &function.symbol, &files)
                 .is_none()
         })
-        .count() as u64
+        .collect()
 }
 
 fn pct(coverage: f64) -> i64 {
@@ -165,7 +169,7 @@ mod tests {
     use sc_core::Span;
 
     #[test]
-    fn uncovered_cc_12_matches_the_prd_example() {
+    fn unmeasured_coverage_does_not_create_crap_rows_or_findings() {
         let functions = vec![FunctionInfo {
             file: "src/parse.rs".into(),
             symbol: "parse_input".into(),
@@ -178,26 +182,38 @@ mod tests {
             cc: 12,
         }];
         let outcome = evaluate(&functions, None, 30, 15, |_| true);
-        assert_eq!(outcome.over, 1);
+        assert!(!outcome.coverage_complete);
+        assert_eq!(outcome.over, 0);
         assert_eq!(outcome.untested, 0);
-        assert!((outcome.crap_max - 156.0).abs() < 1e-9);
-        let finding = &outcome.findings[0];
-        assert_eq!(finding.rule, "crap.over_threshold");
-        assert_eq!(finding.id, "crap:src/parse.rs:parse_input");
-        // The CRAP number is kept, but unmeasured coverage downgrades the
-        // finding to a warning that says so.
-        assert_eq!(finding.severity, "warning");
-        assert_eq!(
-            finding.message,
-            "CRAP 156 (CC=12, cov=0%) exceeds threshold 30; coverage not measured"
-        );
-        assert_eq!(
-            finding.suggested_action.as_deref(),
-            Some("Add tests covering branches or split the function")
-        );
-        assert_eq!(finding.evidence["cc"], 12);
-        assert_eq!(finding.evidence["coverage"], 0.0);
-        assert_eq!(finding.evidence["crap"], 156.0);
+        assert_eq!(outcome.crap_max, 0.0);
+        assert!(outcome.worst.is_empty());
+        assert!(outcome.findings.is_empty());
+    }
+
+    #[test]
+    fn missing_function_record_is_not_treated_as_zero_coverage() {
+        let functions = vec![FunctionInfo {
+            file: "src/lib.rs".into(),
+            symbol: "wide".into(),
+            span: Span {
+                start_line: 1,
+                start_col: 1,
+                end_line: 20,
+                end_col: 2,
+            },
+            cc: 15,
+        }];
+        let coverage = CoverageData {
+            functions: Vec::new(),
+            line_rate: 0.5,
+        };
+        let outcome = evaluate(&functions, Some(&coverage), 30, 15, |_| true);
+        assert!(!outcome.coverage_complete);
+        assert_eq!(outcome.over, 0);
+        assert_eq!(outcome.untested, 0);
+        assert_eq!(outcome.crap_max, 0.0);
+        assert!(outcome.worst.is_empty());
+        assert!(outcome.findings.is_empty());
     }
 
     #[test]
@@ -222,10 +238,85 @@ mod tests {
             line_rate: 1.0,
         };
         let outcome = evaluate(&functions, Some(&coverage), 30, 15, |_| true);
+        assert!(outcome.coverage_complete);
         assert_eq!(outcome.over, 0);
         assert_eq!(outcome.untested, 0);
         assert!(outcome.findings.is_empty());
         assert!((outcome.crap_max - 11.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn measured_zero_coverage_over_threshold_stays_an_error() {
+        let functions = vec![FunctionInfo {
+            file: "src/lib.rs".into(),
+            symbol: "wide".into(),
+            span: Span {
+                start_line: 1,
+                start_col: 1,
+                end_line: 20,
+                end_col: 2,
+            },
+            cc: 12,
+        }];
+        let coverage = CoverageData {
+            functions: vec![crate::coverage::CovFunction {
+                file: "src/lib.rs".into(),
+                demangled: "crate::wide".into(),
+                coverage: 0.0,
+            }],
+            line_rate: 0.0,
+        };
+        let outcome = evaluate(&functions, Some(&coverage), 30, 15, |_| true);
+        assert!(outcome.coverage_complete);
+        assert_eq!(outcome.over, 1);
+        assert_eq!(outcome.findings[0].rule, "crap.over_threshold");
+        assert_eq!(outcome.findings[0].severity, "error");
+        assert!(!outcome.findings[0].message.contains("not measured"));
+    }
+
+    #[test]
+    fn partial_coverage_scores_measured_rows() {
+        let functions = vec![
+            FunctionInfo {
+                file: "src/lib.rs".into(),
+                symbol: "covered".into(),
+                span: Span {
+                    start_line: 1,
+                    start_col: 1,
+                    end_line: 20,
+                    end_col: 2,
+                },
+                cc: 12,
+            },
+            FunctionInfo {
+                file: "src/other.rs".into(),
+                symbol: "missing".into(),
+                span: Span {
+                    start_line: 1,
+                    start_col: 1,
+                    end_line: 20,
+                    end_col: 2,
+                },
+                cc: 12,
+            },
+        ];
+        let coverage = CoverageData {
+            functions: vec![crate::coverage::CovFunction {
+                file: "src/lib.rs".into(),
+                demangled: "crate::covered".into(),
+                coverage: 0.0,
+            }],
+            line_rate: 0.5,
+        };
+        let outcome = evaluate(&functions, Some(&coverage), 30, 15, |_| true);
+        assert!(!outcome.coverage_complete);
+        assert_eq!(outcome.over, 1);
+        assert_eq!(outcome.untested, 0);
+        assert_eq!(outcome.crap_max, 156.0);
+        assert_eq!(outcome.worst.len(), 1);
+        assert_eq!(outcome.worst[0].symbol, "covered");
+        assert_eq!(outcome.findings.len(), 1);
+        assert_eq!(outcome.findings[0].rule, "crap.over_threshold");
     }
 
     #[test]
@@ -241,15 +332,23 @@ mod tests {
             },
             cc: 15,
         }];
-        let outcome = evaluate(&functions, None, 10_000, 15, |_| true);
+        let coverage = CoverageData {
+            functions: vec![crate::coverage::CovFunction {
+                file: "src/lib.rs".into(),
+                demangled: "crate::wide".into(),
+                coverage: 0.0,
+            }],
+            line_rate: 0.0,
+        };
+        let outcome = evaluate(&functions, Some(&coverage), 10_000, 15, |_| true);
         assert_eq!(outcome.over, 0);
         assert_eq!(outcome.untested, 1);
         assert_eq!(outcome.findings.len(), 1);
         assert_eq!(outcome.findings[0].rule, "complexity.untested");
         assert_eq!(outcome.findings[0].id, "complexity:src/lib.rs:wide");
-        assert_eq!(outcome.findings[0].severity, "warning");
+        assert_eq!(outcome.findings[0].severity, "error");
         assert!(
-            outcome.findings[0]
+            !outcome.findings[0]
                 .message
                 .contains("coverage not measured"),
             "{}",

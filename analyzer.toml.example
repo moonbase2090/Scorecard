@@ -1,15 +1,18 @@
-# Scorecard configuration.
-# pack = "rust"   # rust, node, python, bash, go, java, csharp, php, cpp, web, or command
+# Scorecard configuration. Every key below is optional and shows its default.
+# Copy to analyzer.toml at the root of the project you analyze (the path given to
+# `sc analyze`, usually the repo root), or to ~/.config/sc/analyzer.toml. Parent and
+# sub-directories are not searched. --config PATH overrides both.
+# CLI flags override the matching settings. Reference: docs/reference/config.md
+
 # Set this when the repo contains more than one manifest. Same as --pack.
-# Copy to analyzer.toml in the project you analyze, or to ~/.config/sc/analyzer.toml.
-# CLI flags override the matching settings.
+# pack = "rust"   # rust, node, python, bash, go, java, csharp, php, cpp, web, or command
 
 [gates]
 # `spec` and `mutation` run only when `--spec` or `--mutation` asks for them.
 fail_on = ["types", "tests", "crap", "secrets", "lint"]
 crap_threshold = 30
-# Every src function at or above this CC with 0% coverage fails the crap
-# gate (`complexity.untested`). This is the whole src tree until --diff exists.
+# Every function in scope at or above this CC with 0% coverage fails the crap
+# gate (`complexity.untested`). With --diff, only new functions count.
 new_fn_untested_cc = 15
 
 [scope]
@@ -23,8 +26,19 @@ budget_seconds = 180
 
 [llm]
 enabled = false
+# ollama (default, local), cursor, or openai-compatible.
+# cursor sends the spec and files the agent reads to Cursor.
+# openai-compatible sends the spec and tool-read file text to base_url.
+# The API key stays in the named env var.
+backend = "ollama"
 endpoint = "http://127.0.0.1:11434/v1"
 model = "qwen2.5-coder"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+# Tool turns before the model must return a spec-gap verdict.
+# Used by the ollama and openai-compatible backends. 0 means the default.
+# The cursor backend is a single read-only call and ignores this.
+max_tool_rounds = 36
 
 [engines]
 coverage = true
@@ -43,7 +57,16 @@ enforce = false
 enforce = false
 disable = []
 
+# Rustup channel for check, test, coverage, and lint. When set, Cargo
+# uses this channel. Empty: a rust-toolchain.toml / rust-toolchain at or
+# above the project wins over an inherited RUSTUP_TOOLCHAIN; with no
+# file, the inherited variable is left alone.
+# toolchain = "1.85.0"
+
 [commands]
 # Empty skips lint. Non-zero exit is `lint.failed`.
-# Add `lint` to `gates.fail_on` to make that exit fail the process.
-lint = "cargo clippy -- -D warnings"
+# At a workspace root this runs `cargo clippy --workspace`; a member analysis
+# stays scoped to that package. Warnings do not fail the gate.
+# A crate that already denies warnings still fails. To deny them here:
+# lint = "cargo clippy --workspace -- -D warnings"
+lint = "cargo clippy --workspace"

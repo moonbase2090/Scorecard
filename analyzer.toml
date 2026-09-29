@@ -1,5 +1,17 @@
 # Dogfood config for this repository. `sc analyze .` loads it, including the
 # develop CI job, which does not pass `--config`.
+# Fixture trees under testdata/ are real projects in other languages, so an
+# unset pack is ambiguous. This repository is Rust.
+# Those fixtures contain placeholder tokens on purpose. They are not secrets
+# of this tree.
+pack = "rust"
+
+# Fail fixtures under testdata/ intentionally contain credentials so pack
+# and secrets regression tests can assert exit 1. Leave them out of dogfood
+# --diff runs; analyzing a fixture directory as its own root still sees them.
+[scope]
+exclude = ["target/**", "generated/**", "testdata/**"]
+
 # CRAP uses the defaults: threshold 30, untested CC 15.
 
 [gates]

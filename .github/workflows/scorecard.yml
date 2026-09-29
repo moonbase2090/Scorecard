@@ -19,7 +19,16 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Set up Rust for pull request source builds
+        if: github.event_name == 'pull_request'
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        if: github.event_name == 'pull_request'
       - uses: ./action
         with:
           format: all
           fail-on: ""
+          diff: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+          build-from-source: ${{ github.event_name == 'pull_request' }}

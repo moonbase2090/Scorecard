@@ -179,6 +179,7 @@ fn good_crate_passes_and_has_the_scorecard_shape() {
     assert!(card["mutation"]["score"].is_null());
     assert!(card["spec"]["gaps"].as_array().unwrap().is_empty());
     assert_eq!(card["metrics"]["hallucinated_imports"], 0);
+    assert_eq!(card["metrics"]["undeclared_dependencies"], 0);
     let skipped = card["engines_skipped"].as_array().unwrap();
     assert!(skipped.iter().any(|engine| engine == "llm"));
     assert!(skipped.iter().any(|engine| engine == "mutation"));
@@ -239,30 +240,139 @@ fn fake_dep_warns_on_hallucinated_import() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|finding| finding["rule"] == "sca.hallucinated_import")
+        .find(|finding| finding["rule"] == "sca.undeclared_dependency")
         .expect("advisory dependency finding");
     assert_eq!(finding["severity"], "warning");
     assert_eq!(finding["disposition"], "ask");
-    assert!(card["gates"]
+    let message = finding["message"].as_str().unwrap();
+    assert!(message.starts_with("Advisory:"), "{message}");
+    assert!(!message.contains("Strongly"), "{message}");
+    let reason = card["gates"]
         .as_array()
         .unwrap()
         .iter()
-        .any(|gate| { gate["id"] == "sca" && gate["enforced"] == false && gate["pass"] == false }));
-    assert!(card["metrics"]["hallucinated_imports"].as_u64().unwrap() >= 1);
+        .find(|gate| gate["id"] == "sca")
+        .unwrap();
+    assert_eq!(reason["enforced"], false);
+    assert_eq!(reason["pass"], false);
+    let reason = reason["reason"].as_str().unwrap();
+    assert!(reason.contains("undeclared"), "{reason}");
+    assert!(reason.contains("advisory"), "{reason}");
+    assert!(card["metrics"]["undeclared_dependencies"].as_u64().unwrap() >= 1);
+    assert_eq!(card["metrics"]["hallucinated_imports"], 0);
+}
+
+#[test]
+fn advisory_sca_findings_reduce_security_score_proportionally() {
+    let (code, card, _, stderr) = analyze(&["testdata/fake_dep_many"]);
+    assert_eq!(code, 0, "stderr={stderr}\ncard={card}");
+    let sca_count = card["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|finding| finding["rule"] == "sca.undeclared_dependency")
+        .count();
+    assert_eq!(sca_count, 16, "{card}");
+    let security = card["scores"]["security"].as_f64().unwrap();
+    assert!(
+        (security - 0.84).abs() < 1e-9,
+        "security={security}\n{card}"
+    );
+}
+
+#[test]
+fn partial_python_coverage_keeps_measured_crap() {
+    let (_code, card, _, _stderr) = analyze(&["testdata/python_cov_partial"]);
+    let rules = rules(&card);
+    assert!(
+        rules.contains(&"coverage.missing"),
+        "expected a coverage.missing finding\n{card}"
+    );
+    let crap = card["gates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|gate| gate["id"] == "crap")
+        .expect("crap gate");
+    assert_eq!(crap["pass"], false);
+    if rules.contains(&"crap.over_threshold") {
+        assert_eq!(crap["enforced"], true, "{card}");
+        assert!(
+            !card["crap"]["worst"].as_array().unwrap().is_empty(),
+            "worst CRAP must keep measured rows\n{card}"
+        );
+        assert!(
+            card["metrics"]["crap_max"].as_f64().unwrap() > 0.0,
+            "crap_max must not drop to 0 when measured rows exist\n{card}"
+        );
+        let reason = crap["reason"].as_str().unwrap_or("");
+        assert!(
+            reason.contains("not scored") || reason.contains("no coverage record"),
+            "reason={reason}\n{card}"
+        );
+    } else {
+        // Hosts without pytest never collect a coverage report, so there are no
+        // measured rows to keep. The gate must stay advisory and not invent zeros
+        // from assumed coverage.
+        assert_eq!(crap["enforced"], false, "{card}");
+        assert!(
+            card["crap"]["worst"].as_array().unwrap().is_empty(),
+            "{card}"
+        );
+        assert_eq!(card["metrics"]["crap_over_threshold"], 0);
+        let reason = crap["reason"].as_str().unwrap_or("");
+        assert!(
+            reason.contains("no coverage record") || reason.contains("not measured"),
+            "reason={reason}\n{card}"
+        );
+    }
 }
 
 #[test]
 fn local_mod_pub_use_is_not_hallucinated() {
     let (code, card, _, stderr) = analyze(&["testdata/local_mod"]);
     assert_eq!(code, 0, "stderr={stderr}\ncard={card}");
-    let hallucinated: Vec<_> = card["findings"]
+    let dependency: Vec<_> = card["findings"]
         .as_array()
         .unwrap()
         .iter()
-        .filter(|finding| finding["rule"] == "sca.hallucinated_import")
+        .filter(|finding| {
+            finding["rule"] == "sca.hallucinated_import"
+                || finding["rule"] == "sca.undeclared_dependency"
+        })
         .collect();
-    assert!(hallucinated.is_empty(), "{hallucinated:?}");
+    assert!(dependency.is_empty(), "{dependency:?}");
     assert_eq!(card["metrics"]["hallucinated_imports"].as_u64().unwrap(), 0);
+    assert_eq!(
+        card["metrics"]["undeclared_dependencies"].as_u64().unwrap(),
+        0
+    );
+}
+
+#[test]
+fn python_local_imports_are_not_dependency_findings() {
+    let (code, card, _, stderr) = analyze(&["testdata/py_local_import"]);
+    let dependency: Vec<_> = rules(&card)
+        .into_iter()
+        .filter(|rule| rule.starts_with("sca."))
+        .collect();
+    assert!(
+        dependency.is_empty(),
+        "{dependency:?}\nstderr={stderr}\n{card}"
+    );
+    assert_eq!(card["metrics"]["hallucinated_imports"], 0);
+    assert_eq!(card["metrics"]["undeclared_dependencies"], 0);
+    assert!(card["gates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|gate| { gate["id"] == "sca" && gate["pass"] == true && gate["enforced"] == false }));
+    // The scorecard job does not install Ruff. A missing linter fails `lint`
+    // and must not look like a dependency miss. When lint ran, the tree passes.
+    let lint_missing = rules(&card).contains(&"engine.unavailable");
+    if !lint_missing {
+        assert_eq!(code, 0, "stderr={stderr}\n{card}");
+    }
 }
 
 #[test]
@@ -306,12 +416,22 @@ fn pack_contract_passes_clean_trees_and_fails_secrets() {
         assert_eq!(code, 0, "{path} stderr={stderr}\ncard={card}");
         assert_eq!(card["verdict"], "pass", "{path}");
         assert_eq!(card["test_selection"], "full-suite", "{path}");
-        assert!(
-            card["gates"].as_array().unwrap().iter().any(|gate| {
-                gate["id"] == "crap" && gate["enforced"] == true && gate["pass"] == true
-            }),
-            "{path} {card}"
-        );
+        let crap_gate = card["gates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|gate| gate["id"] == "crap")
+            .unwrap_or_else(|| panic!("{path} has no CRAP gate: {card}"));
+        let coverage_missing = rules(&card)
+            .iter()
+            .any(|rule| matches!(*rule, "coverage.missing" | "coverage.unmatched"));
+        if coverage_missing {
+            assert_eq!(crap_gate["enforced"], false, "{path} {card}");
+            assert_eq!(crap_gate["pass"], false, "{path} {card}");
+        } else {
+            assert_eq!(crap_gate["enforced"], true, "{path} {card}");
+            assert_eq!(crap_gate["pass"], true, "{path} {card}");
+        }
     }
     let (code, card, _, stderr) = analyze(&["testdata/command_pack", "--pack", "command"]);
     assert_eq!(code, 0, "stderr={stderr}\ncard={card}");
@@ -339,6 +459,58 @@ fn pack_contract_passes_clean_trees_and_fails_secrets() {
     let (code, card, _, stderr) = analyze(&["testdata/command_pack_fail", "--pack", "command"]);
     assert_eq!(code, 1, "stderr={stderr}\ncard={card}");
     assert!(rules(&card).iter().any(|rule| rule.starts_with("secrets.")));
+}
+
+#[test]
+fn coverage_missing_does_not_blame_tests_that_never_ran() {
+    for path in [
+        "testdata/node_pack_fail",
+        "testdata/python_pack_fail",
+        "testdata/go_pack_fail",
+    ] {
+        let (_code, card, _, stderr) = analyze(&[path]);
+        let skipped = card["engines_skipped"].as_array().unwrap();
+        let tests_skipped = skipped.iter().any(|engine| engine == "tests");
+        if !tests_skipped {
+            // Host has the toolchain (e.g. go); this fixture cannot probe the skip path.
+            continue;
+        }
+        let messages: Vec<String> = card["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|finding| finding["rule"] == "coverage.missing")
+            .filter_map(|finding| finding["message"].as_str().map(str::to_string))
+            .collect();
+        assert!(
+            !messages.is_empty(),
+            "{path} expected coverage.missing when tests never ran, stderr={stderr}, card={card}"
+        );
+        for message in &messages {
+            assert!(
+                !message.contains("tests gate failed"),
+                "{path} blamed tests that never ran: {message}"
+            );
+            assert!(
+                !message.contains("tests did not pass"),
+                "{path} claimed tests ran: {message}"
+            );
+        }
+        for finding in card["findings"].as_array().unwrap() {
+            if finding["rule"] != "coverage.missing" {
+                continue;
+            }
+            let action = finding["suggested_action"].as_str().unwrap_or("");
+            assert!(
+                !action.is_empty(),
+                "{path} coverage.missing needs a suggested_action"
+            );
+            assert!(
+                !action.contains("tests gate failed"),
+                "{path} suggested_action must stay an action, got {action}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -539,4 +711,112 @@ fn all_format_writes_an_html_sibling() {
     for ext in ["json", "md", "sarif", "html"] {
         let _ = std::fs::remove_file(out.with_extension(ext));
     }
+}
+
+#[test]
+fn config_init_writes_a_starter_and_does_not_overwrite() {
+    let home = std::env::temp_dir().join(format!("sc-user-cfg-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).unwrap();
+    let cfg = home.join(".config/sc/analyzer.toml");
+    let path_out = sc_with_home(&home, &["config", "path"]);
+    assert_eq!(path_out.0, 0, "{}", path_out.2);
+    assert_eq!(path_out.1.trim(), cfg.display().to_string());
+    let wrote = sc_with_home(&home, &["config", "init"]);
+    assert_eq!(wrote.0, 0, "{}", wrote.2);
+    assert!(wrote.1.contains("Wrote "));
+    let starter = std::fs::read_to_string(&cfg).unwrap();
+    assert!(starter.starts_with("# Scorecard configuration."));
+    std::fs::write(&cfg, "keep\n").unwrap();
+    let kept = sc_with_home(&home, &["config", "init"]);
+    assert_eq!(kept.0, 0, "{}", kept.2);
+    assert!(kept.1.contains("left unchanged"));
+    assert!(kept.1.contains("sc config init --force"));
+    assert_eq!(std::fs::read_to_string(&cfg).unwrap(), "keep\n");
+    let forced = sc_with_home(&home, &["config", "init", "--force"]);
+    assert_eq!(forced.0, 0, "{}", forced.2);
+    assert!(std::fs::read_to_string(&cfg)
+        .unwrap()
+        .starts_with("# Scorecard configuration."));
+    let missing = Command::new(env!("CARGO_BIN_EXE_sc"))
+        .env_remove("HOME")
+        .args(["config", "init"])
+        .output()
+        .unwrap();
+    assert_ne!(missing.status.code(), Some(0));
+    let err = String::from_utf8_lossy(&missing.stderr);
+    assert!(err.contains("HOME is not set"), "{err}");
+    assert!(err.contains("sc config init"), "{err}");
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn cpp_missing_header_fails_the_types_gate() {
+    // A missing #include is a compile failure, not a missing compiler.
+    let (code, card, _, stderr) = analyze(&["testdata/cpp_missing_header"]);
+    assert_eq!(code, 1, "stderr={stderr}\ncard={card}");
+    let compile_gate = card["gates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|gate| gate["id"] == "types")
+        .expect("types gate missing");
+    assert!(
+        !compile_gate["pass"].as_bool().unwrap(),
+        "types gate should fail: {card}"
+    );
+    assert!(
+        compile_gate["enforced"].as_bool().unwrap(),
+        "types gate should be enforced: {card}"
+    );
+    let compile_findings: Vec<_> = card["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["engine"] == "compile" && f["severity"] == "error")
+        .collect();
+    assert!(
+        !compile_findings.is_empty(),
+        "expected a compile error finding: {card}"
+    );
+}
+
+#[test]
+fn node_not_found_output_fails_the_tests_gate() {
+    // A test script that outputs "not found" and exits 1 is a real test
+    // failure, not evidence that npm is missing.
+    let (code, card, _, stderr) = analyze(&["testdata/node_not_found_output"]);
+    assert_eq!(code, 1, "stderr={stderr}\ncard={card}");
+    let tests_gate = card["gates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|gate| gate["id"] == "tests")
+        .expect("tests gate missing");
+    assert!(
+        !tests_gate["pass"].as_bool().unwrap(),
+        "tests gate should fail: {card}"
+    );
+    assert!(
+        tests_gate["enforced"].as_bool().unwrap(),
+        "tests gate should be enforced: {card}"
+    );
+    let gate_reason = tests_gate["reason"].as_str().unwrap_or("");
+    assert!(
+        !gate_reason.contains("no test script"),
+        "reason should not say no test script: {card}"
+    );
+}
+
+fn sc_with_home(home: &std::path::Path, args: &[&str]) -> (i32, String, String) {
+    let output = Command::new(env!("CARGO_BIN_EXE_sc"))
+        .env("HOME", home)
+        .args(args)
+        .output()
+        .expect("spawn sc");
+    (
+        output.status.code().unwrap_or(101),
+        String::from_utf8_lossy(&output.stdout).to_string(),
+        String::from_utf8_lossy(&output.stderr).to_string(),
+    )
 }

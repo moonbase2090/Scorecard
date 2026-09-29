@@ -2,41 +2,89 @@
 //! Line coverage reports for the non-Rust packs.
 //!
 //! Each parser returns statement hits inside a function span. Missing reports
-//! leave CRAP at coverage 0.
+//! leave those functions without a CRAP row. Reports under `.sc/coverage` are
+//! removed before the tests run. A report written before this run started,
+//! such as Jacoco's under `target/`, is left from an earlier run and counts as
+//! missing.
 
 use std::collections::BTreeSet;
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use sc_graph::FunctionInfo;
 
 use crate::coverage::{CovFunction, CoverageData};
 
-pub fn load(pack: &str, root: &Path, functions: &[FunctionInfo]) -> Option<CoverageData> {
+/// When this run started, rounded down to the second, because some file
+/// systems store modification times in whole seconds.
+pub fn run_start() -> SystemTime {
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0);
+    UNIX_EPOCH + std::time::Duration::from_secs(secs)
+}
+
+/// Remove the reports this tool writes under `.sc/coverage`, so a pack whose
+/// coverage tool does not run cannot score an earlier run's report.
+pub fn clear(root: &Path) {
+    let dir = root.join(".sc").join("coverage");
+    for name in [
+        "coverage-final.json",
+        "csharp.cobertura.xml",
+        "clover.xml",
+        "cpp.info",
+        "pytest.json",
+    ] {
+        let _ = std::fs::remove_file(dir.join(name));
+    }
+    let _ = std::fs::remove_dir_all(dir.join("kcov"));
+}
+
+pub fn load(
+    pack: &str,
+    root: &Path,
+    functions: &[FunctionInfo],
+    since: SystemTime,
+) -> Option<CoverageData> {
+    let read = |path: &Path| read(path, since);
+    let extra = crate::poly_cc::coverage_paths(root, pack);
     let dir = root.join(".sc").join("coverage");
     match pack {
-        "node" => {
-            read(&dir.join("coverage-final.json")).and_then(|text| istanbul(&text, functions))
-        }
+        "node" => read(&dir.join("coverage-final.json"))
+            .and_then(|text| istanbul(&text, functions, &extra)),
         "java" => read(&root.join("target/site/jacoco/jacoco.xml"))
             .or_else(|| read(&root.join("build/reports/jacoco/test/jacocoTestReport.xml")))
-            .and_then(|text| jacoco(&text, functions)),
-        "csharp" => {
-            read(&dir.join("csharp.cobertura.xml")).and_then(|text| cobertura(&text, functions))
-        }
-        "php" => read(&dir.join("clover.xml")).and_then(|text| clover(&text, functions)),
-        "bash" => find_named(&dir, &["cobertura.xml", "cov.xml", "kcov.xml"], 0)
-            .and_then(|text| cobertura(&text, functions)),
-        "cpp" => read(&dir.join("cpp.info")).and_then(|text| lcov(&text, functions)),
+            .and_then(|text| jacoco(&text, functions, &extra)),
+        "csharp" => read(&dir.join("csharp.cobertura.xml"))
+            .and_then(|text| cobertura(&text, functions, &extra)),
+        "php" => read(&dir.join("clover.xml")).and_then(|text| clover(&text, functions, &extra)),
+        "bash" => find_named(&dir, &["cobertura.xml", "cov.xml", "kcov.xml"], 0, since)
+            .and_then(|text| cobertura(&text, functions, &extra)),
+        "cpp" => read(&dir.join("cpp.info")).and_then(|text| lcov(&text, functions, &extra)),
         "go" => None,
         _ => None,
     }
 }
 
-fn read(path: &Path) -> Option<String> {
+/// A report counts only when this run wrote it: modified after the run started
+/// and not in the future. Two seconds of slack cover a file system whose clock
+/// runs slightly ahead of this machine's.
+pub(crate) fn written_during_run(path: &Path, since: SystemTime) -> bool {
+    let Ok(written) = std::fs::metadata(path).and_then(|meta| meta.modified()) else {
+        return false;
+    };
+    written >= since && written <= SystemTime::now() + std::time::Duration::from_secs(2)
+}
+
+fn read(path: &Path, since: SystemTime) -> Option<String> {
+    if !written_during_run(path, since) {
+        return None;
+    }
     std::fs::read_to_string(path).ok()
 }
 
-fn find_named(dir: &Path, names: &[&str], depth: u32) -> Option<String> {
+fn find_named(dir: &Path, names: &[&str], depth: u32, since: SystemTime) -> Option<String> {
     if depth > 4 || !dir.is_dir() {
         return None;
     }
@@ -49,7 +97,7 @@ fn find_named(dir: &Path, names: &[&str], depth: u32) -> Option<String> {
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| names.contains(&name))
         {
-            if let Some(text) = read(&path) {
+            if let Some(text) = read(&path, since) {
                 return Some(text);
             }
         }
@@ -57,7 +105,7 @@ fn find_named(dir: &Path, names: &[&str], depth: u32) -> Option<String> {
     for entry in &entries {
         let path = entry.path();
         if path.is_dir() {
-            if let Some(text) = find_named(&path, names, depth + 1) {
+            if let Some(text) = find_named(&path, names, depth + 1, since) {
                 return Some(text);
             }
         }
@@ -65,40 +113,50 @@ fn find_named(dir: &Path, names: &[&str], depth: u32) -> Option<String> {
     None
 }
 
-pub fn istanbul(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
+pub fn istanbul(text: &str, functions: &[FunctionInfo], extra: &[String]) -> Option<CoverageData> {
     let value: serde_json::Value = serde_json::from_str(text).ok()?;
     let files = value.as_object()?;
+    let owners = owners(files.keys().map(|name| name.as_str()), functions, extra);
     Some(from_hits(functions, |function| {
-        let file = files
-            .iter()
-            .find(|(name, _)| file_match(name, &function.file))?;
-        let map = file.1.get("statementMap")?.as_object()?;
-        let hits = file.1.get("s")?.as_object()?;
         let mut hit = 0u32;
         let mut total = 0u32;
-        for (id, loc) in map {
-            let line = loc.pointer("/start/line")?.as_u64()? as u32;
-            if line < function.span.start_line || line > function.span.end_line {
+        let mut saw = false;
+        for (name, body) in files {
+            if !crate::coverage::report_owns(&owners, name, &function.file) {
                 continue;
             }
-            total += 1;
-            if hits.get(id).and_then(|count| count.as_u64()).unwrap_or(0) > 0 {
-                hit += 1;
+            let map = body.get("statementMap")?.as_object()?;
+            let hits = body.get("s")?.as_object()?;
+            for (id, loc) in map {
+                let line = loc.pointer("/start/line")?.as_u64()? as u32;
+                if line < function.span.start_line || line > function.span.end_line {
+                    continue;
+                }
+                saw = true;
+                total += 1;
+                if hits.get(id).and_then(|count| count.as_u64()).unwrap_or(0) > 0 {
+                    hit += 1;
+                }
             }
         }
-        (total > 0).then_some((hit, total))
+        saw.then_some((hit, total))
     }))
 }
 
-pub fn jacoco(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
+pub fn jacoco(text: &str, functions: &[FunctionInfo], extra: &[String]) -> Option<CoverageData> {
     let text = xml_lines(text);
+    let mut package = String::new();
     let mut source = String::new();
     let mut rows: Vec<(String, String, u32, u32)> = Vec::new();
     let mut method = String::new();
     for line in text.lines() {
         let trimmed = line.trim();
+        if trimmed.starts_with("<package ") {
+            package = attr(trimmed, "name").unwrap_or_default().replace('.', "/");
+            source.clear();
+        }
         if let Some(name) = attr(trimmed, "sourcefilename") {
-            source = name;
+            source = join_source(&package, &name);
         }
         if trimmed.starts_with("<method ") {
             method = attr(trimmed, "name").unwrap_or_default();
@@ -118,14 +176,22 @@ pub fn jacoco(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
     if rows.is_empty() {
         return None;
     }
+    let owners = owners(
+        rows.iter().map(|(file, _, _, _)| file.as_str()),
+        functions,
+        extra,
+    );
     Some(from_hits(functions, |function| {
         rows.iter()
-            .find(|(file, name, _, _)| file_match(file, &function.file) && *name == function.symbol)
+            .find(|(file, name, _, _)| {
+                crate::coverage::report_owns(&owners, file, &function.file)
+                    && *name == function.symbol
+            })
             .map(|(_, _, covered, missed)| (*covered, covered + missed))
     }))
 }
 
-pub fn cobertura(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
+pub fn cobertura(text: &str, functions: &[FunctionInfo], extra: &[String]) -> Option<CoverageData> {
     let text = xml_lines(text);
     let mut file = String::new();
     let mut lines: Vec<(String, u32, u32)> = Vec::new();
@@ -151,27 +217,24 @@ pub fn cobertura(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData>
     if lines.is_empty() {
         return None;
     }
+    let owners = owners(
+        lines.iter().map(|(name, _, _)| name.as_str()),
+        functions,
+        extra,
+    );
     Some(from_hits(functions, |function| {
-        let mut hit = 0u32;
-        let mut total = 0u32;
-        for (name, line, hits) in &lines {
-            if !file_match(name, &function.file) {
-                continue;
-            }
-            if *line < function.span.start_line || *line > function.span.end_line {
-                continue;
-            }
-            total += 1;
-            if *hits > 0 {
-                hit += 1;
-            }
-        }
-        (total > 0).then_some((hit, total))
+        sum_owned(
+            &owners,
+            &function.file,
+            function.span.start_line,
+            function.span.end_line,
+            &lines,
+        )
     }))
 }
 
-pub fn clover(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
-    cobertura(text, functions).or_else(|| {
+pub fn clover(text: &str, functions: &[FunctionInfo], extra: &[String]) -> Option<CoverageData> {
+    cobertura(text, functions, extra).or_else(|| {
         let text = xml_lines(text);
         let mut file = String::new();
         let mut lines: Vec<(String, u32, u32)> = Vec::new();
@@ -195,27 +258,24 @@ pub fn clover(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
         if lines.is_empty() {
             return None;
         }
+        let owners = owners(
+            lines.iter().map(|(name, _, _)| name.as_str()),
+            functions,
+            extra,
+        );
         Some(from_hits(functions, |function| {
-            let mut hit = 0u32;
-            let mut total = 0u32;
-            for (name, line, count) in &lines {
-                if !file_match(name, &function.file)
-                    || *line < function.span.start_line
-                    || *line > function.span.end_line
-                {
-                    continue;
-                }
-                total += 1;
-                if *count > 0 {
-                    hit += 1;
-                }
-            }
-            (total > 0).then_some((hit, total))
+            sum_owned(
+                &owners,
+                &function.file,
+                function.span.start_line,
+                function.span.end_line,
+                &lines,
+            )
         }))
     })
 }
 
-pub fn lcov(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
+pub fn lcov(text: &str, functions: &[FunctionInfo], extra: &[String]) -> Option<CoverageData> {
     let mut file = String::new();
     let mut lines: Vec<(String, u32, u32)> = Vec::new();
     for raw in text.lines() {
@@ -233,22 +293,19 @@ pub fn lcov(text: &str, functions: &[FunctionInfo]) -> Option<CoverageData> {
     if lines.is_empty() {
         return None;
     }
+    let owners = owners(
+        lines.iter().map(|(name, _, _)| name.as_str()),
+        functions,
+        extra,
+    );
     Some(from_hits(functions, |function| {
-        let mut hit = 0u32;
-        let mut total = 0u32;
-        for (name, line, hits) in &lines {
-            if !file_match(name, &function.file)
-                || *line < function.span.start_line
-                || *line > function.span.end_line
-            {
-                continue;
-            }
-            total += 1;
-            if *hits > 0 {
-                hit += 1;
-            }
-        }
-        (total > 0).then_some((hit, total))
+        sum_owned(
+            &owners,
+            &function.file,
+            function.span.start_line,
+            function.span.end_line,
+            &lines,
+        )
     }))
 }
 
@@ -259,14 +316,14 @@ fn from_hits(
     let mut covered = Vec::new();
     let mut seen = BTreeSet::new();
     for function in functions {
+        let Some((hit, total)) = hits(function).filter(|(_, total)| *total > 0) else {
+            continue;
+        };
         let key = format!("{}:{}", function.file, function.symbol);
         if !seen.insert(key) {
             continue;
         }
-        let coverage = match hits(function) {
-            Some((hit, total)) if total > 0 => f64::from(hit) / f64::from(total),
-            _ => 0.0,
-        };
+        let coverage = f64::from(hit) / f64::from(total);
         covered.push(CovFunction {
             file: function.file.clone(),
             demangled: function.symbol.clone(),
@@ -284,19 +341,44 @@ fn from_hits(
     }
 }
 
-fn file_match(report: &str, function_file: &str) -> bool {
-    let report = report.replace('\\', "/");
-    let function_file = function_file.replace('\\', "/");
-    if report == function_file || report.ends_with(&format!("/{function_file}")) {
-        return true;
+fn owners<'a>(
+    reports: impl IntoIterator<Item = &'a str>,
+    functions: &'a [FunctionInfo],
+    extra: &'a [String],
+) -> std::collections::HashMap<String, String> {
+    let known =
+        crate::coverage::merge_known(functions.iter().map(|item| item.file.as_str()), extra);
+    crate::coverage::file_owners(reports, &known)
+}
+
+fn sum_owned(
+    owners: &std::collections::HashMap<String, String>,
+    file: &str,
+    start: u32,
+    end: u32,
+    lines: &[(String, u32, u32)],
+) -> Option<(u32, u32)> {
+    let mut hit = 0u32;
+    let mut total = 0u32;
+    for (name, line, hits) in lines {
+        if !crate::coverage::report_owns(owners, name, file) || *line < start || *line > end {
+            continue;
+        }
+        total += 1;
+        if *hits > 0 {
+            hit += 1;
+        }
     }
-    // JaCoCo records the source basename. Cobertura sometimes does too.
-    let report_base = report.rsplit('/').next().unwrap_or(report.as_str());
-    let function_base = function_file
-        .rsplit('/')
-        .next()
-        .unwrap_or(function_file.as_str());
-    !report_base.is_empty() && report_base == function_base
+    (total > 0).then_some((hit, total))
+}
+
+fn join_source(package: &str, file: &str) -> String {
+    let package = package.trim_matches('/');
+    if package.is_empty() || file.contains('/') {
+        file.to_string()
+    } else {
+        format!("{package}/{file}")
+    }
 }
 
 fn xml_lines(text: &str) -> String {
@@ -352,11 +434,151 @@ mod tests {
     }
 
     #[test]
+    fn a_report_written_before_the_run_is_not_read() {
+        let root = std::env::temp_dir().join(format!("sc-stale-cov-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join(".sc/coverage")).unwrap();
+        std::fs::write(
+            root.join(".sc/coverage/coverage-final.json"),
+            r#"{"src/app.js":{"statementMap":{"0":{"start":{"line":2}}},"s":{"0":1}}}"#,
+        )
+        .unwrap();
+        let later = run_start() + std::time::Duration::from_secs(60);
+        assert!(load("node", &root, &[sample()], later).is_none());
+        let earlier = run_start() - std::time::Duration::from_secs(60);
+        assert!(load("node", &root, &[sample()], earlier).is_some());
+        clear(&root);
+        assert!(load("node", &root, &[sample()], earlier).is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_report_dated_in_the_future_is_not_read() {
+        let root = std::env::temp_dir().join(format!("sc-future-cov-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("target/site/jacoco")).unwrap();
+        let path = root.join("target/site/jacoco/jacoco.xml");
+        std::fs::write(&path, "<report/>").unwrap();
+        let since = run_start() - std::time::Duration::from_secs(60);
+        assert!(written_during_run(&path, since));
+        let future = SystemTime::now() + std::time::Duration::from_secs(3600 * 24 * 365);
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(future)
+            .unwrap();
+        assert!(!written_during_run(&path, since));
+        assert!(load("java", &root, &[sample_java()], since).is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn istanbul_counts_a_hit_and_a_miss() {
         let text = r#"{"src/app.js":{"statementMap":{"0":{"start":{"line":2}},"1":{"start":{"line":3}}},"s":{"0":1,"1":0}}}"#;
-        let data = istanbul(text, &[sample()]).unwrap();
-        let cov = data.for_function("src/app.js", "choose").unwrap();
+        let data = istanbul(text, &[sample()], &[]).unwrap();
+        let cov = data
+            .for_function_known("src/app.js", "choose", &[])
+            .unwrap();
         assert!((cov - 0.5).abs() < 1e-9, "{cov}");
+    }
+
+    #[test]
+    fn two_index_js_files_do_not_share_coverage() {
+        let other = FunctionInfo {
+            file: "other/index.js".into(),
+            ..sample()
+        };
+        let pkg = FunctionInfo {
+            file: "pkg/index.js".into(),
+            ..sample()
+        };
+        let text = r#"{"pkg/index.js":{"statementMap":{"0":{"start":{"line":2}},"1":{"start":{"line":3}}},"s":{"0":1,"1":1}}}"#;
+        let data = istanbul(text, &[pkg, other], &[]).unwrap();
+        assert!(data
+            .for_function_known("pkg/index.js", "choose", &[])
+            .is_some());
+        assert!(data
+            .for_function_known("other/index.js", "choose", &[])
+            .is_none());
+    }
+
+    #[test]
+    fn jacoco_joins_the_package_name_to_the_source_file() {
+        let text = r#"
+            <report>
+              <package name="com/a">
+                <class name="com/a/Util" sourcefilename="Util.java">
+                  <method name="choose"><counter type="LINE" missed="0" covered="2"/></method>
+                </class>
+              </package>
+              <package name="com/b">
+                <class name="com/b/Util" sourcefilename="Util.java">
+                  <method name="choose"><counter type="LINE" missed="2" covered="0"/></method>
+                </class>
+              </package>
+            </report>
+        "#;
+        let a = FunctionInfo {
+            file: "src/main/java/com/a/Util.java".into(),
+            ..sample_java()
+        };
+        let b = FunctionInfo {
+            file: "src/main/java/com/b/Util.java".into(),
+            ..sample_java()
+        };
+        let data = jacoco(text, &[a, b], &[]).unwrap();
+        let covered = data
+            .for_function_known("src/main/java/com/a/Util.java", "choose", &[])
+            .unwrap();
+        let missed = data
+            .for_function_known("src/main/java/com/b/Util.java", "choose", &[])
+            .unwrap();
+        assert!((covered - 1.0).abs() < 1e-9, "{covered}");
+        assert!(missed.abs() < 1e-9, "{missed}");
+    }
+
+    #[test]
+    fn lcov_does_not_add_hits_from_a_longer_path() {
+        let text =
+            "SF:helper/src/lib.rs\nDA:2,4\nend_of_record\nSF:src/lib.rs\nDA:2,0\nend_of_record\n";
+        let short = FunctionInfo {
+            file: "src/lib.rs".into(),
+            ..sample()
+        };
+        let long = FunctionInfo {
+            file: "helper/src/lib.rs".into(),
+            ..sample()
+        };
+        let data = lcov(text, &[short, long], &[]).unwrap();
+        let short_cov = data
+            .for_function_known("src/lib.rs", "choose", &[])
+            .unwrap();
+        let long_cov = data
+            .for_function_known("helper/src/lib.rs", "choose", &[])
+            .unwrap();
+        assert!(short_cov.abs() < 1e-9, "{short_cov}");
+        assert!((long_cov - 1.0).abs() < 1e-9, "{long_cov}");
+    }
+
+    #[test]
+    fn vendor_index_does_not_cover_the_root_file() {
+        let text = r#"{"vendor/index.js":{"statementMap":{"0":{"start":{"line":2}}},"s":{"0":8}},"index.js":{"statementMap":{"0":{"start":{"line":2}}},"s":{"0":0}}}"#;
+        let root = FunctionInfo {
+            file: "index.js".into(),
+            ..sample()
+        };
+        let vendor = FunctionInfo {
+            file: "vendor/index.js".into(),
+            ..sample()
+        };
+        let data = istanbul(text, &[root, vendor], &[]).unwrap();
+        let root_cov = data.for_function_known("index.js", "choose", &[]).unwrap();
+        let vendor_cov = data
+            .for_function_known("vendor/index.js", "choose", &[])
+            .unwrap();
+        assert!(root_cov.abs() < 1e-9, "{root_cov}");
+        assert!((vendor_cov - 1.0).abs() < 1e-9, "{vendor_cov}");
     }
 
     #[test]
@@ -368,17 +590,19 @@ mod tests {
               </method>
             </class>
         "#;
-        let data = jacoco(text, &[sample()]).unwrap();
-        let cov = data.for_function("src/app.js", "choose").unwrap();
+        let data = jacoco(text, &[sample()], &[]).unwrap();
+        let cov = data
+            .for_function_known("src/app.js", "choose", &[])
+            .unwrap();
         assert!((cov - 0.5).abs() < 1e-9, "{cov}");
     }
 
     #[test]
     fn jacoco_reads_a_single_line_report() {
         let text = r#"<?xml version="1.0"?><report name="cov-java"><class name="App" sourcefilename="App.java"><method name="&lt;init&gt;" desc="()V" line="1"><counter type="LINE" missed="1" covered="0"/></method><method name="choose" desc="(I)Ljava/lang/String;" line="3"><counter type="LINE" missed="1" covered="2"/></method></class></report>"#;
-        let data = jacoco(text, &[sample_java()]).unwrap();
+        let data = jacoco(text, &[sample_java()], &[]).unwrap();
         let cov = data
-            .for_function("src/main/java/App.java", "choose")
+            .for_function_known("src/main/java/App.java", "choose", &[])
             .unwrap();
         assert!((cov - (2.0 / 3.0)).abs() < 1e-9, "{cov}");
     }
@@ -391,8 +615,10 @@ mod tests {
               <line number="3" hits="0"/>
             </class>
         "#;
-        let data = cobertura(text, &[sample()]).unwrap();
-        let cov = data.for_function("src/app.js", "choose").unwrap();
+        let data = cobertura(text, &[sample()], &[]).unwrap();
+        let cov = data
+            .for_function_known("src/app.js", "choose", &[])
+            .unwrap();
         assert!((cov - 0.5).abs() < 1e-9, "{cov}");
     }
 
@@ -404,16 +630,20 @@ mod tests {
               <line num="3" count="0"/>
             </file>
         "#;
-        let data = clover(text, &[sample()]).unwrap();
-        let cov = data.for_function("src/app.js", "choose").unwrap();
+        let data = clover(text, &[sample()], &[]).unwrap();
+        let cov = data
+            .for_function_known("src/app.js", "choose", &[])
+            .unwrap();
         assert!((cov - 0.5).abs() < 1e-9, "{cov}");
     }
 
     #[test]
     fn lcov_uses_da_records() {
         let text = "SF:/src/src/app.js\nDA:2,1\nDA:3,0\nend_of_record\n";
-        let data = lcov(text, &[sample()]).unwrap();
-        let cov = data.for_function("src/app.js", "choose").unwrap();
+        let data = lcov(text, &[sample()], &[]).unwrap();
+        let cov = data
+            .for_function_known("src/app.js", "choose", &[])
+            .unwrap();
         assert!((cov - 0.5).abs() < 1e-9, "{cov}");
     }
 }

@@ -2,7 +2,7 @@ name: ci
 
 on:
   pull_request:
-    branches: [develop, main]
+    branches: [develop, main, docs/task-based-docs]
     paths-ignore:
       - "**/*.md"
       - "docs/**"

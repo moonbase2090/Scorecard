@@ -133,5 +133,7 @@ mod tests {
         assert!(is_excluded("target/debug/lib.rs", &patterns));
         assert!(is_excluded("generated/foo.rs", &patterns));
         assert!(!is_excluded("src/lib.rs", &patterns));
+        assert!(is_excluded("src/target/lib.rs", &patterns));
+        assert!(is_excluded("src/generated/proto.rs", &patterns));
     }
 }
