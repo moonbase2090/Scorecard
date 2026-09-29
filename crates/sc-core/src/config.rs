@@ -77,6 +77,9 @@ pub struct LlmConfig {
 pub struct EnginesConfig {
     pub coverage: bool,
     pub sca: bool,
+    /// When true, emit `perf.nested_loop` / `perf.clone_in_loop` on product
+    /// Rust (test modules stay skipped). Off by default.
+    pub perf: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -181,6 +184,7 @@ impl Default for EnginesConfig {
         Self {
             coverage: true,
             sca: true,
+            perf: false,
         }
     }
 }
@@ -263,6 +267,7 @@ mod tests {
         assert_eq!(config.gates.crap_threshold, 30);
         assert!(config.engines.coverage);
         assert!(config.engines.sca);
+        assert!(!config.engines.perf);
         assert!(config.pack.is_empty());
         assert_eq!(config.gates.new_fn_untested_cc, 15);
         assert!(!config.llm.enabled);

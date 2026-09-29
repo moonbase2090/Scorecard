@@ -7,7 +7,7 @@
 //!
 //! - correctness: `compile`, `tests`, `config`, `lint`, and `html` findings
 //! - maintainability: `complexity`, `crap`, and `coverage` findings
-//! - efficiency: `perf` findings (none in M1, so this stays 1.0)
+//! - efficiency: `perf` findings (only when `engines.perf` is on)
 //! - security: `secrets` and `sca` findings (`sca` warnings subtract 0.01)
 //! - a11y: `a11y` findings
 

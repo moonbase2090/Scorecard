@@ -12,7 +12,7 @@ use crate::secrets::secrets_in_text;
 
 /// Bump when what a parse records changes, so an upgrade does not reuse old
 /// facts for unchanged files.
-const CACHE_VERSION: u32 = 3;
+const CACHE_VERSION: u32 = 6;
 
 #[derive(Debug, Clone)]
 pub struct AnalyzedFile {
@@ -32,9 +32,13 @@ pub(crate) fn analyze_tree_with_workspace(
     root: &Path,
     exclude: &[String],
     toolchain_pin: &str,
+    perf_enabled: bool,
 ) -> (Vec<AnalyzedFile>, bool) {
     let (rels, workspace_root) = tree_source_rels(root, exclude, toolchain_pin);
-    (analyze_rels(root, &rels), workspace_root)
+    (
+        analyze_rels(root, &rels, perf_enabled, exclude, toolchain_pin),
+        workspace_root,
+    )
 }
 
 /// Count (and list) the same source paths a tree-scope run would analyze,
@@ -67,31 +71,84 @@ pub(crate) fn tree_source_rels(
     (rels, workspace_root)
 }
 
-pub fn analyze_rels(root: &Path, rels: &[String]) -> Vec<AnalyzedFile> {
+pub fn analyze_rels(
+    root: &Path,
+    rels: &[String],
+    perf_enabled: bool,
+    exclude: &[String],
+    toolchain_pin: &str,
+) -> Vec<AnalyzedFile> {
     let cache_path = cache_path(root);
     let mut cache = read_cache(&cache_path);
-    let mut out = Vec::new();
+    if cache.perf_enabled != perf_enabled {
+        cache = CacheDoc {
+            version: CACHE_VERSION,
+            perf_enabled,
+            files: BTreeMap::new(),
+        };
+    }
+    let mut texts: BTreeMap<String, String> = BTreeMap::new();
     for rel in rels {
         let path = root.join(rel);
-        let Ok(text) = fs::read_to_string(&path) else {
-            continue;
-        };
-        let hash = hash_text(&text);
-        if let Some(hit) = cache.files.get(rel) {
-            if hit.hash == hash {
-                out.push(hit.to_analyzed(rel));
-                continue;
-            }
+        if let Ok(text) = fs::read_to_string(&path) {
+            texts.insert(rel.clone(), text);
         }
-        let analyzed = parse_file(rel, &text);
+    }
+    let (cfg_test_files, cfg_test_prefixes) = if perf_enabled {
+        let (tree_rels, _) = tree_source_rels(root, exclude, toolchain_pin);
+        cfg_test_coverage_from_tree(root, &tree_rels)
+    } else {
+        (
+            std::collections::BTreeSet::new(),
+            std::collections::BTreeSet::new(),
+        )
+    };
+    let mut out = Vec::new();
+    for (rel, text) in &texts {
+        let hash = hash_text(text);
+        // Always record unfiltered perf when enabled so a later cfg(test)→product
+        // declaration change does not leave a cleared cache entry.
+        let analyzed = if let Some(hit) = cache.files.get(rel) {
+            if hit.hash == hash {
+                hit.to_analyzed(rel)
+            } else {
+                parse_file(rel, text, perf_enabled)
+            }
+        } else {
+            parse_file(rel, text, perf_enabled)
+        };
         cache
             .files
             .insert(rel.clone(), CachedFile::from_analyzed(&hash, &analyzed));
-        out.push(analyzed);
+        let mut returned = analyzed;
+        if sc_graph::is_cfg_test_only(rel, &cfg_test_files, &cfg_test_prefixes) {
+            returned.perf.clear();
+        }
+        out.push(returned);
     }
+    cache.perf_enabled = perf_enabled;
     let _ = write_cache(&cache_path, &cache);
     out.sort_by(|a, b| a.rel.cmp(&b.rel));
     out
+}
+
+/// Declared out-of-line `#[cfg(test)]` module files and their child-directory
+/// prefixes, discovered from the whole tree (not only the analyzed subset).
+fn cfg_test_coverage_from_tree(
+    root: &Path,
+    tree_rels: &[String],
+) -> (
+    std::collections::BTreeSet<String>,
+    std::collections::BTreeSet<String>,
+) {
+    let mut declared = Vec::new();
+    for rel in tree_rels {
+        let Ok(text) = fs::read_to_string(root.join(rel)) else {
+            continue;
+        };
+        declared.extend(sc_graph::out_of_line_cfg_test_paths_from_source(&text, rel));
+    }
+    sc_graph::cfg_test_coverage(declared)
 }
 
 fn member_src_dirs(meta: Option<&CargoMetadata>) -> Vec<PathBuf> {
@@ -163,9 +220,9 @@ struct CargoPackage {
     manifest_path: String,
 }
 
-fn parse_file(rel: &str, text: &str) -> AnalyzedFile {
+fn parse_file(rel: &str, text: &str, perf_enabled: bool) -> AnalyzedFile {
     let loc = text.lines().count() as u64;
-    let facts = sc_graph::inspect_source(text, rel);
+    let facts = sc_graph::inspect_source(text, rel, perf_enabled);
     let (functions, imports, perf, items, local_names) = match facts {
         Some(facts) => (
             facts.functions,
@@ -221,6 +278,10 @@ fn write_cache(path: &Path, doc: &CacheDoc) -> std::io::Result<()> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CacheDoc {
     version: u32,
+    /// Matches `engines.perf` for the run that wrote this cache. A mismatch
+    /// drops the file entries so enabling perf re-scans.
+    #[serde(default)]
+    perf_enabled: bool,
     files: BTreeMap<String, CachedFile>,
 }
 
@@ -228,6 +289,7 @@ impl Default for CacheDoc {
     fn default() -> Self {
         Self {
             version: CACHE_VERSION,
+            perf_enabled: false,
             files: BTreeMap::new(),
         }
     }
@@ -278,19 +340,175 @@ mod tests {
     use super::*;
 
     #[test]
+    fn out_of_line_cfg_test_file_skips_perf() {
+        let dir = std::env::temp_dir().join(format!("sc-cfg-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::write(
+            dir.join("src/lib.rs"),
+            "pub fn product(rows: &[String]) -> Vec<String> {\n    let mut out = Vec::new();\n    for row in rows { out.push(row.clone()); }\n    out\n}\n\n#[cfg(test)]\nmod helpers;\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.join("src/helpers.rs"),
+            "pub fn helper(rows: &[String]) -> Vec<String> {\n    let mut out = Vec::new();\n    for row in rows {\n        for _ in 0..1 { out.push(row.clone()); }\n    }\n    out\n}\n",
+        )
+        .unwrap();
+        let files = analyze_tree_with_workspace(&dir, &[], "", true).0;
+        let helpers = files
+            .iter()
+            .find(|file| file.rel == "src/helpers.rs")
+            .expect("helpers.rs analyzed");
+        assert!(
+            helpers.perf.is_empty(),
+            "out-of-line cfg(test) file must not get perf hits: {:?}",
+            helpers.perf
+        );
+        let product = files
+            .iter()
+            .find(|file| file.rel == "src/lib.rs")
+            .expect("lib.rs analyzed");
+        assert!(
+            product
+                .perf
+                .iter()
+                .any(|hit| hit.symbol == "product" && hit.rule == "perf.clone_in_loop"),
+            "product still scanned: {:?}",
+            product.perf
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cfg_test_module_child_files_are_skipped() {
+        let dir = std::env::temp_dir().join(format!("sc-cfg-child-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("src/helpers")).unwrap();
+        fs::write(
+            dir.join("src/lib.rs"),
+            "pub fn product(rows: &[String]) -> Vec<String> {\n    let mut out = Vec::new();\n    for row in rows { out.push(row.clone()); }\n    out\n}\n\n#[cfg(test)]\nmod helpers;\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.join("src/helpers.rs"),
+            "pub mod fixtures;\npub fn helper(rows: &[String]) -> Vec<String> {\n    let mut out = Vec::new();\n    for row in rows { out.push(row.clone()); }\n    out\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.join("src/helpers/fixtures.rs"),
+            "pub fn fixture(rows: &[String]) -> Vec<String> {\n    let mut out = Vec::new();\n    for row in rows {\n        for _ in 0..1 { out.push(row.clone()); }\n    }\n    out\n}\n",
+        )
+        .unwrap();
+        let files = analyze_tree_with_workspace(&dir, &[], "", true).0;
+        let fixtures = files
+            .iter()
+            .find(|file| file.rel == "src/helpers/fixtures.rs")
+            .expect("fixtures.rs analyzed");
+        assert!(
+            fixtures.perf.is_empty(),
+            "child of cfg(test) module must not get perf hits: {:?}",
+            fixtures.perf
+        );
+        let helpers = files
+            .iter()
+            .find(|file| file.rel == "src/helpers.rs")
+            .expect("helpers.rs");
+        assert!(helpers.perf.is_empty(), "{:?}", helpers.perf);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn diff_only_test_module_file_stays_clean() {
+        let dir = std::env::temp_dir().join(format!("sc-cfg-diff-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"cfg_diff\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.join("src/lib.rs"),
+            "pub fn product(rows: &[String]) -> Vec<String> {\n    let mut out = Vec::new();\n    for row in rows { out.push(row.clone()); }\n    out\n}\n\n#[cfg(test)]\nmod helpers;\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.join("src/helpers.rs"),
+            "pub fn helper(rows: &[String]) -> Vec<String> {\n    let mut out = Vec::new();\n    for row in rows { out.push(row.clone()); }\n    out\n}\n",
+        )
+        .unwrap();
+        // Analyze only helpers.rs (as --diff would when lib.rs is unchanged).
+        let files = analyze_rels(&dir, &["src/helpers.rs".into()], true, &[], "");
+        assert_eq!(files.len(), 1);
+        assert!(
+            files[0].perf.is_empty(),
+            "diff of only the test-only file must stay clean: {:?}",
+            files[0].perf
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cache_keeps_hits_when_cfg_test_becomes_product() {
+        let dir = std::env::temp_dir().join(format!("sc-cfg-cache-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::write(
+            dir.join("src/lib.rs"),
+            "pub fn product() {}\n\n#[cfg(test)]\nmod helpers;\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.join("src/helpers.rs"),
+            "pub fn helper(rows: &[String]) -> Vec<String> {\n    let mut out = Vec::new();\n    for row in rows { out.push(row.clone()); }\n    out\n}\n",
+        )
+        .unwrap();
+        let first = analyze_tree_with_workspace(&dir, &[], "", true).0;
+        let helpers = first
+            .iter()
+            .find(|file| file.rel == "src/helpers.rs")
+            .unwrap();
+        assert!(
+            helpers.perf.is_empty(),
+            "cfg(test) first pass: {:?}",
+            helpers.perf
+        );
+        // Warm cache stored unfiltered hits; flip declaration to product.
+        fs::write(
+            dir.join("src/lib.rs"),
+            "pub fn product() {}\n\npub mod helpers;\n",
+        )
+        .unwrap();
+        let second = analyze_tree_with_workspace(&dir, &[], "", true).0;
+        let helpers = second
+            .iter()
+            .find(|file| file.rel == "src/helpers.rs")
+            .unwrap();
+        assert!(
+            helpers
+                .perf
+                .iter()
+                .any(|hit| hit.symbol == "helper" && hit.rule == "perf.clone_in_loop"),
+            "after cfg(test)→product, warm cache must still yield hits: {:?}",
+            helpers.perf
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn second_read_reuses_the_cache() {
         let dir = std::env::temp_dir().join(format!("sc-cache-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("src")).unwrap();
         fs::write(dir.join("src/lib.rs"), "pub fn cached() -> i32 { 1 }\n").unwrap();
-        let first = analyze_tree_with_workspace(&dir, &[], "").0;
+        let first = analyze_tree_with_workspace(&dir, &[], "", false).0;
         assert_eq!(first[0].functions[0].symbol, "cached");
         fs::write(
             dir.join(".sc/cache/parse-v2.json"),
             fs::read_to_string(dir.join(".sc/cache/parse-v2.json")).unwrap(),
         )
         .unwrap();
-        let second = analyze_tree_with_workspace(&dir, &[], "").0;
+        let second = analyze_tree_with_workspace(&dir, &[], "", false).0;
         assert_eq!(second[0].functions[0].symbol, "cached");
         let _ = fs::remove_dir_all(&dir);
     }
@@ -301,7 +519,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("sc-ws-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         copy_fixture(&src, &dir);
-        let files = analyze_tree_with_workspace(&dir, &[], "").0;
+        let files = analyze_tree_with_workspace(&dir, &[], "", false).0;
         let rels: Vec<&str> = files.iter().map(|file| file.rel.as_str()).collect();
         assert!(
             rels.iter()
