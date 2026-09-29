@@ -46,7 +46,8 @@ struct AnalyzeArgs {
     /// Also write the report to this path.
     #[arg(long)]
     out: Option<PathBuf>,
-    /// Comma-separated gates that fail the run. Default: types,tests,crap,secrets,lint.
+    /// Gates that set exit 1 when they fail. The report verdict still reflects every enforced gate.
+    /// Default: types,tests,crap,secrets,lint.
     #[arg(long, value_name = "LIST")]
     fail_on: Option<String>,
     /// Pack override when several manifests match: rust, node, python, bash, go, java, csharp, php, cpp, web, or command.

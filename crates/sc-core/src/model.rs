@@ -104,7 +104,9 @@ impl Scores {
 pub struct Gate {
     pub id: String,
     pub pass: bool,
-    /// When false, the gate is reported and does not fail the process.
+    /// When false, the gate does not affect the report verdict or exit code.
+    /// When true, a failure affects the report verdict; `--fail-on` separately
+    /// selects which enforced failures set exit 1.
     #[serde(default = "enforced_gate")]
     pub enforced: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]

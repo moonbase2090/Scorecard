@@ -1,6 +1,6 @@
 # Gates
 
-A gate is a pass or fail check. Enforced gates decide the exit status; advisory gates are reported only. `gates.fail_on` (or `--fail-on`) is the list of enforced gates.
+A gate is a pass or fail check. Any failed enforced gate makes the report verdict `FAIL`; advisory gates are reported without affecting the verdict. `gates.fail_on` (or `--fail-on`) selects which enforced gate failures set process exit 1. Naming an advisory gate can enforce it; leaving an already enforced gate out of the exit list does not hide its failure from the report.
 
 | Gate | Enforced by default | Fails when | Rules |
 |---|---|---|---|

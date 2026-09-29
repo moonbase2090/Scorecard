@@ -714,6 +714,58 @@ fn all_format_writes_an_html_sibling() {
 }
 
 #[test]
+fn fail_on_changes_exit_code_without_hiding_enforced_failures_in_any_report() {
+    let out = std::env::temp_dir().join(format!("sc-all-verdict-{}.html", std::process::id()));
+    let out_s = out.to_string_lossy().to_string();
+    let (code, stdout, stderr) = analyze_raw(&[
+        "testdata/secret_token",
+        "--format",
+        "all",
+        "--out",
+        &out_s,
+        "--fail-on",
+        "",
+    ]);
+    assert_eq!(code, 0, "stderr={stderr}\n{stdout}");
+
+    let markdown_start = stdout.find("\n# scorecard\n").expect("markdown output");
+    let card: serde_json::Value = serde_json::from_str(&stdout[..markdown_start]).unwrap();
+    assert_eq!(card["verdict"], "fail", "{card}");
+    let secrets_gate = card["gates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|gate| gate["id"] == "secrets")
+        .expect("secrets gate");
+    assert_eq!(secrets_gate["pass"], false, "{card}");
+    assert_eq!(secrets_gate["enforced"], true, "{card}");
+
+    let markdown = std::fs::read_to_string(out.with_extension("md")).unwrap();
+    assert!(markdown.contains("**Verdict:** fail"), "{markdown}");
+    let html = std::fs::read_to_string(out.with_extension("html")).unwrap();
+    assert!(
+        html.contains("<span class=\"verdict fail\">FAIL</span>"),
+        "{html}"
+    );
+    let sarif: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(out.with_extension("sarif")).unwrap())
+            .unwrap();
+    assert_eq!(sarif["runs"][0]["properties"]["scorecardVerdict"], "fail");
+    let sarif_secrets_gate = sarif["runs"][0]["properties"]["scorecardGates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|gate| gate["id"] == "secrets")
+        .expect("SARIF secrets gate");
+    assert_eq!(sarif_secrets_gate["pass"], false);
+    assert_eq!(sarif_secrets_gate["enforced"], true);
+
+    for ext in ["json", "md", "sarif", "html"] {
+        let _ = std::fs::remove_file(out.with_extension(ext));
+    }
+}
+
+#[test]
 fn config_init_writes_a_starter_and_does_not_overwrite() {
     let home = std::env::temp_dir().join(format!("sc-user-cfg-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&home);

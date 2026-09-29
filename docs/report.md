@@ -14,7 +14,7 @@ The header: `sc` version, analyzed path, [pack](packs.md), git commit, `clean` o
 PASS  2 advisory gates failing
 ```
 
-The verdict. `PASS` means every enforced gate passed. Advisory gates can still fail under a `PASS`; the note counts them. `FAIL` means an enforced gate failed and the exit status is 1.
+The verdict. `PASS` means every enforced gate passed. Advisory gates can still fail under a `PASS`; the note counts them. `FAIL` means at least one enforced gate failed. `--fail-on` controls the process exit code, so it can be 0 while the report says `FAIL` if none of the selected gates failed. Naming an advisory gate can enforce it; omitting an already enforced gate from the exit list does not change the report verdict.
 
 ```text
 gates
@@ -23,7 +23,7 @@ gates
   ✗  sca              advisory  16 undeclared dependencies (advisory; does not fail the process)
 ```
 
-One row per gate: result, `enforced` or `advisory`, and the reason when it did not pass. Only enforced gates change the exit status. [Gates](reference/gates.md) lists them and how to enforce an advisory one.
+One row per gate: result, `enforced` or `advisory`, and the reason when it did not pass. Enforced gates determine the report verdict. `--fail-on` selects which enforced failures set exit 1. [Gates](reference/gates.md) lists the gates and how to enforce an advisory one.
 
 ```text
 scores
@@ -63,7 +63,7 @@ Each finding: severity, [rule id](reference/rules.md), location, and a suggested
 ```text
 engines run: compile, tests, crap, sca, secrets, lint
 engines skipped: complexity, mutation, llm
-exit 0: gates passed
+exit 0: enforced gates passed
 ```
 
 Which checks ran, which did not, and the exit status. An engine is skipped when its tool is missing or when it is off by default (`mutation`, `llm`, `spec`). A skip caused by a missing tool also appears as an `engine.unavailable` finding with the reason.
@@ -93,6 +93,8 @@ Top-level fields of `.sc/last-scorecard.json` and `--format json`:
 | `findings` | `rule`, `engine`, `severity`, `file`, `span`, `symbol`, `message`, `suggested_action`, `disposition`, `evidence` |
 | `engines_run`, `engines_skipped` | As in the terminal footer |
 | `runs` | Every command `sc` ran, with exit code and duration |
+
+`verdict` is `fail` when any enforced gate fails. The `--fail-on` list selects the process exit code; it does not hide failures from gates that remain enforced.
 
 List the findings an agent should fix:
 

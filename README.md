@@ -53,10 +53,10 @@ findings
 engines run: compile, tests, coverage, complexity, crap, sca, secrets, perf, lint
 engines skipped: spec, mutation, llm
 duration: 0.7s
-exit 0: gates passed
+exit 0: enforced gates passed
 ```
 
-Exit status: `0` the enforced gates passed, `1` an enforced gate failed, `2` `sc` could not run. [Reading the report](docs/report.md) explains every section.
+Exit status: `1` a gate selected by `--fail-on` failed; `0` none did; `2` `sc` could not run. The report still shows `FAIL` when any enforced gate fails, even if `--fail-on` keeps the process exit code at 0. [Reading the report](docs/report.md) explains every section.
 
 `sc analyze . --diff BASE` scores only what changed against that git ref. When the project is a subdirectory of a larger repository, the changed paths are still relative to the project (`src/a.rs`).
 
