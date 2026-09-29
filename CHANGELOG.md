@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Perf analysis skips test modules and `#[cfg(test)]` modules. A nested loop and a collecting `.clone()` are still not findings.
 - A finding with disposition `ignore` stays in the JSON report and is left out of the SARIF upload. A `perf.*` rule is disposition `ignore`. The analyzer does not emit a performance finding, so a normal run's report and SARIF are unchanged.
 - When `analyzer.toml` names a Rust channel, check, test, coverage, lint, and mutation use it. A `rust-toolchain.toml` / `rust-toolchain` at or above the project clears an inherited `RUSTUP_TOOLCHAIN` so rustup reads the file; with no pin, the inherited variable is left alone.
 - On a `--diff` run (pull-request reports), the scorecard names the changed paths and adds a one-line count of the other source paths still in the tree. Terminal, markdown, and HTML show the same count.
