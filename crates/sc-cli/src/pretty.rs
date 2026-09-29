@@ -622,16 +622,9 @@ mod tests {
     }
 
     #[test]
-    fn crap_rows_show_dashes_when_coverage_was_not_measured() {
+    fn unmeasured_coverage_leaves_the_crap_table_empty() {
         let mut card = Scorecard::skeleton("demo", 30);
         card.verdict = "pass".into();
-        card.crap.worst = vec![CrapFunction {
-            symbol: "classify".into(),
-            file: "src/lib.rs".into(),
-            cc: 11,
-            coverage: 0.0,
-            crap: 132.0,
-        }];
         let opts = PrettyOpts {
             color: false,
             width: 120,
@@ -641,8 +634,15 @@ mod tests {
         };
         let text = to_pretty(&card, &opts);
         assert!(text.contains("coverage not measured: no CRAP scores, nothing treated as 0%"));
-        assert!(text.contains("   132   11    --  classify"));
+        assert!(text.contains("  (none)"));
         card.engines_run.push("coverage".into());
+        card.crap.worst = vec![CrapFunction {
+            symbol: "classify".into(),
+            file: "src/lib.rs".into(),
+            cc: 11,
+            coverage: 0.0,
+            crap: 132.0,
+        }];
         let text = to_pretty(&card, &opts);
         assert!(text.contains("   132   11    0%  classify"));
         assert!(!text.contains("not measured"));

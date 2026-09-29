@@ -611,7 +611,14 @@ fn crap(out: &mut String, card: &Scorecard) {
     out.push_str("<table>");
     out.push_str("<tr><th>crap</th><th>cc</th><th>coverage</th><th>symbol</th><th>file</th></tr>");
     if card.crap.worst.is_empty() {
-        out.push_str("<tr><td colspan=\"5\" style=\"color:var(--dim)\">No functions over the reporting window.</td></tr>");
+        let empty = if measured {
+            "No functions over the reporting window."
+        } else {
+            "No CRAP scores: coverage was not measured."
+        };
+        out.push_str("<tr><td colspan=\"5\" style=\"color:var(--dim)\">");
+        out.push_str(empty);
+        out.push_str("</td></tr>");
     }
     for row in &card.crap.worst {
         let over = row.crap > card.crap.threshold as f64;
@@ -1247,10 +1254,11 @@ mod tests {
     fn html_says_coverage_not_measured_instead_of_zero() {
         let mut c = card();
         c.engines_run.retain(|engine| engine != "coverage");
+        c.crap.worst.clear();
         let html = to_html(&c);
         assert!(html.contains("<b>—</b><span>coverage not measured</span>"));
-        assert!(html.contains("<span class=\"cov\">not measured</span>"));
         assert!(html.contains("nothing is treated as 0% coverage"));
+        assert!(html.contains("No CRAP scores: coverage was not measured."));
         assert!(!html.contains("<span>coverage</span>"));
         assert!(html.contains("<span>crap max</span>"));
         assert!(html.contains("<span>over threshold</span>"));

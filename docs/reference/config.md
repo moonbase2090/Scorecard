@@ -35,7 +35,7 @@ Only the first file found is read. Command-line flags override the matching keys
 
 | Key | Default | Meaning |
 |---|---|---|
-| `engines.coverage` | `true` | Run tests with coverage. `false` skips coverage; CRAP then assumes no coverage. |
+| `engines.coverage` | `true` | Run tests with coverage. `false` skips coverage; no CRAP scores are reported and nothing is treated as 0% coverage. |
 | `engines.sca` | `true` | Check that imports are declared dependencies. |
 
 ### `[commands]`

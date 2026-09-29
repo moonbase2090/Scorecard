@@ -14,7 +14,7 @@ or activate your own virtualenv, with pytest installed, before running `sc`.
 
 ## Coverage not measured
 
-The `crap` gate shows `advisory` with `coverage was not measured`, and COV shows `--`. Tests did not run, or the coverage tool for the pack is missing:
+The `crap` gate shows `advisory` with `some functions have no coverage record and were not scored`, and the worst-CRAP table is empty (`(none)`). A `coverage.missing` warning says coverage was not measured and how to collect it. Tests did not run, or the coverage tool for the pack is missing:
 
 | Pack | Install |
 |---|---|
