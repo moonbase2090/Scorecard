@@ -37,6 +37,7 @@ pub fn select(
     diff_head: Option<&str>,
     path_list: &[String],
     toolchain_pin: &str,
+    perf_enabled: bool,
 ) -> Result<Selection, String> {
     if diff_base.is_some() && !path_list.is_empty() {
         return Err("pass either --diff or --paths, not both".into());
@@ -49,6 +50,7 @@ pub fn select(
             diff_head,
             crate::facts::is_workspace_root(root, toolchain_pin),
             toolchain_pin,
+            perf_enabled,
         );
     }
     if !path_list.is_empty() {
@@ -56,10 +58,11 @@ pub fn select(
             root,
             path_list,
             crate::facts::is_workspace_root(root, toolchain_pin),
+            perf_enabled,
         ));
     }
     let (files, workspace_root) =
-        crate::facts::analyze_tree_with_workspace(root, exclude, toolchain_pin);
+        crate::facts::analyze_tree_with_workspace(root, exclude, toolchain_pin, perf_enabled);
     Ok(tree_like("tree", files, workspace_root))
 }
 
@@ -86,13 +89,22 @@ fn tree_like(mode: &str, files: Vec<AnalyzedFile>, workspace_root: bool) -> Sele
     }
 }
 
-fn select_paths(root: &Path, path_list: &[String], workspace_root: bool) -> Selection {
+fn select_paths(
+    root: &Path,
+    path_list: &[String],
+    workspace_root: bool,
+    perf_enabled: bool,
+) -> Selection {
     let rels: Vec<String> = path_list
         .iter()
         .map(|path| normalize_rel(root, path))
         .filter(|rel| rel.ends_with(".rs"))
         .collect();
-    tree_like("paths", analyze_rels(root, &rels), workspace_root)
+    tree_like(
+        "paths",
+        analyze_rels(root, &rels, perf_enabled),
+        workspace_root,
+    )
 }
 
 fn select_diff(
@@ -102,6 +114,7 @@ fn select_diff(
     head: Option<&str>,
     workspace_root: bool,
     toolchain_pin: &str,
+    perf_enabled: bool,
 ) -> Result<Selection, String> {
     let base = resolve_base(root, base)?;
     let deltas = diff_files(root, &base, head)?;
@@ -111,7 +124,7 @@ fn select_diff(
         .filter(|delta| !exclude_hit(&delta.rel) && delta.rel.contains("src/"))
         .collect();
     let rels: Vec<String> = deltas.iter().map(|delta| delta.rel.clone()).collect();
-    let files = analyze_rels(root, &rels);
+    let files = analyze_rels(root, &rels, perf_enabled);
     let mut crap_functions = Vec::new();
     let mut new_symbols = BTreeSet::new();
     let mut loc_changed = 0u64;
@@ -359,7 +372,7 @@ mod tests {
             "pub fn old() -> i32 { 1 }\npub fn added() -> i32 { 2 }\n",
         )
         .unwrap();
-        let selection = select(&dir, &[], Some("HEAD"), None, &[], "").unwrap();
+        let selection = select(&dir, &[], Some("HEAD"), None, &[], "", false).unwrap();
         assert_eq!(selection.mode, "diff");
         let symbols: Vec<_> = selection
             .crap_functions

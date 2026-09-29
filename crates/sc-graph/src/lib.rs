@@ -32,12 +32,12 @@ pub struct SourceFacts {
     pub local_names: Vec<String>,
 }
 
-pub fn inspect_source(text: &str, rel: &str) -> Option<SourceFacts> {
+pub fn inspect_source(text: &str, rel: &str, perf_enabled: bool) -> Option<SourceFacts> {
     let file = syn::parse_file(text).ok()?;
     Some(SourceFacts {
         functions: functions_in_source(&file, rel),
         imports: imports_in_file(&file, rel),
-        perf: perf_in_file(&file, rel),
+        perf: perf_in_file(&file, rel, perf_enabled),
         items: pub_items_in_file(&file, rel),
         local_names: local_names_in_file(&file),
     })

@@ -27,6 +27,8 @@ Every finding has a rule id. Severity `error` counts against the gate; `warning`
 | `spec.missing_item` | error | fix | A public item named in `--spec` does not exist. | Add the item, or fix the spec. |
 | `spec.llm_gap` | warning | ask | The LLM review found a gap between the spec and the code. | Update the code or the spec. |
 | `mutation.survivor` | error | fix | A mutant survived the tests. | Add a test that fails for that mutant. |
+| `perf.nested_loop` | warning | ignore | A loop inside a loop (only when `engines.perf = true`). | Consider a lookup table or a single pass. |
+| `perf.clone_in_loop` | warning | ignore | A value is cloned on every loop iteration (only when `engines.perf = true`). | Clone once outside the loop, or borrow. |
 | `html.parse` | error | fix | The page does not parse cleanly. | Fix the markup at the location shown. |
 | `html.doctype` | error | fix | The page has no `<!doctype html>`. | Add it as the first line. |
 | `html.viewport` | error | fix | The page has no viewport `meta` tag. | Add `<meta name="viewport" content="width=device-width, initial-scale=1">`. |

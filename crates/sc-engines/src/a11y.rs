@@ -736,7 +736,7 @@ mod tests {
 
     #[test]
     fn source_stays_within_the_uncovered_crap_bar() {
-        let facts = sc_graph::inspect_source(include_str!("a11y.rs"), "a11y.rs").unwrap();
+        let facts = sc_graph::inspect_source(include_str!("a11y.rs"), "a11y.rs", false).unwrap();
         for function in facts.functions {
             assert!(
                 function.cc <= 5,
@@ -745,9 +745,12 @@ mod tests {
                 function.cc
             );
         }
-        let report =
-            sc_graph::inspect_source(include_str!("../../sc-cli/src/report.rs"), "report.rs")
-                .unwrap();
+        let report = sc_graph::inspect_source(
+            include_str!("../../sc-cli/src/report.rs"),
+            "report.rs",
+            false,
+        )
+        .unwrap();
         for function in report.functions {
             if !function.symbol.contains("a11y") {
                 continue;

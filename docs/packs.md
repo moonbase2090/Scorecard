@@ -62,6 +62,6 @@ Flags, output formats, and exit status are in the [CLI reference](reference/cli.
 
 In tree mode the scorecard fields `loc_changed`, `files_changed`, and `coverage_changed` describe the analyzed `src` tree, not a git diff. `hallucinated_imports` and `undeclared_dependencies` are 0. `mutation.status` is `skipped`. In `--diff` mode `scope.base` records the resolved base ref (omitted in other modes), and `crap_over_threshold` counts only changed functions.
 
-A nested loop, and a `.clone()` that the loop collects, are not findings.
+A nested loop, and a `.clone()` that the loop collects, are not findings unless `engines.perf = true` in `analyzer.toml`. When that setting is on, those patterns are `perf.*` findings (disposition `ignore`) on product Rust; paths under `tests/` or `benches/`, and `#[cfg(test)]` / `#[…::test]` items, are not scanned.
 
 `.github` is not required. `action/action.yml` installs `sc`, runs it, and uploads SARIF when the format is `sarif` or `all`.

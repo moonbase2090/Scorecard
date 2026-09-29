@@ -37,6 +37,7 @@ Only the first file found is read. Command-line flags override the matching keys
 |---|---|---|
 | `engines.coverage` | `true` | Run tests with coverage. `false` skips coverage; no CRAP scores are reported and nothing is treated as 0% coverage. |
 | `engines.sca` | `true` | Check that imports are declared dependencies. |
+| `engines.perf` | `false` | When true, Rust nested loops and `.clone()` inside a loop become `perf.*` findings (disposition `ignore`). Paths under `tests/` or `benches/`, and `#[cfg(test)]` / `#[…::test]` items, are not scanned. Off by default so ordinary Rust does not change the report. |
 
 ### `[commands]`
 

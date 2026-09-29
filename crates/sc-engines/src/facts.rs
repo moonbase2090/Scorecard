@@ -12,7 +12,7 @@ use crate::secrets::secrets_in_text;
 
 /// Bump when what a parse records changes, so an upgrade does not reuse old
 /// facts for unchanged files.
-const CACHE_VERSION: u32 = 3;
+const CACHE_VERSION: u32 = 4;
 
 #[derive(Debug, Clone)]
 pub struct AnalyzedFile {
@@ -32,9 +32,10 @@ pub(crate) fn analyze_tree_with_workspace(
     root: &Path,
     exclude: &[String],
     toolchain_pin: &str,
+    perf_enabled: bool,
 ) -> (Vec<AnalyzedFile>, bool) {
     let (rels, workspace_root) = tree_source_rels(root, exclude, toolchain_pin);
-    (analyze_rels(root, &rels), workspace_root)
+    (analyze_rels(root, &rels, perf_enabled), workspace_root)
 }
 
 /// Count (and list) the same source paths a tree-scope run would analyze,
@@ -67,9 +68,16 @@ pub(crate) fn tree_source_rels(
     (rels, workspace_root)
 }
 
-pub fn analyze_rels(root: &Path, rels: &[String]) -> Vec<AnalyzedFile> {
+pub fn analyze_rels(root: &Path, rels: &[String], perf_enabled: bool) -> Vec<AnalyzedFile> {
     let cache_path = cache_path(root);
     let mut cache = read_cache(&cache_path);
+    if cache.perf_enabled != perf_enabled {
+        cache = CacheDoc {
+            version: CACHE_VERSION,
+            perf_enabled,
+            files: BTreeMap::new(),
+        };
+    }
     let mut out = Vec::new();
     for rel in rels {
         let path = root.join(rel);
@@ -83,12 +91,13 @@ pub fn analyze_rels(root: &Path, rels: &[String]) -> Vec<AnalyzedFile> {
                 continue;
             }
         }
-        let analyzed = parse_file(rel, &text);
+        let analyzed = parse_file(rel, &text, perf_enabled);
         cache
             .files
             .insert(rel.clone(), CachedFile::from_analyzed(&hash, &analyzed));
         out.push(analyzed);
     }
+    cache.perf_enabled = perf_enabled;
     let _ = write_cache(&cache_path, &cache);
     out.sort_by(|a, b| a.rel.cmp(&b.rel));
     out
@@ -163,9 +172,9 @@ struct CargoPackage {
     manifest_path: String,
 }
 
-fn parse_file(rel: &str, text: &str) -> AnalyzedFile {
+fn parse_file(rel: &str, text: &str, perf_enabled: bool) -> AnalyzedFile {
     let loc = text.lines().count() as u64;
-    let facts = sc_graph::inspect_source(text, rel);
+    let facts = sc_graph::inspect_source(text, rel, perf_enabled);
     let (functions, imports, perf, items, local_names) = match facts {
         Some(facts) => (
             facts.functions,
@@ -221,6 +230,10 @@ fn write_cache(path: &Path, doc: &CacheDoc) -> std::io::Result<()> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CacheDoc {
     version: u32,
+    /// Matches `engines.perf` for the run that wrote this cache. A mismatch
+    /// drops the file entries so enabling perf re-scans.
+    #[serde(default)]
+    perf_enabled: bool,
     files: BTreeMap<String, CachedFile>,
 }
 
@@ -228,6 +241,7 @@ impl Default for CacheDoc {
     fn default() -> Self {
         Self {
             version: CACHE_VERSION,
+            perf_enabled: false,
             files: BTreeMap::new(),
         }
     }
@@ -283,14 +297,14 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("src")).unwrap();
         fs::write(dir.join("src/lib.rs"), "pub fn cached() -> i32 { 1 }\n").unwrap();
-        let first = analyze_tree_with_workspace(&dir, &[], "").0;
+        let first = analyze_tree_with_workspace(&dir, &[], "", false).0;
         assert_eq!(first[0].functions[0].symbol, "cached");
         fs::write(
             dir.join(".sc/cache/parse-v2.json"),
             fs::read_to_string(dir.join(".sc/cache/parse-v2.json")).unwrap(),
         )
         .unwrap();
-        let second = analyze_tree_with_workspace(&dir, &[], "").0;
+        let second = analyze_tree_with_workspace(&dir, &[], "", false).0;
         assert_eq!(second[0].functions[0].symbol, "cached");
         let _ = fs::remove_dir_all(&dir);
     }
@@ -301,7 +315,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("sc-ws-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         copy_fixture(&src, &dir);
-        let files = analyze_tree_with_workspace(&dir, &[], "").0;
+        let files = analyze_tree_with_workspace(&dir, &[], "", false).0;
         let rels: Vec<&str> = files.iter().map(|file| file.rel.as_str()).collect();
         assert!(
             rels.iter()

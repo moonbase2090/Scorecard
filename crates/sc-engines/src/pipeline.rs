@@ -751,6 +751,7 @@ fn analyze_rust(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         request.diff_head.as_deref(),
         &request.path_list,
         &request.config.toolchain,
+        request.config.engines.perf,
     ) {
         Ok(selection) => (selection, None),
         Err(err) => (empty_selection(), Some(err)),

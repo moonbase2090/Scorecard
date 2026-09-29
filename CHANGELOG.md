@@ -18,13 +18,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- A finding with disposition `ignore` stays in the JSON report and is left out of the SARIF upload. A `perf.*` rule is disposition `ignore`. The analyzer does not emit a performance finding, so a normal run's report and SARIF are unchanged.
+- Opt-in Rust performance hints (`engines.perf = true`) flag a nested loop and a `.clone()` inside a loop as `perf.*` findings (disposition `ignore`). Paths under `tests/` or `benches/`, and `#[cfg(test)]` / `#[…::test]` items, are not scanned. The default stays off, so ordinary Rust does not change the report or the efficiency score.
+- A finding with disposition `ignore` stays in the JSON report and is left out of the SARIF upload. A `perf.*` rule is disposition `ignore`. With the default `engines.perf = false`, a normal run's report and SARIF stay unchanged.
 - When `analyzer.toml` names a Rust channel, check, test, coverage, lint, and mutation use it. A `rust-toolchain.toml` / `rust-toolchain` at or above the project clears an inherited `RUSTUP_TOOLCHAIN` so rustup reads the file; with no pin, the inherited variable is left alone.
 - On a `--diff` run (pull-request reports), the scorecard names the changed paths and adds a one-line count of the other source paths still in the tree. Terminal, markdown, and HTML show the same count.
 - When the test command ran and failed, `coverage.missing` says coverage was skipped and names the exit code. A missing tool or absent test script does not claim tests failed.
 - Python dependency checks read `requirements.txt`, `setup.cfg`, and `setup.py` `install_requires`. A docstring is not an import. `_typeshed`, `import setuptools` in `setup.py`, and an import inside `try` / `except ImportError` are not findings.
 - When tests run through `uv` and `uv` is not installed, the tests finding says `uv is not installed` instead of `pytest is not installed`.
-- A nested loop, and a `.clone()` that the loop collects, are not findings. Efficiency is not reduced for that ordinary Rust.
+- A nested loop, and a `.clone()` that the loop collects, are not findings by default. Efficiency is not reduced for that ordinary Rust unless `engines.perf` is on.
 - A Rust import is declared only by that crate's `Cargo.toml`, plus `[workspace.dependencies]`. A dependency of another crate in the same workspace is still `sca.undeclared_dependency`.
 - The Rust dependency check no longer reports crates that are already provided or declared. `proc_macro` is a builtin, like `std`, `core`, and `alloc`. A bare `use Name;` or `use Name as Alias;` of a name the file already imports by path, or defines, is a re-export and not a crate. A bare `use serde;` is still a crate. A header such as `[target.'cfg(windows)'.dependencies.windows-sys]` or `[dependencies.bytes]` declares that crate. A `use` of a module declared in the same crate counts as local, including a `mod` declared inside a macro call. The parse cache version changed, so the first run after upgrading re-parses every file.
 - Tests cover the LLM review outcome, the PyPI name lookup, the Cursor review, and the markdown renderer. Those functions no longer exceed the CRAP threshold.
