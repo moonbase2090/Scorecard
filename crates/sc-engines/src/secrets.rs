@@ -154,20 +154,60 @@ fn pem_block_has_body(lines: &[&str], header_idx: usize) -> bool {
     material.len() >= 32 && shannon(&material) >= 3.0
 }
 
-/// Drop a surrounding string-literal wrapper so a PEM body line written as
-/// `"base64\n"` or `'base64',` still counts as key material.
+/// Drop common source-language wrappers from a PEM body line.
 fn pem_line_payload(line: &str) -> String {
     let mut s = line.trim();
+
+    if let Some(item) = s.strip_prefix("- ") {
+        s = item.trim_start();
+    }
+    if let Some(rest) = s.strip_prefix('+') {
+        let candidate = rest.trim_start();
+        let quoted = candidate.starts_with('"')
+            || candidate.starts_with('\'')
+            || candidate.starts_with('\x60')
+            || ["br", "rb", "fr", "rf", "b", "B", "r", "R", "f", "F"]
+                .iter()
+                .any(|prefix| {
+                    candidate
+                        .strip_prefix(prefix)
+                        .is_some_and(|value| value.starts_with('"') || value.starts_with('\''))
+                });
+        if quoted {
+            s = candidate;
+        }
+    }
     if let Some(stripped) = s.strip_suffix(',') {
         s = stripped.trim_end();
     }
-    let bytes = s.as_bytes();
-    if bytes.len() >= 2 {
-        let open = bytes[0];
-        let close = bytes[bytes.len() - 1];
-        if (open == b'"' && close == b'"') || (open == b'\'' && close == b'\'') {
-            s = &s[1..s.len() - 1];
+
+    if let Some(before_operator) = s.strip_suffix('+') {
+        let before_operator = before_operator.trim_end();
+        if before_operator.ends_with('"')
+            || before_operator.ends_with('\'')
+            || before_operator.ends_with('\x60')
+        {
+            s = before_operator;
         }
+    }
+
+    for prefix in ["br", "rb", "fr", "rf", "b", "B", "r", "R", "f", "F"] {
+        if let Some(rest) = s.strip_prefix(prefix) {
+            if rest.starts_with('"') || rest.starts_with('\'') {
+                s = rest;
+                break;
+            }
+        }
+    }
+
+    for delimiter in ["'''", "\"\"\"", "\x60", "\"", "'"] {
+        if s.starts_with(delimiter) && s.ends_with(delimiter) && s.len() > delimiter.len() * 2 {
+            s = &s[delimiter.len()..s.len() - delimiter.len()];
+            break;
+        }
+    }
+    if let Some(stripped) = s.strip_suffix("\\r\\n") {
+        s = stripped;
     }
     if let Some(stripped) = s.strip_suffix("\\n") {
         s = stripped;
@@ -647,5 +687,121 @@ mod tests {
         assert_eq!(findings.len(), 1, "{findings:?}");
         assert_eq!(findings[0].rule, "secrets.private_key");
         assert_eq!(findings[0].span.as_ref().unwrap().start_line, 2);
+    }
+
+    #[test]
+    fn flags_pem_written_as_go_string_concatenation() {
+        let body = ["MIIEowIBAAKCAQEA0Z3VS5J4", "Ab3kQm9ZnR4pLx7wKq9ZmN4p"].concat();
+        let mid = body.len() / 2;
+        let text = format!(
+            "var key = \"{}RSA {}\\n\" +\n    \"{}\\n\" +\n    \"{}\\n\" +\n    \"-----END RSA {}\\n\"\n",
+            super::pem_begin(),
+            super::pem_end(),
+            &body[..mid],
+            &body[mid..],
+            super::pem_end()
+        );
+        let findings = secrets_in_text(&text, "src/key.go");
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].rule, "secrets.private_key");
+    }
+
+    #[test]
+    fn flags_pem_written_as_java_string_concatenation() {
+        let body = ["MIIEowIBAAKCAQEA0Z3VS5J4", "Ab3kQm9ZnR4pLx7wKq9ZmN4p"].concat();
+        let mid = body.len() / 2;
+        let text = format!(
+            "String key = \"{}RSA {}\\n\" +\n    + \"{}\\n\" +\n    + \"{}\\n\" +\n    + \"-----END RSA {}\\n\";\n",
+            super::pem_begin(),
+            super::pem_end(),
+            &body[..mid],
+            &body[mid..],
+            super::pem_end()
+        );
+        let findings = secrets_in_text(&text, "src/Key.java");
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].rule, "secrets.private_key");
+    }
+
+    #[test]
+    fn flags_pem_written_with_backtick_literals() {
+        let body = ["MIIEowIBAAKCAQEA0Z3VS5J4", "Ab3kQm9ZnR4pLx7wKq9ZmN4p"].concat();
+        let mid = body.len() / 2;
+        let text = format!(
+            "const key = [\n  \x60{}RSA {}\x60,\n  \x60{}\x60,\n  \x60{}\x60,\n  \x60-----END {}\x60,\n];\n",
+            super::pem_begin(),
+            super::pem_end(),
+            &body[..mid],
+            &body[mid..],
+            super::pem_end()
+        );
+        let findings = secrets_in_text(&text, "src/key.js");
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].rule, "secrets.private_key");
+    }
+
+    #[test]
+    fn flags_pem_written_with_python_string_prefixes() {
+        let body = ["MIIEowIBAAKCAQEA0Z3VS5J4", "Ab3kQm9ZnR4pLx7wKq9ZmN4p"].concat();
+        let mid = body.len() / 2;
+        for prefix in ["b", "r", "f"] {
+            let text = format!(
+                "key = (\n    {prefix}\"{}RSA {}\\n\"\n    {prefix}\"{}\\n\"\n    {prefix}\"{}\\n\"\n    {prefix}\"-----END RSA {}\\n\"\n)\n",
+                super::pem_begin(),
+                super::pem_end(),
+                &body[..mid],
+                &body[mid..],
+                super::pem_end()
+            );
+            let findings = secrets_in_text(&text, "src/key.py");
+            assert_eq!(findings.len(), 1, "prefix {prefix}: {findings:?}");
+            assert_eq!(findings[0].rule, "secrets.private_key");
+        }
+    }
+
+    #[test]
+    fn flags_pem_written_as_yaml_list_items() {
+        let body = ["MIIEowIBAAKCAQEA0Z3VS5J4", "Ab3kQm9ZnR4pLx7wKq9ZmN4p"].concat();
+        let mid = body.len() / 2;
+        let variants = [
+            format!(
+                "private_key:\n  - \"{}RSA {}\"\n  - \"{}\"\n  - {}\n  - \"-----END RSA {}\"\n",
+                super::pem_begin(),
+                super::pem_end(),
+                &body[..mid],
+                &body[mid..],
+                super::pem_end()
+            ),
+            format!(
+                "private_key:\n  - {}RSA {}\n  - {}\n  - {}\n  - -----END RSA {}\n",
+                super::pem_begin(),
+                super::pem_end(),
+                &body[..mid],
+                &body[mid..],
+                super::pem_end()
+            ),
+        ];
+        for text in variants {
+            let findings = secrets_in_text(&text, "config/keys.yml");
+            assert_eq!(findings.len(), 1, "{findings:?}");
+            assert_eq!(findings[0].rule, "secrets.private_key");
+        }
+    }
+
+    #[test]
+    fn flags_pem_written_as_per_line_triple_quoted_literals() {
+        let body = ["MIIEowIBAAKCAQEA0Z3VS5J4", "Ab3kQm9ZnR4pLx7wKq9ZmN4p"].concat();
+        let mid = body.len() / 2;
+        let text = format!(
+            "key = (\n    \"\"\"{}RSA {}\"\"\",\n    \"\"\"{}\"\"\",\n    \"\"\"{}\"\"\",\n    \"\"\"-----END RSA {}\"\"\",\n)\n",
+            super::pem_begin(),
+            super::pem_end(),
+            &body[..mid],
+            &body[mid..],
+            super::pem_end()
+        );
+        let findings = secrets_in_text(&text, "src/key.py");
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].rule, "secrets.private_key");
     }
 }
