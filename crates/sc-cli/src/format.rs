@@ -61,6 +61,16 @@ fn push_llm_markdown(out: &mut String, card: &Scorecard) {
 
 pub fn to_markdown(card: &Scorecard) -> String {
     let mut out = String::new();
+    push_markdown_header(&mut out, card);
+    push_llm_markdown(&mut out, card);
+    push_markdown_gates(&mut out, card);
+    push_markdown_scores(&mut out, card);
+    push_markdown_crap(&mut out, card);
+    push_markdown_findings(&mut out, card);
+    out
+}
+
+fn push_markdown_header(out: &mut String, card: &Scorecard) {
     let head = card.git.head.as_deref().unwrap_or("none");
     let dirty = if card.git.dirty { "dirty" } else { "clean" };
     out.push_str("# scorecard\n\n");
@@ -103,8 +113,9 @@ pub fn to_markdown(card: &Scorecard) -> String {
             card.engines_skipped.join(", ")
         ));
     }
-    push_llm_markdown(&mut out, card);
+}
 
+fn push_markdown_gates(out: &mut String, card: &Scorecard) {
     out.push_str("## Gates\n\n");
     out.push_str("| Gate | Result | Enforced | Reason |\n|---|---|---|---|\n");
     for gate in &card.gates {
@@ -118,7 +129,9 @@ pub fn to_markdown(card: &Scorecard) -> String {
         ));
     }
     out.push('\n');
+}
 
+fn push_markdown_scores(out: &mut String, card: &Scorecard) {
     out.push_str("## Scores\n\n");
     out.push_str(&format!(
         "- correctness: {:.2}\n- efficiency: {:.2}\n- maintainability: {:.2}\n- security: {:.2}\n- a11y: {:.2}\n\n",
@@ -128,7 +141,9 @@ pub fn to_markdown(card: &Scorecard) -> String {
         card.scores.security,
         card.scores.a11y
     ));
+}
 
+fn push_markdown_crap(out: &mut String, card: &Scorecard) {
     out.push_str("## Worst CRAP\n\n");
     out.push_str(&format!("Threshold {}.\n\n", card.crap.threshold));
     if let Some(line) = crate::report::rest_of_tree(card) {
@@ -164,7 +179,9 @@ pub fn to_markdown(card: &Scorecard) -> String {
         out.push_str("| | | | | |\n");
     }
     out.push('\n');
+}
 
+fn push_markdown_findings(out: &mut String, card: &Scorecard) {
     out.push_str("## Findings\n\n");
     if card.findings.is_empty() {
         out.push_str("None.\n");
@@ -209,7 +226,6 @@ pub fn to_markdown(card: &Scorecard) -> String {
         }
         out.push('\n');
     }
-    out
 }
 
 /// A fence one backtick longer than any run in the log keeps it closed.
