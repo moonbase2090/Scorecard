@@ -58,6 +58,8 @@ exit 0: gates passed
 
 Exit status: `0` the enforced gates passed, `1` an enforced gate failed, `2` `sc` could not run. [Reading the report](docs/report.md) explains every section.
 
+`sc analyze . --diff BASE` scores only what changed against that git ref. When the project is a subdirectory of a larger repository, the changed paths are still relative to the project (`src/a.rs`).
+
 Clippy findings use the first error with a file, line, and lint name. If no such error exists, they use the first warning with those details:
 
 ```bash doctest project=lint_diagnostic

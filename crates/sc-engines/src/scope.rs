@@ -217,6 +217,7 @@ pub fn resolve_base(root: &Path, requested: &str) -> Result<String, String> {
 }
 
 pub fn diff_files(root: &Path, base: &str, head: Option<&str>) -> Result<Vec<FileDelta>, String> {
+    let prefix = repo_prefix(root)?;
     let names = git_diff_names(root, base, head)?;
     let untracked = if head.is_none() {
         git(root, &["ls-files", "--others", "--exclude-standard"]).unwrap_or_default()
@@ -233,7 +234,8 @@ pub fn diff_files(root: &Path, base: &str, head: Option<&str>) -> Result<Vec<Fil
     let mut out = Vec::new();
     for rel in rels {
         let patch = git_diff_patch(root, base, head, &rel).unwrap_or_default();
-        let tracked = git_ok(root, &["cat-file", "-e", &format!("{base}:{rel}")]);
+        let git_rel = format!("{prefix}{rel}");
+        let tracked = git_ok(root, &["cat-file", "-e", &format!("{base}:{git_rel}")]);
         let changed_lines = if tracked {
             parse_new_lines(&patch)
         } else {
@@ -287,15 +289,32 @@ pub fn overlaps(function: &FunctionInfo, changed: &[u32]) -> bool {
 }
 
 pub fn base_symbols(root: &Path, base: &str, rel: &str) -> BTreeSet<String> {
-    let text = match git(root, &["show", &format!("{base}:{rel}")]) {
+    let prefix = repo_prefix(root).unwrap_or_default();
+    let git_rel = format!("{prefix}{rel}");
+    let text = match git(root, &["show", &format!("{base}:{git_rel}")]) {
         Ok(text) => text,
         Err(_) => return BTreeSet::new(),
     };
     sc_graph::function_symbols(&text, rel).into_iter().collect()
 }
 
+/// Prefix of `root` inside its git work tree, with a trailing slash.
+/// Empty when the project is the repository root.
+fn repo_prefix(root: &Path) -> Result<String, String> {
+    let prefix = git(root, &["rev-parse", "--show-prefix"])?;
+    Ok(prefix.trim().replace('\\', "/"))
+}
+
 fn git_diff_names(root: &Path, base: &str, head: Option<&str>) -> Result<String, String> {
-    let mut args = vec!["diff", "--name-only", "--diff-filter=ACMR", base];
+    // `--relative` makes names relative to `root` and drops files outside it.
+    // `git -C sub diff --name-only` otherwise prints `sub/src/a.rs`.
+    let mut args = vec![
+        "diff",
+        "--relative",
+        "--name-only",
+        "--diff-filter=ACMR",
+        base,
+    ];
     if let Some(head) = head {
         args.push(head);
     }
@@ -388,6 +407,59 @@ mod tests {
             .new_symbols
             .contains(&("src/lib.rs".into(), "added".into())));
         assert!(!selection.new_symbols.iter().any(|(_, name)| name == "old"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn diff_in_a_subdirectory_scores_the_project_path() {
+        let dir = std::env::temp_dir().join(format!("sc-diff-sub-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let sub = dir.join("sub");
+        std::fs::create_dir_all(sub.join("src")).unwrap();
+        std::fs::create_dir_all(dir.join("other/src")).unwrap();
+        std::fs::write(sub.join("src/lib.rs"), "pub mod a;\npub mod b;\n").unwrap();
+        std::fs::write(sub.join("src/a.rs"), "pub fn a() -> i32 { 1 }\n").unwrap();
+        std::fs::write(sub.join("src/b.rs"), "pub fn b() -> i32 { 1 }\n").unwrap();
+        std::fs::write(dir.join("other/src/z.rs"), "pub fn z() -> i32 { 1 }\n").unwrap();
+        let git = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(args)
+                .env("GIT_AUTHOR_NAME", "sc")
+                .env("GIT_AUTHOR_EMAIL", "sc@example.com")
+                .env("GIT_COMMITTER_NAME", "sc")
+                .env("GIT_COMMITTER_EMAIL", "sc@example.com")
+                .status()
+                .unwrap();
+            assert!(status.success(), "{args:?}");
+        };
+        git(&["init"]);
+        git(&["add", "."]);
+        git(&["commit", "-m", "base"]);
+        std::fs::write(sub.join("src/a.rs"), "pub fn a() -> i32 { 2 }\n").unwrap();
+        std::fs::write(dir.join("other/src/z.rs"), "pub fn z() -> i32 { 2 }\n").unwrap();
+        std::fs::write(sub.join("src/c.rs"), "pub fn c() -> i32 { 3 }\n").unwrap();
+        let selection = select(&sub, &[], Some("HEAD"), None, &[], "", false).unwrap();
+        assert_eq!(
+            selection.paths,
+            vec!["src/a.rs".to_string(), "src/c.rs".to_string()]
+        );
+        assert_eq!(selection.other_paths, Some(2));
+        let symbols: Vec<_> = selection
+            .crap_functions
+            .iter()
+            .map(|function| function.symbol.as_str())
+            .collect();
+        assert!(symbols.contains(&"a::a"), "{symbols:?}");
+        assert!(symbols.contains(&"c::c"), "{symbols:?}");
+        assert!(!symbols
+            .iter()
+            .any(|name| name.contains("z") || name.contains("::b")));
+        assert!(!selection.new_symbols.iter().any(|(_, name)| name == "a::a"));
+        assert!(selection
+            .new_symbols
+            .contains(&("src/c.rs".into(), "c::c".into())));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

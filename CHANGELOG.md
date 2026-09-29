@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `sc analyze --diff` scores a project that lives in a subdirectory of its git repository. Changed paths are relative to that project (`src/a.rs`), so the complexity and CRAP gates see the change. Before, the diff was empty and those gates passed without scoring it.
 - Opt-in Rust performance hints (`engines.perf = true`) flag a nested loop and a `.clone()` inside a loop as `perf.*` findings (disposition `ignore`). Paths under `tests/` or `benches/`, `src/test.rs` / `src/tests.rs`, inline `#[cfg(test)]` / `#[…::test]` items, files loaded by an out-of-line `#[cfg(test)] mod name;` (including on `--diff`, via a whole-tree lookup), and children under that module's directory, are not scanned. The parse cache stores unfiltered hits and applies the test-only filter on read, so flipping `cfg(test)` to a product module re-flags the file without waiting for it to change. The default stays off, so ordinary Rust does not change the report or the efficiency score.
 - A finding with disposition `ignore` stays in the JSON report and is left out of the SARIF upload. A `perf.*` rule is disposition `ignore`. With the default `engines.perf = false`, a normal run's report and SARIF stay unchanged.
 - When `analyzer.toml` names a Rust channel, check, test, coverage, lint, and mutation use it. A `rust-toolchain.toml` / `rust-toolchain` at or above the project clears an inherited `RUSTUP_TOOLCHAIN` so rustup reads the file; with no pin, the inherited variable is left alone.

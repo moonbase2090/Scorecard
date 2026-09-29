@@ -17,7 +17,7 @@ sc setup
 | `--out PATH` | none | Also write the report to `PATH`. |
 | `--fail-on LIST` | `types,tests,crap,secrets,lint` | Comma-separated [gates](gates.md) that fail the run. Overrides `gates.fail_on`. |
 | `--pack PACK` | detected | `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, `web`, or `command`. Needed when the tree has two markers. See [packs](../packs.md). |
-| `--diff [BASE]` | off | Score only what changed against git `BASE`. Without `BASE`: `HEAD~1`, else `main`. Uncommitted changes count. |
+| `--diff [BASE]` | off | Score only what changed against git `BASE`. Paths are relative to the project directory, including when that directory sits inside a larger git repository. Without `BASE`: `HEAD~1`, else `main`. Uncommitted changes count. |
 | `--diff-head REV` | worktree | With `--diff`, compare `BASE` to commit `REV` instead of the worktree. |
 | `--paths FILE` | off | Score only the source files listed in `FILE`, one per line. Cannot be combined with `--diff`. |
 | `--spec FILE` | off | Check that files and public items named in `FILE` exist (`spec` gate). |
