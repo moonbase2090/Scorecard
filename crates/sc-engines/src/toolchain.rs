@@ -1825,6 +1825,7 @@ mod tests {
             &root,
             Instant::now() + std::time::Duration::from_secs(30),
             None,
+            true,
         );
         let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
         assert!(!gate.pass, "{gate:?} {:?}", report.findings);
@@ -1852,6 +1853,7 @@ mod tests {
             &root,
             Instant::now() + std::time::Duration::from_secs(30),
             None,
+            true,
         );
         let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
         assert!(!gate.pass, "{gate:?} {:?}", report.findings);
@@ -1893,6 +1895,7 @@ mod tests {
             &root,
             Instant::now() + std::time::Duration::from_secs(30),
             None,
+            true,
         );
         let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
         assert!(gate.pass, "{gate:?} {:?}", report.findings);
@@ -1932,6 +1935,7 @@ mod tests {
             &root,
             Instant::now() + std::time::Duration::from_secs(30),
             None,
+            true,
         );
         let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
         assert!(gate.pass, "{gate:?} {:?}", report.findings);
@@ -1957,6 +1961,7 @@ mod tests {
             &root,
             Instant::now() + std::time::Duration::from_secs(30),
             None,
+            true,
         );
         let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
         assert!(!gate.pass, "{gate:?} {:?}", report.findings);
@@ -2036,6 +2041,7 @@ mod tests {
             &root,
             Instant::now() + std::time::Duration::from_secs(30),
             None,
+            true,
         );
         let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
         assert!(gate.pass, "{gate:?} {:?}", report.findings);
@@ -2074,6 +2080,7 @@ mod tests {
             &root,
             Instant::now() + std::time::Duration::from_secs(30),
             None,
+            true,
         );
         let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
         assert!(gate.pass, "{gate:?} {:?}", report.findings);
@@ -2112,6 +2119,7 @@ mod tests {
             &root,
             Instant::now() + std::time::Duration::from_secs(30),
             None,
+            true,
         );
         let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
         assert!(!gate.pass, "{gate:?} {:?}", report.findings);
@@ -2151,6 +2159,7 @@ mod tests {
             &root,
             Instant::now() + std::time::Duration::from_secs(30),
             None,
+            true,
         );
         let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
         assert!(gate.pass, "{gate:?} {:?}", report.findings);
@@ -2214,6 +2223,7 @@ mod tests {
             &root,
             Instant::now() + std::time::Duration::from_secs(30),
             None,
+            true,
         );
         let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
         assert!(gate.pass, "{gate:?} {:?}", report.findings);
@@ -2248,6 +2258,7 @@ mod tests {
             &root,
             Instant::now() + std::time::Duration::from_secs(30),
             None,
+            true,
         );
         let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
         assert!(!gate.pass, "{gate:?} {:?}", report.findings);
@@ -2290,6 +2301,7 @@ mod tests {
             &root,
             Instant::now() + std::time::Duration::from_secs(30),
             None,
+            true,
         );
         let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
         assert!(!gate.pass, "{gate:?} {:?}", report.findings);
@@ -2332,6 +2344,7 @@ mod tests {
             &root,
             Instant::now() + std::time::Duration::from_secs(30),
             None,
+            true,
         );
         let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
         assert!(!gate.pass, "{gate:?} {:?}", report.findings);
@@ -2370,6 +2383,7 @@ mod tests {
             &root,
             Instant::now() + std::time::Duration::from_secs(30),
             None,
+            true,
         );
         let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
         assert!(gate.pass, "{gate:?} {:?}", report.findings);
@@ -2451,6 +2465,7 @@ mod tests {
             &root,
             Instant::now() + std::time::Duration::from_secs(30),
             None,
+            true,
         );
         let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
         assert!(!gate.pass, "{gate:?} {:?}", report.findings);
@@ -2493,6 +2508,7 @@ mod tests {
             &root,
             Instant::now() + std::time::Duration::from_secs(30),
             None,
+            true,
         );
         let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
         assert!(!gate.pass, "{gate:?} {:?}", report.findings);
@@ -2620,6 +2636,7 @@ mod tests {
             &root,
             Instant::now() + std::time::Duration::from_secs(30),
             None,
+            true,
         );
         let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
         assert!(!gate.pass, "{gate:?} {:?}", report.findings);
@@ -2663,6 +2680,7 @@ mod tests {
             &root,
             Instant::now() + std::time::Duration::from_secs(30),
             None,
+            true,
         );
         let gate = report.gates.iter().find(|gate| gate.id == "types").unwrap();
         assert!(!gate.pass, "{gate:?} {:?}", report.findings);
