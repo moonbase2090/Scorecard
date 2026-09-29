@@ -20,7 +20,7 @@ jobs:
           diff: origin/${{ github.base_ref }}
 ```
 
-The action installs `sc`, runs `sc analyze .`, and fails the job when an enforced gate fails. On public repositories the SARIF report appears in the pull request's code scanning alerts. With `format: html` or `all`, the report is uploaded as the `scorecard-report` artifact.
+The action installs `sc`, runs `sc analyze .`, and fails the job when an enforced gate fails. On public repositories the SARIF report appears in the pull request's code scanning alerts. Only `secrets.*` findings upload at error level; every other rule (test failures, missing coverage, lint, CRAP) uploads at warning, so quality signals never count as security vulnerabilities. With `format: html` or `all`, the report is uploaded as the `scorecard-report` artifact.
 
 | Input | Default | Meaning |
 |---|---|---|

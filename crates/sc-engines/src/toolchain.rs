@@ -723,7 +723,13 @@ fn cpp_has_ctest(root: &Path) -> bool {
 }
 
 fn cpp_coverage() -> String {
-    "cmake -S . -B .sc/cmake-build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_FLAGS=--coverage -DCMAKE_CXX_FLAGS=--coverage -DCMAKE_EXE_LINKER_FLAGS=--coverage && cmake --build .sc/cmake-build && ctest --test-dir .sc/cmake-build --output-on-failure; status=$?; mkdir -p .sc/coverage && lcov --capture --directory .sc/cmake-build --output-file .sc/coverage/cpp.info || true; exit $status".into()
+    // `--ignore-errors unsupported` keeps lcov 2.x working with the Apple
+    // LLVM gcov shim (it warns that function end-line derivation needs a
+    // newer gcov, then still writes the report). Without it the capture
+    // fails, the tests gate fails, and the missing report cascades into
+    // coverage.missing — on hosts where plain `lcov --capture` works the
+    // flag is accepted and ignored.
+    "cmake -S . -B .sc/cmake-build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_FLAGS=--coverage -DCMAKE_CXX_FLAGS=--coverage -DCMAKE_EXE_LINKER_FLAGS=--coverage && cmake --build .sc/cmake-build && ctest --test-dir .sc/cmake-build --output-on-failure; status=$?; mkdir -p .sc/coverage && lcov --capture --directory .sc/cmake-build --output-file .sc/coverage/cpp.info --ignore-errors unsupported || true; exit $status".into()
 }
 
 fn has_php_tests(root: &Path) -> bool {
