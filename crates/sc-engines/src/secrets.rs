@@ -166,7 +166,7 @@ fn pem_end() -> &'static str {
 fn aws_key_at(line: &str) -> Option<usize> {
     let mut found = None;
     for prefix in ["AKIA", "ASIA"] {
-        if let Some(at) = token_at(line, prefix, 16, |c| {
+        for at in token_ats(line, prefix, 16, |c| {
             c.is_ascii_uppercase() || c.is_ascii_digit()
         }) {
             let token = aws_access_token(line, at);
@@ -194,7 +194,7 @@ fn github_at(line: &str) -> Option<usize> {
     for prefix in ["github_pat_", "ghp_", "gho_", "ghu_", "ghs_", "ghr_"] {
         let min_tail = if prefix == "github_pat_" { 20 } else { 36 };
         let allow_underscore = prefix == "github_pat_";
-        if let Some(at) = token_at(line, prefix, min_tail, |c| {
+        for at in token_ats(line, prefix, min_tail, |c| {
             c.is_ascii_alphanumeric() || (allow_underscore && c == '_')
         }) {
             let token = token_body(line, at, prefix.len(), |c| {
@@ -324,9 +324,13 @@ fn slack_at(line: &str) -> Option<usize> {
 }
 
 fn stripe_at(line: &str) -> Option<usize> {
-    let at = token_at(line, "sk_live_", 16, |c| c.is_ascii_alphanumeric())?;
-    let body = token_body(line, at, "sk_live_".len(), |c| c.is_ascii_alphanumeric());
-    credential_signal(body).then_some(at)
+    for at in token_ats(line, "sk_live_", 16, |c| c.is_ascii_alphanumeric()) {
+        let body = token_body(line, at, "sk_live_".len(), |c| c.is_ascii_alphanumeric());
+        if credential_signal(body) {
+            return Some(at);
+        }
+    }
+    None
 }
 
 fn token_body(line: &str, at: usize, prefix_len: usize, tail: impl Fn(char) -> bool) -> &str {
@@ -335,25 +339,37 @@ fn token_body(line: &str, at: usize, prefix_len: usize, tail: impl Fn(char) -> b
     &after[..count]
 }
 
-fn token_at(
-    line: &str,
-    prefix: &str,
+/// Every offset where `prefix` is followed by at least `min_tail` tail
+/// characters. Callers that reject a candidate (a placeholder, or no
+/// credential signal) keep looking instead of stopping at the first one,
+// so a placeholder earlier on the line cannot hide a real key later on it.
+fn token_ats<'a>(
+    line: &'a str,
+    prefix: &'a str,
     min_tail: usize,
-    tail: impl Fn(char) -> bool,
-) -> Option<usize> {
+    tail: impl Fn(char) -> bool + 'a,
+) -> impl Iterator<Item = usize> + 'a {
     let mut rest = line;
     let mut offset = 0;
-    while let Some(start) = rest.find(prefix) {
-        let after = &rest[start + prefix.len()..];
-        let count = after.chars().take_while(|c| tail(*c)).count();
-        if count >= min_tail {
-            return Some(offset + start);
+    let mut done = false;
+    std::iter::from_fn(move || {
+        if done {
+            return None;
         }
-        let next = start + prefix.len();
-        offset += next;
-        rest = &rest[next..];
-    }
-    None
+        while let Some(start) = rest.find(prefix) {
+            let after = &rest[start + prefix.len()..];
+            let count = after.chars().take_while(|c| tail(*c)).count();
+            let at = offset + start;
+            let next = start + prefix.len();
+            offset += next;
+            rest = &rest[next..];
+            if count >= min_tail {
+                return Some(at);
+            }
+        }
+        done = true;
+        None
+    })
 }
 
 #[cfg(test)]
@@ -392,6 +408,34 @@ mod tests {
                 findings.is_empty(),
                 "should ignore placeholder in {text:?}, got {findings:?}"
             );
+        }
+    }
+
+    #[test]
+    fn a_placeholder_earlier_on_a_line_does_not_hide_a_real_key() {
+        // Placeholder first, real key second on the same line: each key is
+        // caught when alone, so the placeholder must not excuse the key.
+        let aws = format!("{}{}", "AKIA", "QWERTYUIOPASDFGH");
+        let ghp_body = ["k7Qm9", "Lx4wAb3Z", "nR8pY2cF9wQx", "T6vB1nM5sDe"].concat();
+        let stripe_body = ["51Hq8vN2mK", "x7pL4wZr9T", "cYbQ3aF6d"].concat();
+        let cases = [
+            (
+                format!("# aws: replace AKIAIOSFODNN7EXAMPLE with {aws}\n"),
+                "secrets.aws_access_key",
+            ),
+            (
+                format!("# token ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA real ghp_{ghp_body}\n"),
+                "secrets.github_token",
+            ),
+            (
+                format!("# stripe sk_live_0000000000000000 real sk_live_{stripe_body}\n"),
+                "secrets.stripe_key",
+            ),
+        ];
+        for (text, rule) in cases {
+            let findings = secrets_in_text(&text, "notes.txt");
+            assert_eq!(findings.len(), 1, "{text:?} got {findings:?}");
+            assert_eq!(findings[0].rule, rule);
         }
     }
 
