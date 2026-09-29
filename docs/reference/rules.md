@@ -13,10 +13,11 @@ Every finding has a rule id. Severity `error` counts against the gate; `warning`
 | `coverage.unmatched` | warning | ask | Coverage ran, but some functions have no coverage record. | Check that those functions are built into the test run. `evidence.functions` lists them. |
 | `lint.failed` | error | fix | The linter reported problems. A Clippy finding uses the first error with a file, line, and lint name, or the first warning with those details if no such error exists. | Run the lint command from the finding and fix what it reports. |
 | `secrets.aws_access_key` | error | fix | An AWS access key id is in the tree. | Remove it, rotate the key, and rewrite history if it was pushed. |
-| `secrets.aws_secret_key` | error | fix | An AWS secret access key is in the tree. | Remove it, rotate the key, and rewrite history if it was pushed. |
+| `secrets.aws_secret_key` | error | fix | An AWS secret access key is in the tree, including a Terraform AWS provider `secret_key` assignment. | Remove it, rotate the key, and rewrite history if it was pushed. |
 | `secrets.github_token` | error | fix | A GitHub token is in the tree. | Remove it and revoke the token. |
-| `secrets.slack_token` | error | fix | A Slack token is in the tree. | Remove it and revoke the token. |
-| `secrets.stripe_key` | error | fix | A Stripe live key is in the tree. | Remove it and roll the key. |
+| `secrets.slack_token` | error | fix | A Slack bot or app token is in the tree. | Remove it and revoke the token. |
+| `secrets.slack_webhook` | error | fix | A Slack incoming webhook URL is in the tree. | Remove it and revoke the webhook. |
+| `secrets.stripe_key` | error | fix | A Stripe live secret or restricted key is in the tree. | Remove it and roll the key. |
 | `secrets.private_key` | error | fix | A private-key block is in the tree, including PEM split across source string lines or YAML list items. | Remove it and replace the key. |
 | `secrets.unreadable` | error | fix | A file the secrets scan should read could not be opened, so the gate does not pass. | Restore read access, or exclude the path with `exclude = ["path"]` under `[scope]` in `analyzer.toml`. |
 | `secrets.partial` | error | fix | A file over 64 MiB was not read, so the scan was partial and the gate does not pass. A file over 1 MiB is still scanned (including when it contains NUL bytes) unless git ignores it. | Exclude that path with `exclude = ["path"]` under `[scope]` in `analyzer.toml`, or move the secret out of the large file. |
