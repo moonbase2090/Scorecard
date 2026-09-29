@@ -475,6 +475,7 @@ fn analyze_unsupported(
         &request.root,
         Instant::now() + request.budget,
         user_lint.as_deref(),
+        request.config.engines.coverage,
     );
     let mut findings = tools.findings;
     findings.push(unavailable(

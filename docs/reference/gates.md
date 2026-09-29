@@ -16,7 +16,7 @@ A gate is a pass or fail check. Enforced gates decide the exit status; advisory 
 | `links` | no | A link points at a missing file in the tree | `links.missing` |
 | `a11y` | no | A static accessibility check fails | see [accessibility](../a11y.md) |
 
-When a function has no coverage record and no measured function fails, the `crap` gate is advisory for that run: the gate shows `advisory` and the reason says coverage was not measured. A measured function still fails the gate when it is over the CRAP threshold, or when its CC is at or above `gates.new_fn_untested_cc` with 0% coverage (`complexity.untested`), even if another function has no coverage record. The reason then also says some functions were not scored.
+When a function has no coverage record and no measured function fails, the `crap` gate is advisory for that run: the gate shows `advisory` and the reason says some functions have no coverage record and were not scored. A measured function still fails the gate when it is over the CRAP threshold, or when its CC is at or above `gates.new_fn_untested_cc` with 0% coverage (`complexity.untested`), even if another function has no coverage record.
 
 A function with no coverage record is not scored, so it cannot fail the gate itself. Node and Python record a file the tests never load at 0%. With other packs' coverage tools, such a file can have no record.
 
