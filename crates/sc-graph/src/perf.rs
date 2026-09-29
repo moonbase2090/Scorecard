@@ -33,12 +33,128 @@ pub fn perf_in_file(file: &File, rel: &str, enabled: bool) -> Vec<PerfHit> {
     out
 }
 
-/// Rust integration-test and bench trees. Product code under `src/spec/` stays
-/// scanned.
+/// Relative paths of files that an out-of-line `#[cfg(test)] mod name;` (or
+/// `#[cfg(test)] #[path = "..."] mod name;`) in `declaring_rel` would load.
+/// Candidates are both `name.rs` and `name/mod.rs` when there is no `#[path]`.
+pub fn out_of_line_cfg_test_paths(file: &File, declaring_rel: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    collect_out_of_line_cfg_test(&file.items, declaring_rel, &mut out);
+    out
+}
+
+/// Parse `text` and return out-of-line `#[cfg(test)]` module paths.
+pub fn out_of_line_cfg_test_paths_from_source(text: &str, declaring_rel: &str) -> Vec<String> {
+    let Ok(file) = syn::parse_file(text) else {
+        return Vec::new();
+    };
+    out_of_line_cfg_test_paths(&file, declaring_rel)
+}
+
+fn collect_out_of_line_cfg_test(items: &[Item], declaring_rel: &str, out: &mut Vec<String>) {
+    for item in items {
+        let Item::Mod(module) = item else {
+            continue;
+        };
+        if let Some((_, nested)) = &module.content {
+            // Inline module: recurse so a nested out-of-line child is found.
+            // Children of an inline mod live beside the declaring file's children dir.
+            let child_decl = match module_children_dir(declaring_rel) {
+                dir if dir.is_empty() => format!("{}.rs", module.ident),
+                dir => format!("{dir}/{}.rs", module.ident),
+            };
+            collect_out_of_line_cfg_test(nested, &child_decl, out);
+            continue;
+        }
+        if !is_cfg_test(&module.attrs) {
+            continue;
+        }
+        if let Some(path) = path_attr(&module.attrs) {
+            out.push(join_rel(&parent_dir(declaring_rel), &path));
+            continue;
+        }
+        let dir = module_children_dir(declaring_rel);
+        let name = module.ident.to_string();
+        out.push(join_rel(&dir, &format!("{name}.rs")));
+        out.push(join_rel(&dir, &format!("{name}/mod.rs")));
+    }
+}
+
+fn path_attr(attrs: &[syn::Attribute]) -> Option<String> {
+    for attr in attrs {
+        if !attr.path().is_ident("path") {
+            continue;
+        }
+        match &attr.meta {
+            syn::Meta::NameValue(nv) => {
+                if let syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Str(lit),
+                    ..
+                }) = &nv.value
+                {
+                    return Some(lit.value().replace('\\', "/"));
+                }
+            }
+            syn::Meta::List(_) => {
+                if let Ok(lit) = attr.parse_args::<syn::LitStr>() {
+                    return Some(lit.value().replace('\\', "/"));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn normalize_rel(rel: &str) -> String {
+    rel.trim_start_matches("./").replace('\\', "/")
+}
+
+fn parent_dir(rel: &str) -> String {
+    let rel = normalize_rel(rel);
+    match rel.rsplit_once('/') {
+        Some((parent, _)) => parent.to_string(),
+        None => String::new(),
+    }
+}
+
+/// Directory that holds submodules of `declaring_rel` (Rust module layout).
+fn module_children_dir(declaring_rel: &str) -> String {
+    let rel = normalize_rel(declaring_rel);
+    let file_name = rel.rsplit('/').next().unwrap_or(rel.as_str());
+    let parent = parent_dir(&rel);
+    if matches!(file_name, "lib.rs" | "main.rs" | "mod.rs") {
+        return parent;
+    }
+    let stem = file_name
+        .rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(file_name);
+    join_rel(&parent, stem)
+}
+
+fn join_rel(dir: &str, name: &str) -> String {
+    let name = name.trim_start_matches("./");
+    if dir.is_empty() {
+        name.to_string()
+    } else {
+        format!("{dir}/{name}")
+    }
+}
+
+/// Rust integration-test and bench trees, plus `src/test.rs` / `src/tests.rs`.
+/// Product code under `src/spec/` stays scanned.
 pub(crate) fn is_test_path(rel: &str) -> bool {
-    let rel = rel.trim_start_matches("./").replace('\\', "/");
-    rel.split('/')
+    let rel = normalize_rel(rel);
+    if rel
+        .split('/')
         .any(|part| matches!(part, "tests" | "benches"))
+    {
+        return true;
+    }
+    // Cheap guard for the common out-of-line `#[cfg(test)] mod tests;` file.
+    let name = rel.rsplit('/').next().unwrap_or("");
+    let stem = name.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(name);
+    matches!(stem, "test" | "tests") && rel.split('/').any(|part| part == "src")
 }
 
 fn is_cfg_test(attrs: &[syn::Attribute]) -> bool {
@@ -287,9 +403,13 @@ mod inner {
         assert!(is_test_path("tests/rows.rs"));
         assert!(is_test_path("crates/foo/tests/it.rs"));
         assert!(is_test_path("benches/hot.rs"));
+        assert!(is_test_path("src/tests.rs"));
+        assert!(is_test_path("src/test.rs"));
+        assert!(is_test_path("crates/foo/src/tests.rs"));
         assert!(!is_test_path("src/lib.rs"));
         assert!(!is_test_path("src/spec/mod.rs"));
         assert!(!is_test_path("src/rows_test.rs"));
+        assert!(!is_test_path("src/helpers.rs"));
 
         let file = syn::parse_file(CLONE_SRC).unwrap();
         assert!(
@@ -298,6 +418,40 @@ mod inner {
         );
         assert!(perf_in_file(&file, "tests/rows.rs", true).is_empty());
         assert!(perf_in_file(&file, "benches/hot.rs", true).is_empty());
+        assert!(perf_in_file(&file, "src/tests.rs", true).is_empty());
+    }
+
+    #[test]
+    fn out_of_line_cfg_test_mod_resolves_beside_lib() {
+        let lib = syn::parse_file(
+            r#"
+pub fn product() {}
+#[cfg(test)]
+mod helpers;
+"#,
+        )
+        .unwrap();
+        let paths = out_of_line_cfg_test_paths(&lib, "src/lib.rs");
+        assert!(paths.contains(&"src/helpers.rs".into()), "{paths:?}");
+        assert!(paths.contains(&"src/helpers/mod.rs".into()), "{paths:?}");
+
+        let with_path = syn::parse_file(
+            r#"
+#[cfg(test)]
+#[path = "alt/probe.rs"]
+mod helpers;
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            out_of_line_cfg_test_paths(&with_path, "src/lib.rs"),
+            vec!["src/alt/probe.rs".to_string()]
+        );
+
+        // File module: children live under src/foo/
+        let foo = syn::parse_file("#[cfg(test)]\nmod helpers;\n").unwrap();
+        let paths = out_of_line_cfg_test_paths(&foo, "src/foo.rs");
+        assert!(paths.contains(&"src/foo/helpers.rs".into()), "{paths:?}");
     }
 
     #[test]

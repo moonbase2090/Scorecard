@@ -44,7 +44,8 @@ max_tool_rounds = 36
 coverage = true
 sca = true
 # Off by default. When true, Rust nested loops and clones inside a loop are
-# perf.* findings (disposition ignore). Test modules stay skipped.
+# perf.* findings (disposition ignore). Test modules (inline, out-of-line
+# #[cfg(test)] mod, tests/benches, src/tests.rs) stay skipped.
 perf = false
 
 [html]

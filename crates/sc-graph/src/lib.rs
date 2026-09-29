@@ -44,5 +44,7 @@ pub fn inspect_source(text: &str, rel: &str, perf_enabled: bool) -> Option<Sourc
 }
 pub use discover::{is_excluded, scan, source_files, source_files_under, Scan};
 pub use imports::{imports_in_file, local_names_in_file, ImportHit};
-pub use perf::{perf_in_file, PerfHit};
+pub use perf::{
+    out_of_line_cfg_test_paths, out_of_line_cfg_test_paths_from_source, perf_in_file, PerfHit,
+};
 pub use pubs::{pub_items_in_file, PubItem};

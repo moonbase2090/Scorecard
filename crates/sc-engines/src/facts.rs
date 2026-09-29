@@ -12,7 +12,7 @@ use crate::secrets::secrets_in_text;
 
 /// Bump when what a parse records changes, so an upgrade does not reuse old
 /// facts for unchanged files.
-const CACHE_VERSION: u32 = 4;
+const CACHE_VERSION: u32 = 5;
 
 #[derive(Debug, Clone)]
 pub struct AnalyzedFile {
@@ -78,20 +78,34 @@ pub fn analyze_rels(root: &Path, rels: &[String], perf_enabled: bool) -> Vec<Ana
             files: BTreeMap::new(),
         };
     }
-    let mut out = Vec::new();
+    let mut texts: BTreeMap<String, String> = BTreeMap::new();
     for rel in rels {
         let path = root.join(rel);
-        let Ok(text) = fs::read_to_string(&path) else {
-            continue;
-        };
-        let hash = hash_text(&text);
-        if let Some(hit) = cache.files.get(rel) {
-            if hit.hash == hash {
-                out.push(hit.to_analyzed(rel));
-                continue;
-            }
+        if let Ok(text) = fs::read_to_string(&path) {
+            texts.insert(rel.clone(), text);
         }
-        let analyzed = parse_file(rel, &text, perf_enabled);
+    }
+    let cfg_test_files = if perf_enabled {
+        cfg_test_module_files(&texts)
+    } else {
+        std::collections::BTreeSet::new()
+    };
+    let mut out = Vec::new();
+    for (rel, text) in &texts {
+        let hash = hash_text(text);
+        let scan_perf = perf_enabled && !cfg_test_files.contains(rel);
+        let mut analyzed = if let Some(hit) = cache.files.get(rel) {
+            if hit.hash == hash {
+                hit.to_analyzed(rel)
+            } else {
+                parse_file(rel, text, scan_perf)
+            }
+        } else {
+            parse_file(rel, text, scan_perf)
+        };
+        if !scan_perf {
+            analyzed.perf.clear();
+        }
         cache
             .files
             .insert(rel.clone(), CachedFile::from_analyzed(&hash, &analyzed));
@@ -100,6 +114,17 @@ pub fn analyze_rels(root: &Path, rels: &[String], perf_enabled: bool) -> Vec<Ana
     cache.perf_enabled = perf_enabled;
     let _ = write_cache(&cache_path, &cache);
     out.sort_by(|a, b| a.rel.cmp(&b.rel));
+    out
+}
+
+/// Paths loaded by out-of-line `#[cfg(test)] mod …;` declarations in `texts`.
+fn cfg_test_module_files(texts: &BTreeMap<String, String>) -> std::collections::BTreeSet<String> {
+    let mut out = std::collections::BTreeSet::new();
+    for (rel, text) in texts {
+        for path in sc_graph::out_of_line_cfg_test_paths_from_source(text, rel) {
+            out.insert(path);
+        }
+    }
     out
 }
 
@@ -290,6 +315,46 @@ impl CachedFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn out_of_line_cfg_test_file_skips_perf() {
+        let dir = std::env::temp_dir().join(format!("sc-cfg-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::write(
+            dir.join("src/lib.rs"),
+            "pub fn product(rows: &[String]) -> Vec<String> {\n    let mut out = Vec::new();\n    for row in rows { out.push(row.clone()); }\n    out\n}\n\n#[cfg(test)]\nmod helpers;\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.join("src/helpers.rs"),
+            "pub fn helper(rows: &[String]) -> Vec<String> {\n    let mut out = Vec::new();\n    for row in rows {\n        for _ in 0..1 { out.push(row.clone()); }\n    }\n    out\n}\n",
+        )
+        .unwrap();
+        let files = analyze_tree_with_workspace(&dir, &[], "", true).0;
+        let helpers = files
+            .iter()
+            .find(|file| file.rel == "src/helpers.rs")
+            .expect("helpers.rs analyzed");
+        assert!(
+            helpers.perf.is_empty(),
+            "out-of-line cfg(test) file must not get perf hits: {:?}",
+            helpers.perf
+        );
+        let product = files
+            .iter()
+            .find(|file| file.rel == "src/lib.rs")
+            .expect("lib.rs analyzed");
+        assert!(
+            product
+                .perf
+                .iter()
+                .any(|hit| hit.symbol == "product" && hit.rule == "perf.clone_in_loop"),
+            "product still scanned: {:?}",
+            product.perf
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn second_read_reuses_the_cache() {
