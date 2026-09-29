@@ -34,7 +34,7 @@ pub struct Finding {
 /// How an agent should treat a finding.
 ///
 /// Errors from deterministic engines are `fix`. Missing tools and coverage
-/// gaps are `ask`.
+/// gaps are `ask`. A performance hint (`perf.*`) is `ignore`.
 pub fn disposition_for(rule: &str, severity: &str) -> &'static str {
     match rule {
         "engine.unavailable"
@@ -42,6 +42,7 @@ pub fn disposition_for(rule: &str, severity: &str) -> &'static str {
         | "coverage.unmatched"
         | "spec.llm_gap"
         | "sca.hallucinated_import" => "ask",
+        _ if rule.starts_with("perf.") => "ignore",
         _ if severity == "warning" => "ask",
         _ => "fix",
     }
@@ -535,6 +536,8 @@ mod tests {
         assert_eq!(disposition_for("crap.over_threshold", "error"), "fix");
         assert_eq!(disposition_for("engine.unavailable", "warning"), "ask");
         assert_eq!(disposition_for("sca.hallucinated_import", "warning"), "ask");
+        let perf_rule = format!("perf.{}", "clone_in_loop");
+        assert_eq!(disposition_for(&perf_rule, "warning"), "ignore");
         assert_eq!(finding["span"]["start_line"], 42);
         assert_eq!(finding["evidence"]["cc"], 12);
         assert_eq!(finding["evidence"]["crap"], 156.0);

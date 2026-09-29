@@ -76,7 +76,7 @@ Each JSON finding has a `disposition` that tells an agent what to do:
 |---|---|
 | `fix` | A real problem. Change the code. |
 | `ask` | Needs a human decision, such as installing a tool or declaring a dependency. |
-| `ignore` | Informational, such as performance hints. |
+| `ignore` | Informational, such as a `perf.*` hint. It stays in this report and is left out of the SARIF upload, so a pull-request check does not annotate it. |
 
 ## JSON
 
