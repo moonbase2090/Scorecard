@@ -50,7 +50,7 @@ Installs the Scorecard agent skill and registers the `sc-mcp` server for the cur
 | `pretty` | Terminal layout | Same text to `PATH` |
 | `json` | JSON scorecard | Same JSON to `PATH` |
 | `md` | Markdown | Same Markdown to `PATH` |
-| `sarif` | SARIF 2.1.0 | Same SARIF to `PATH` |
+| `sarif` | SARIF 2.1.0. Only `secrets.*` findings are level `error`; every other rule is `warning` or `note`. | Same SARIF to `PATH` |
 | `html` | Self-contained HTML page | Same HTML to `PATH` |
 | `all` | JSON, then Markdown | `.json`, `.md`, `.sarif`, and `.html` files next to `PATH` |
 

@@ -20,3 +20,16 @@ That fixture has a broken test, so the verdict is `fail`, the report
 lists a `test.failed` rule, and the process exits 1. Gate failures
 always mean a nonzero exit; warnings (like the undeclared-dependency
 advisory) do not fail the process on their own.
+
+## SARIF levels
+
+```bash
+sc analyze testdata/failing_test --format sarif | jq -r '.runs[0].results[] | "\(.ruleId) | \(.level)"'
+```
+
+```text
+coverage.missing | warning
+test.failed | warning
+```
+
+The failing test is level `warning` in SARIF, so GitHub code scanning does not count it as a security vulnerability. Only `secrets.*` findings are level `error`. The JSON report still gives `test.failed` severity `error`, and the tests gate still fails the run.

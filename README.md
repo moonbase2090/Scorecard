@@ -60,6 +60,8 @@ Exit status: `0` the enforced gates passed, `1` an enforced gate failed, `2` `sc
 
 `sc analyze . --diff BASE` scores only what changed against that git ref. When the project is a subdirectory of a larger repository, the changed paths are still relative to the project (`src/a.rs`).
 
+`sc analyze . --format sarif` writes SARIF for GitHub code scanning. Only `secrets.*` findings are level `error`, which code scanning counts as a security vulnerability. Every other rule, including a failing test or missing coverage, is level `warning` and still fails its gate ([CI](docs/how-to/ci.md)).
+
 Clippy findings use the first error with a file, line, and lint name. If no such error exists, they use the first warning with those details:
 
 ```bash doctest project=lint_diagnostic
