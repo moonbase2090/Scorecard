@@ -1342,8 +1342,8 @@ fn finish(mut draft: Draft) -> AnalyzeOutput {
     sort_findings(&mut draft.findings);
     unique_ids(&mut draft.findings);
     apply_disposition(&mut draft.findings);
-    sc_core::apply_fail_on(&mut draft.gates, &draft.fail_on);
-    let failed = sc_core::verdict_fails(&draft.gates, &draft.fail_on);
+    let verdict_failed = sc_core::verdict_fails(&draft.gates);
+    let exit_failed = sc_core::exit_code_fails(&draft.gates, &draft.fail_on);
     let scores = compute_scores(&draft.findings);
     let scorecard = Scorecard {
         version: SCORECARD_VERSION.to_string(),
@@ -1359,7 +1359,7 @@ fn finish(mut draft: Draft) -> AnalyzeOutput {
             other_paths: draft.other_paths,
         },
         intent: draft.intent,
-        verdict: if failed { "fail" } else { "pass" }.to_string(),
+        verdict: if verdict_failed { "fail" } else { "pass" }.to_string(),
         engines_run: draft.ran,
         engines_skipped: draft.skipped,
         scores,
@@ -1378,7 +1378,7 @@ fn finish(mut draft: Draft) -> AnalyzeOutput {
     write_last_scorecard(&draft.root, &scorecard);
     let status = if draft.analyzer_error {
         RunStatus::AnalyzerError
-    } else if failed {
+    } else if exit_failed {
         RunStatus::GateFailed
     } else {
         RunStatus::Passed
@@ -3616,8 +3616,7 @@ mod tests {
     #[test]
     fn blocked_analysis_reports_pre_analysis_git_state() {
         // analyze() snapshots git before any engine runs: a clean repo with
-        // no detectable pack reports clean with the committed head, and an
-        // empty --fail-on set reconciles every gate to reported-only.
+        // no detectable pack reports clean with the committed head.
         let dir = git_repo("sc-git-blocked");
         let output = analyze(AnalyzeRequest {
             root: dir.clone(),
@@ -3635,7 +3634,6 @@ mod tests {
         });
         assert!(!output.scorecard.git.dirty);
         assert_eq!(output.scorecard.git.head.as_ref().unwrap().len(), 40);
-        assert!(output.scorecard.gates.iter().all(|gate| !gate.enforced));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

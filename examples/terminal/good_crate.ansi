@@ -26,5 +26,5 @@ findings
 engines run: compile, tests, coverage, complexity, crap, sca, secrets, perf, lint
 engines skipped: spec, mutation, llm
 duration: 0.9s
-exit 0: gates passed
+exit 0: enforced gates passed
 

@@ -29,4 +29,4 @@ warning
 engines run: complexity, crap, html, a11y, links, secrets
 engines skipped: compile, tests, coverage, sca, lint, mutation, llm
 duration: DURs
-exit 0: gates passed
+exit 0: enforced gates passed

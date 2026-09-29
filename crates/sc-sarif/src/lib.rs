@@ -48,7 +48,10 @@ pub fn to_sarif(card: &Scorecard) -> String {
                 }
             },
             "results": results,
-            "properties": {"scorecardGates": gates},
+            "properties": {
+                "scorecardVerdict": sc_core::report_verdict(card),
+                "scorecardGates": gates,
+            },
         }]
     });
     serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".into())
@@ -177,6 +180,24 @@ mod tests {
             secrets_text.contains("\"level\": \"error\"")
                 || secrets_text.contains("\"level\":\"error\""),
             "{secrets_text}"
+        );
+    }
+
+    #[test]
+    fn sarif_includes_the_scorecard_verdict_and_gate_enforcement() {
+        let mut card = Scorecard::skeleton(".", 30);
+        card.verdict = "pass".into();
+        card.gates.push(sc_core::Gate {
+            id: "lint".into(),
+            pass: false,
+            enforced: true,
+            reason: Some("lint failed".into()),
+        });
+        let value: Value = serde_json::from_str(&to_sarif(&card)).unwrap();
+        assert_eq!(value["runs"][0]["properties"]["scorecardVerdict"], "fail");
+        assert_eq!(
+            value["runs"][0]["properties"]["scorecardGates"][0]["enforced"],
+            true
         );
     }
 

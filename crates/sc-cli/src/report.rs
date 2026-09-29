@@ -140,14 +140,14 @@ pub(crate) enum Outcome {
     Pass,
     /// Enforced gates passed; this many advisory gates (such as `sca`) failed.
     Advisory(usize),
-    /// No gate was enforced (empty `--fail-on`) and this many failed. Must
-    /// never read as a clean pass.
+    /// No gate was enforced and this many failed. Must never read as a clean
+    /// pass.
     ReportOnly(usize),
 }
 
 impl Outcome {
     pub(crate) fn of(card: &Scorecard) -> Self {
-        if card.verdict != "pass" {
+        if sc_core::report_verdict(card) != "pass" {
             return Outcome::Fail;
         }
         let provided: Vec<_> = card.gates.iter().filter(|gate| provided(gate)).collect();
@@ -175,7 +175,7 @@ impl Outcome {
     fn word(self, card: &Scorecard) -> &str {
         match self {
             Outcome::ReportOnly(_) => "report only",
-            _ => &card.verdict,
+            _ => sc_core::report_verdict(card),
         }
     }
 }
@@ -1437,7 +1437,7 @@ mod tests {
 
     #[test]
     fn html_marks_pass_with_failures_report_only() {
-        // Empty --fail-on dogfood case: verdict passes while gates failed.
+        // A report-only run must not read as a clean pass.
         let mut c = card();
         c.verdict = "pass".into();
         c.gates[0].enforced = false;
@@ -1451,8 +1451,19 @@ mod tests {
     }
 
     #[test]
+    fn html_fails_when_an_enforced_gate_fails_even_if_verdict_says_pass() {
+        let mut c = card();
+        c.verdict = "pass".into();
+        c.gates[0].pass = false;
+        c.gates[0].enforced = true;
+        let html = to_html(&c);
+        assert!(html.contains("<span class=\"verdict fail\">FAIL</span>"));
+        assert!(!html.contains("REPORT ONLY"));
+    }
+
+    #[test]
     fn html_advisory_miss_stays_pass_with_a_note() {
-        // Default --fail-on: enforced gates passed, only advisory sca failed.
+        // Enforced gates passed; only advisory sca failed.
         let mut c = card();
         c.verdict = "pass".into();
         c.gates[0].pass = true;

@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Enforced gate failures remain visible as a `FAIL` verdict in JSON, Markdown, HTML, SARIF, and terminal output when `--fail-on` suppresses exit 1. SARIF now includes the scorecard verdict; `--fail-on` selects the process exit code without hiding failures from gates that remain enforced.
 - `sc analyze --diff` scores a project that lives in a subdirectory of its git repository. Changed paths are relative to that project (`src/a.rs`), so the complexity and CRAP gates see the change. Before, the diff was empty and those gates passed without scoring it.
 - Only `secrets.*` findings upload to code scanning at SARIF error level. Every other rule (`test.failed`, `coverage.missing`, lint, CRAP) uploads at warning, so a failing test or missing coverage report never counts as a security vulnerability. Finding severity in the JSON report is unchanged.
 - A tracked file over 1 MiB that starts with NUL bytes is scanned for secrets instead of being skipped as binary. A secret in that file is reported; gitignored build output is still skipped.
@@ -55,7 +56,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The readme, `docs/config.md`, and `analyzer.toml.example` say where `analyzer.toml` goes: the root of the analyzed directory (usually the repo root), then `~/.config/sc/analyzer.toml`, with no parent or sub-directory search.
 - The HTML report summary grid keeps the git SHA inside its own cell. A long value wraps or clips instead of painting over the tests column.
 - `sca.hallucinated_import` treats workspace member package names and their dependencies as declared. A path dep written with a hyphen matches the underscore name used in source.
-- A report-only run (`--fail-on ""` with failing gates) no longer reads as a clean pass anywhere. The HTML flow strip and page title say `report only`, the markdown verdict line adds the failing count, and the terminal shows a `REPORT ONLY` banner and `exit 0: no enforced gate failed`. A run whose enforced gates pass while an advisory gate such as `sca` fails stays `PASS`, with a note such as `1 advisory gate failing`, instead of switching to `REPORT ONLY`.
+- When no gate is enforced and advisory gates fail, reports say `REPORT ONLY` with the failing count. A run whose enforced gates pass while an advisory gate such as `sca` fails stays `PASS`, with a note such as `1 advisory gate failing`.
 - The HTML flow strip's scope box counts paths (`tree · 42 paths`) instead of calling them skipped, and the markdown scope line no longer claims every tree is `src`.
 - Incomplete coverage leaves unmatched functions unscored. Measured rows still show their coverage percent and can fail the gate. When nothing measured fails, the `crap` gate is advisory because some functions have no coverage record.
 - Python now retries coverage collection with `coverage.py` when `pytest --cov` did not write a report, using the same `--source` directories as pytest-cov. Node coverage can come from either c8 or nyc; both run with `--all` so unloaded files stay measured.
@@ -82,7 +83,7 @@ Version 0.1.2 was tagged but never published. This release includes its planned 
 ### Fixed
 
 - HTML report truncates a long git SHA to 12 characters so the header column does not overflow.
-- Gates outside `--fail-on` render as reported-only across JSON, Markdown, HTML, and the terminal.
+- Enforced failures outside `--fail-on` remain visible in the report verdict; the selected list controls the process exit code.
 - Unprovided gates show a skipped pill and no longer count in the HTML flow-strip ratio.
 - Git dirty detection snapshots at analyze start so Scorecard's own outputs do not mark a clean checkout dirty.
 - The `sca` gate stays advisory when it passes, so JSON, Markdown, HTML, and the terminal layout agree. A failing dependency check still does not change the exit code.
