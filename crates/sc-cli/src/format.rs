@@ -184,7 +184,7 @@ fn pct(coverage: f64) -> i64 {
     (coverage.clamp(0.0, 1.0) * 100.0).round() as i64
 }
 
-fn fmt_num(value: f64) -> String {
+pub(crate) fn fmt_num(value: f64) -> String {
     if (value - value.round()).abs() < 1e-6 {
         format!("{}", value.round() as i64)
     } else {
@@ -384,9 +384,9 @@ mod tests {
         let html = crate::report::to_html(&card);
         let types_at = html.find(">types<").unwrap();
         let sca_at = html.find(">sca<").unwrap();
-        let types_cell = &html[types_at..html[types_at..].find("</tr>").unwrap() + types_at];
-        let sca_cell = &html[sca_at..html[sca_at..].find("</tr>").unwrap() + sca_at];
-        assert!(types_cell.contains(">yes<"), "{types_cell}");
+        let types_cell = &html[types_at..html[types_at..].find("</li>").unwrap() + types_at];
+        let sca_cell = &html[sca_at..html[sca_at..].find("</li>").unwrap() + sca_at];
+        assert!(types_cell.contains(">enforced<"), "{types_cell}");
         assert!(sca_cell.contains("reported only"), "{sca_cell}");
         assert!(html.contains("overflow-wrap:anywhere"));
 

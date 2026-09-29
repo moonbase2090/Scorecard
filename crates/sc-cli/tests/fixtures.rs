@@ -550,3 +550,31 @@ fn all_format_writes_an_html_sibling() {
         let _ = std::fs::remove_file(out.with_extension(ext));
     }
 }
+
+#[test]
+fn html_report_passes_scs_own_web_checks() {
+    // sc checks its own report: html (doctype, viewport, parse, unclosed and
+    // misnested tags), a11y, links, secrets and CRAP on the inline script.
+    let dir = std::env::temp_dir().join(format!("sc-report-web-{}", std::process::id()));
+    for fixture in ["testdata/failing_test", "testdata/good_crate"] {
+        let (_, html, stderr) =
+            analyze_raw(&[fixture, "--format", "html", "--budget-seconds", "180"]);
+        assert!(html.starts_with("<!DOCTYPE html>"), "{fixture}: {stderr}");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("index.html"), &html).unwrap();
+        let dir_s = dir.to_string_lossy().to_string();
+        let (_, json, stderr) = analyze_raw(&[&dir_s, "--pack", "web", "--format", "json"]);
+        let card: serde_json::Value =
+            serde_json::from_str(&json).unwrap_or_else(|_| panic!("{stderr}"));
+        let problems: Vec<String> = card["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|f| f["file"] != ".")
+            .map(|f| format!("{} {}", f["rule"], f["message"]))
+            .collect();
+        assert!(problems.is_empty(), "{fixture} report: {problems:#?}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
