@@ -108,7 +108,7 @@ sc analyze . --format all --out sc-report >/dev/null
 ls sc-report.json sc-report.md sc-report.sarif sc-report.html
 ```
 
-`--format all --out NAME` writes JSON, Markdown, SARIF, and a self-contained HTML page next to `NAME`. The HTML page is described in [HTML report](html-report.md). SARIF is for GitHub code scanning; see [CI](how-to/ci.md).
+`--format all --out NAME` writes JSON, Markdown, SARIF, and a self-contained HTML page next to `NAME`. The HTML page is described in [HTML report](html-report.md). SARIF is for GitHub code scanning; see [CI](how-to/ci.md). GitHub counts every SARIF `error` as a high severity security alert, so only `secrets.*` findings use level `error`. A failing test or missing coverage report is level `warning` in SARIF, stays severity `error` in the JSON report, and still fails its gate.
 
 ## The `.sc/` directory
 
