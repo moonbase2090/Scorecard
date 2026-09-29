@@ -59,6 +59,7 @@ pub fn run(
     untested_cc: u32,
     started: std::time::SystemTime,
     exclude: &[String],
+    coverage_enabled: bool,
 ) -> PythonOutcome {
     let mut findings = Vec::new();
     let mut runs = Vec::new();
@@ -95,7 +96,9 @@ pub fn run(
     let mut coverage = read_coverage(root, &functions, started);
     let mut coverage_reason: Option<String> = None;
     let mut coverage_fix: Option<&'static str> = None;
-    if coverage.is_none() && tests_enforced && tests_pass {
+    if !coverage_enabled {
+        coverage = None;
+    } else if coverage.is_none() && tests_enforced && tests_pass {
         if let Err(err) = run_coverage_fallback(root, deadline, &cov_sources(&functions), &mut runs)
         {
             coverage_reason = Some(err);
@@ -130,7 +133,13 @@ pub fn run(
             .rev()
             .find(|run| run.engine == "tests" && run.exit_code != Some(0))
             .and_then(|run| run.exit_code);
-        let (reason, fix) = if !tests_enforced {
+        let (reason, fix) = if !coverage_enabled {
+            (
+                "coverage is disabled (`engines.coverage = false`), so coverage was not collected"
+                    .to_string(),
+                "Set `engines.coverage = true` in analyzer.toml and re-run `sc analyze`",
+            )
+        } else if !tests_enforced {
             (
                 "no pytest suite was detected, so coverage was not collected".to_string(),
                 "Add pytest tests, then run `sc analyze` again",
@@ -1816,6 +1825,45 @@ fn error_finding(id: &str, rule: &str, engine: &str, message: String, action: &s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn coverage_disabled_skips_collection_and_names_the_flag() {
+        let root = std::env::temp_dir().join(format!("sc-py-nocov-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("app.py"), "def wide(n):\n    return n\n").unwrap();
+        let outcome = run(
+            &root,
+            std::time::Instant::now() + std::time::Duration::from_secs(60),
+            30,
+            15,
+            std::time::SystemTime::now(),
+            &[],
+            false,
+        );
+        assert!(!outcome.crap_coverage_complete);
+        assert!(outcome.crap_worst.is_empty());
+        assert!(outcome.skipped.iter().any(|engine| engine == "coverage"));
+        let missing = outcome
+            .findings
+            .iter()
+            .find(|finding| finding.rule == "coverage.missing")
+            .expect("coverage.missing when disabled");
+        assert!(
+            missing.message.contains("engines.coverage = false"),
+            "{}",
+            missing.message
+        );
+        assert!(
+            missing
+                .suggested_action
+                .as_deref()
+                .unwrap_or("")
+                .contains("engines.coverage = true"),
+            "{missing:?}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn coverage_tests_skip_reason_does_not_blame_missing_pytest() {

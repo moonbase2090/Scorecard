@@ -279,6 +279,12 @@ mod tests {
     #[test]
     fn markdown_marks_unmeasured_coverage() {
         let mut card = Scorecard::skeleton(".", 30);
+        let md = to_markdown(&card);
+        assert!(md.contains(
+            "Coverage was not measured, so no CRAP scores are reported and nothing is treated as 0% coverage."
+        ));
+        assert!(md.contains("| | | | | |"));
+        card.engines_run.push("coverage".into());
         card.crap = CrapSection {
             threshold: 30,
             worst: vec![CrapFunction {
@@ -289,12 +295,6 @@ mod tests {
                 crap: 132.0,
             }],
         };
-        let md = to_markdown(&card);
-        assert!(md.contains(
-            "Coverage was not measured, so CRAP assumes 0% coverage. These numbers are an upper bound."
-        ));
-        assert!(md.contains("| 132 | 11 | not measured | classify | src/lib.rs |"));
-        card.engines_run.push("coverage".into());
         let md = to_markdown(&card);
         assert!(md.contains("| 132 | 11 | 0% | classify | src/lib.rs |"));
         assert!(!md.contains("not measured"));

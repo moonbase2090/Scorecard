@@ -17,7 +17,7 @@ scores
   a11y             1.00  [##########]
 
 worst crap  threshold 30
-  coverage not measured: CRAP assumes 0% coverage (upper bound)
+  coverage not measured: no CRAP scores, nothing treated as 0%
   (none)
 
 findings

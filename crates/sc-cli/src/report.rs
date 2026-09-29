@@ -500,14 +500,14 @@ fn gates(out: &mut String, card: &Scorecard) {
 
 /// Coverage counts as measured only when the coverage engine ran. Incomplete
 /// coverage still leaves measured rows scored; only a missing coverage run
-/// means every CRAP number assumes 0%.
+/// means no CRAP numbers are reported at all.
 pub(crate) fn coverage_measured(card: &Scorecard) -> bool {
     card.engines_run.iter().any(|engine| engine == "coverage")
 }
 
 /// One sentence for every renderer when coverage was not measured.
 pub(crate) const COVERAGE_NOT_MEASURED: &str =
-    "Coverage was not measured, so CRAP assumes 0% coverage. These numbers are an upper bound.";
+    "Coverage was not measured, so no CRAP scores are reported and nothing is treated as 0% coverage.";
 
 /// One line for a `--diff` report: how many paths were scored, and how many
 /// other source paths remain in the tree. `None` when not a diff run or when
@@ -611,7 +611,14 @@ fn crap(out: &mut String, card: &Scorecard) {
     out.push_str("<table>");
     out.push_str("<tr><th>crap</th><th>cc</th><th>coverage</th><th>symbol</th><th>file</th></tr>");
     if card.crap.worst.is_empty() {
-        out.push_str("<tr><td colspan=\"5\" style=\"color:var(--dim)\">No functions over the reporting window.</td></tr>");
+        let empty = if measured {
+            "No functions over the reporting window."
+        } else {
+            "No CRAP scores: coverage was not measured."
+        };
+        out.push_str("<tr><td colspan=\"5\" style=\"color:var(--dim)\">");
+        out.push_str(empty);
+        out.push_str("</td></tr>");
     }
     for row in &card.crap.worst {
         let over = row.crap > card.crap.threshold as f64;
@@ -1247,10 +1254,11 @@ mod tests {
     fn html_says_coverage_not_measured_instead_of_zero() {
         let mut c = card();
         c.engines_run.retain(|engine| engine != "coverage");
+        c.crap.worst.clear();
         let html = to_html(&c);
         assert!(html.contains("<b>—</b><span>coverage not measured</span>"));
-        assert!(html.contains("<span class=\"cov\">not measured</span>"));
-        assert!(html.contains("CRAP assumes 0% coverage"));
+        assert!(html.contains("nothing is treated as 0% coverage"));
+        assert!(html.contains("No CRAP scores: coverage was not measured."));
         assert!(!html.contains("<span>coverage</span>"));
         assert!(html.contains("<span>crap max</span>"));
         assert!(html.contains("<span>over threshold</span>"));
