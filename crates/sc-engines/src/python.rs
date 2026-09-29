@@ -357,6 +357,7 @@ fn run_pytest(
         let _ = std::fs::create_dir_all(parent);
     }
     let _ = std::fs::remove_file(&cov_file);
+    let base_command = pytest_command(&base, sources, &cov_file, false);
     let command = pytest_command(&base, sources, &cov_file, coverage_enabled);
     let command = if base.starts_with("uv ") || host_pytest() {
         command
@@ -371,8 +372,8 @@ fn run_pytest(
                     || captured.stderr.contains("unrecognized arguments")
                     || captured.stderr.contains("pytest-cov")) =>
         {
-            executed = base.clone();
-            shell(root, &base, deadline)
+            executed = base_command.clone();
+            shell(root, &base_command, deadline)
         }
         other => other,
     };
@@ -442,6 +443,31 @@ fn cov_sources(functions: &[sc_graph::FunctionInfo]) -> Vec<String> {
     dirs.into_iter().collect()
 }
 
+/// Put each Python `src/` root first on the test process's import path. A
+/// non-editable install can otherwise make pytest exercise a copy in
+/// site-packages while coverage measures the checkout's `src/` files.
+fn pythonpath_prefix(sources: &[String]) -> String {
+    let mut roots = BTreeSet::new();
+    for source in sources {
+        let mut root = PathBuf::new();
+        for component in Path::new(source).components() {
+            root.push(component);
+            if component.as_os_str() == "src" {
+                roots.insert(root.to_string_lossy().into_owned());
+                break;
+            }
+        }
+    }
+    if roots.is_empty() {
+        return String::new();
+    }
+    let roots = roots.into_iter().collect::<Vec<_>>().join(":");
+    format!(
+        "PYTHONPATH={}${{PYTHONPATH:+:\"$PYTHONPATH\"}} ",
+        crate::command::shell_quote_arg(&roots)
+    )
+}
+
 fn coverage_source_flags(sources: &[String]) -> String {
     sources
         .iter()
@@ -450,24 +476,25 @@ fn coverage_source_flags(sources: &[String]) -> String {
         .join(" ")
 }
 
-/// The pytest invocation before any missing-pytest retry: with coverage on,
-/// `--cov` per source plus a JSON report; with coverage off, the bare base
-/// command. Pure constructor so tests assert the built string directly.
+/// Build the pytest command. Coverage adds one `--cov` per source and a JSON
+/// report. A `src/` layout puts its source roots first on `PYTHONPATH` either
+/// way so tests import the checkout that Scorecard measures.
 fn pytest_command(
     base: &str,
     sources: &[String],
     cov_file: &Path,
     coverage_enabled: bool,
 ) -> String {
+    let pythonpath = pythonpath_prefix(sources);
     if !coverage_enabled {
-        return base.to_string();
+        return format!("{pythonpath}{base}");
     }
     let cov: Vec<String> = sources
         .iter()
         .map(|dir| format!("--cov={}", crate::command::shell_quote_arg(dir)))
         .collect();
     format!(
-        "{base} {} --cov-report=json:{}",
+        "{pythonpath}{base} {} --cov-report=json:{}",
         cov.join(" "),
         cov_file.display()
     )
@@ -476,15 +503,16 @@ fn pytest_command(
 /// `uv run` when the project has `uv.lock` or a `.venv` directory.
 /// Otherwise `python3 -m coverage`.
 fn coverage_fallback_command(root: &Path, cov_file: &Path, sources: &[String]) -> String {
+    let pythonpath = pythonpath_prefix(sources);
     let source_flags = coverage_source_flags(sources);
     let output = cov_file.display();
     if root.join("uv.lock").is_file() || root.join(".venv").is_dir() {
         format!(
-            "uv run --extra dev --with coverage coverage run {source_flags} -m pytest -q && uv run --extra dev --with coverage coverage json -o {output}"
+            "{pythonpath}uv run --extra dev --with coverage coverage run {source_flags} -m pytest -q && uv run --extra dev --with coverage coverage json -o {output}"
         )
     } else {
         format!(
-            "python3 -m coverage run {source_flags} -m pytest -q && python3 -m coverage json -o {output}"
+            "{pythonpath}python3 -m coverage run {source_flags} -m pytest -q && python3 -m coverage json -o {output}"
         )
     }
 }
@@ -1849,9 +1877,20 @@ mod tests {
         let cov_file = std::path::PathBuf::from("/tmp/sc-pytest.json");
         let sources = vec![".".to_string(), "src/app".to_string()];
         let off = pytest_command("python3 -m pytest -q", &sources, &cov_file, false);
-        assert_eq!(off, "python3 -m pytest -q", "{off}");
+        assert!(
+            off.starts_with("PYTHONPATH='src'${PYTHONPATH:+:\"$PYTHONPATH\"} python3 -m pytest -q"),
+            "{off}"
+        );
         assert!(!off.contains("--cov"), "{off}");
+        assert_eq!(
+            pytest_command("python3 -m pytest -q", &[".".into()], &cov_file, false),
+            "python3 -m pytest -q"
+        );
         let on = pytest_command("python3 -m pytest -q", &sources, &cov_file, true);
+        assert!(
+            on.starts_with("PYTHONPATH='src'${PYTHONPATH:+:\"$PYTHONPATH\"} python3 -m pytest -q"),
+            "{on}"
+        );
         assert!(on.contains("--cov='.'"), "{on}");
         assert!(on.contains("--cov='src/app'"), "{on}");
         assert!(on.contains("--cov-report=json:"), "{on}");
@@ -2423,6 +2462,59 @@ dev = ["pytest>=8"]
     }
 
     #[test]
+    fn src_layout_tests_import_the_checkout_before_an_installed_copy() {
+        let dir = scratch("srcpath");
+        let source_package = dir.join("src/sample_pkg");
+        let installed_package = dir.join("installed/sample_pkg");
+        std::fs::create_dir_all(&source_package).unwrap();
+        std::fs::create_dir_all(&installed_package).unwrap();
+        std::fs::write(source_package.join("__init__.py"), "ORIGIN = 'checkout'\n").unwrap();
+        std::fs::write(
+            installed_package.join("__init__.py"),
+            "ORIGIN = 'installed'\n",
+        )
+        .unwrap();
+
+        let import = "import sample_pkg; print(sample_pkg.ORIGIN)";
+        let baseline_command = format!("python3 -c {}", crate::command::shell_quote_arg(import));
+        let mut baseline = Command::new("sh");
+        baseline
+            .current_dir(&dir)
+            .env("PYTHONPATH", dir.join("installed"))
+            .args(["-c", baseline_command.as_str()]);
+        let installed = baseline.output().expect("python3 is available");
+        assert!(
+            installed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&installed.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&installed.stdout).trim(),
+            "installed"
+        );
+
+        let command = pytest_command(
+            &format!("python3 -c {}", crate::command::shell_quote_arg(import)),
+            &["src/sample_pkg".into()],
+            &dir.join(".sc/coverage/pytest.json"),
+            false,
+        );
+        let mut with_src = Command::new("sh");
+        with_src
+            .current_dir(&dir)
+            .env("PYTHONPATH", dir.join("installed"))
+            .args(["-c", &command]);
+        let checkout = with_src.output().expect("python3 is available");
+        assert!(
+            checkout.status.success(),
+            "{}",
+            String::from_utf8_lossy(&checkout.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&checkout.stdout).trim(), "checkout");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn coverage_fallback_passes_the_same_sources_as_pytest_cov() {
         let flags = coverage_source_flags(&[".".into(), "src/app".into(), "tools".into()]);
         assert_eq!(flags, "--source='.' --source='src/app' --source='tools'");
@@ -2435,8 +2527,9 @@ dev = ["pytest>=8"]
         let cov_file = dir.join(".sc/coverage/pytest.json");
         let sources = ["src".to_string(), ".".to_string()];
         let python3 = coverage_fallback_command(&dir, &cov_file, &sources);
-        assert!(python3
-            .starts_with("python3 -m coverage run --source='src' --source='.' -m pytest -q && "));
+        assert!(python3.starts_with(
+            "PYTHONPATH='src'${PYTHONPATH:+:\"$PYTHONPATH\"} python3 -m coverage run --source='src' --source='.' -m pytest -q && "
+        ));
         assert!(python3.contains(&format!(
             "python3 -m coverage json -o {}",
             cov_file.display()
@@ -2444,15 +2537,14 @@ dev = ["pytest>=8"]
         assert!(!python3.contains("uv run"));
 
         std::fs::write(dir.join(".venv"), "not a directory\n").unwrap();
-        assert!(
-            coverage_fallback_command(&dir, &cov_file, &sources).starts_with("python3 -m coverage")
-        );
+        assert!(coverage_fallback_command(&dir, &cov_file, &sources)
+            .starts_with("PYTHONPATH='src'${PYTHONPATH:+:\"$PYTHONPATH\"} python3 -m coverage"));
         std::fs::remove_file(dir.join(".venv")).unwrap();
 
         std::fs::create_dir(dir.join(".venv")).unwrap();
         let venv = coverage_fallback_command(&dir, &cov_file, &sources);
         assert!(venv.starts_with(
-            "uv run --extra dev --with coverage coverage run --source='src' --source='.' -m pytest -q && "
+            "PYTHONPATH='src'${PYTHONPATH:+:\"$PYTHONPATH\"} uv run --extra dev --with coverage coverage run --source='src' --source='.' -m pytest -q && "
         ));
         assert!(venv.contains(&format!(
             "uv run --extra dev --with coverage coverage json -o {}",
@@ -2487,7 +2579,7 @@ dev = ["pytest>=8"]
         );
         assert!(runs[0]
             .command
-            .starts_with("python3 -m coverage run --source='src' "));
+            .starts_with("PYTHONPATH='src'${PYTHONPATH:+:\"$PYTHONPATH\"} python3 -m coverage run --source='src' "));
         assert_ne!(runs[0].exit_code, Some(0));
         assert!(dir.join(".sc/coverage").is_dir());
         let _ = std::fs::remove_dir_all(&dir);

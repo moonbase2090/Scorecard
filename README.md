@@ -126,6 +126,8 @@ cargo install --locked --path crates/sc-mcp
 
 Rust coverage needs `rustup component add llvm-tools` and `cargo install cargo-llvm-cov`. Without them `sc` still runs and reports coverage as not measured. Other packs need their own tools; see [packs](docs/packs.md).
 
+For Python projects with a `src/` layout, `sc` prepends each source root to `PYTHONPATH` while tests and coverage run. Pytest then imports the checkout files that Scorecard measures, even when another package copy is installed.
+
 For a Cargo workspace, analyze the root to check every member. Analyze a member directory to check only that package and avoid sibling crates.
 
 ## License
