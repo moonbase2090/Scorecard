@@ -357,19 +357,7 @@ fn run_pytest(
         let _ = std::fs::create_dir_all(parent);
     }
     let _ = std::fs::remove_file(&cov_file);
-    let command = if coverage_enabled {
-        let cov: Vec<String> = sources
-            .iter()
-            .map(|dir| format!("--cov={}", crate::command::shell_quote_arg(dir)))
-            .collect();
-        format!(
-            "{base} {} --cov-report=json:{}",
-            cov.join(" "),
-            cov_file.display()
-        )
-    } else {
-        base.clone()
-    };
+    let command = pytest_command(&base, sources, &cov_file, coverage_enabled);
     let command = if base.starts_with("uv ") || host_pytest() {
         command
     } else {
@@ -460,6 +448,29 @@ fn coverage_source_flags(sources: &[String]) -> String {
         .map(|dir| format!("--source={}", crate::command::shell_quote_arg(dir)))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// The pytest invocation before any missing-pytest retry: with coverage on,
+/// `--cov` per source plus a JSON report; with coverage off, the bare base
+/// command. Pure constructor so tests assert the built string directly.
+fn pytest_command(
+    base: &str,
+    sources: &[String],
+    cov_file: &Path,
+    coverage_enabled: bool,
+) -> String {
+    if !coverage_enabled {
+        return base.to_string();
+    }
+    let cov: Vec<String> = sources
+        .iter()
+        .map(|dir| format!("--cov={}", crate::command::shell_quote_arg(dir)))
+        .collect();
+    format!(
+        "{base} {} --cov-report=json:{}",
+        cov.join(" "),
+        cov_file.display()
+    )
 }
 
 /// `uv run` when the project has `uv.lock` or a `.venv` directory.
@@ -1835,37 +1846,15 @@ mod tests {
 
     #[test]
     fn pytest_command_omits_cov_flags_when_coverage_is_disabled() {
-        let root = std::env::temp_dir().join(format!("sc-py-nocov-cmd-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(root.join("test")).unwrap();
-        std::fs::write(root.join("app.py"), "def wide(n):\n    return n\n").unwrap();
-        std::fs::write(
-            root.join("test/test_app.py"),
-            "from app import wide\ndef test_wide():\n    assert wide(1) == 1\n",
-        )
-        .unwrap();
-        let mut runs = Vec::new();
-        let _ = run_pytest(
-            &root,
-            std::time::Instant::now() + std::time::Duration::from_secs(60),
-            &[".".to_string()],
-            &mut Vec::new(),
-            &mut runs,
-            &mut Vec::new(),
-            &mut Vec::new(),
-            false,
-        );
-        let test_run = runs
-            .iter()
-            .find(|run| run.engine == "tests")
-            .expect("tests engine records a run");
-        assert!(!test_run.command.contains("--cov"), "{}", test_run.command);
-        assert!(
-            !test_run.command.contains("--cov-report"),
-            "{}",
-            test_run.command
-        );
-        let _ = std::fs::remove_dir_all(&root);
+        let cov_file = std::path::PathBuf::from("/tmp/sc-pytest.json");
+        let sources = vec![".".to_string(), "src/app".to_string()];
+        let off = pytest_command("python3 -m pytest -q", &sources, &cov_file, false);
+        assert_eq!(off, "python3 -m pytest -q", "{off}");
+        assert!(!off.contains("--cov"), "{off}");
+        let on = pytest_command("python3 -m pytest -q", &sources, &cov_file, true);
+        assert!(on.contains("--cov='.'"), "{on}");
+        assert!(on.contains("--cov='src/app'"), "{on}");
+        assert!(on.contains("--cov-report=json:"), "{on}");
     }
 
     #[test]
