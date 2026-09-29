@@ -577,9 +577,14 @@ fn analyze_unsupported(
                 .map(|data| crate::crap::unmatched_count(&functions, data))
                 .unwrap_or(functions.len() as u64);
             if unmatched > 0 {
+                let fix = if !request.config.engines.coverage {
+                    "Set `engines.coverage = true` in analyzer.toml and re-run `sc analyze`"
+                } else {
+                    coverage_fix_hint(pack)
+                };
                 findings.push(crate::coverage::missing_finding(
                     &format!("coverage data is missing for {unmatched} analyzed function(s)"),
-                    coverage_fix_hint(pack),
+                    fix,
                 ));
             }
         }
@@ -661,6 +666,7 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         request.config.gates.new_fn_untested_cc,
         started,
         &request.config.scope.exclude,
+        request.config.engines.coverage,
     );
     let gates = vec![
         if outcome.types_pass {
