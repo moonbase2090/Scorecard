@@ -73,3 +73,10 @@ private_key:
 ```
 
 Run `sc analyze .` to report these as `secrets.private_key`. See the [rules reference](../docs/reference/rules.md#rules) for the finding and fix.
+
+## Secrets
+
+Run `sc analyze .` from the project root to check secrets. A Slack incoming
+webhook reports as `secrets.slack_webhook`, a Stripe `rk_live_` key as
+`secrets.stripe_key`, and an AWS Terraform provider `secret_key` as
+`secrets.aws_secret_key`. These findings fail the secrets gate by default.

@@ -52,14 +52,9 @@ pub fn secrets_in_text(text: &str, rel: &str) -> Vec<Finding> {
                 end_col: col.saturating_add(1),
             }),
             symbol: None,
-            message: format!(
-                "{} on line {line_no}. Remove it from the tree and rotate it if it was used.",
-                secret_name(rule)
-            ),
+            message: secret_message(rule, line_no),
             evidence: serde_json::json!({"rule": rule}),
-            suggested_action: Some(
-                "Remove the secret from source and rotate it if it is real".into(),
-            ),
+            suggested_action: Some(secret_action(rule).into()),
             disposition: String::new(),
         });
     }
@@ -72,9 +67,30 @@ fn secret_name(rule: &str) -> &'static str {
         "secrets.aws_secret_key" => "AWS secret access key",
         "secrets.github_token" => "GitHub token",
         "secrets.slack_token" => "Slack token",
+        "secrets.slack_webhook" => "Slack incoming webhook",
         "secrets.stripe_key" => "Stripe live key",
         "secrets.private_key" => "private key block",
         _ => "secret",
+    }
+}
+
+fn secret_message(rule: &str, line_no: u32) -> String {
+    if rule == "secrets.slack_webhook" {
+        return format!(
+            "Slack incoming webhook on line {line_no} can post to its destination. Remove it and revoke the webhook in Slack."
+        );
+    }
+    format!(
+        "{} on line {line_no}. Remove it from the tree and rotate it if it was used.",
+        secret_name(rule)
+    )
+}
+
+fn secret_action(rule: &str) -> &'static str {
+    if rule == "secrets.slack_webhook" {
+        "Remove it from source and revoke the webhook in Slack"
+    } else {
+        "Remove the secret from source and rotate it if it is real"
     }
 }
 
@@ -87,6 +103,9 @@ fn match_line(line: &str) -> Option<(&'static str, usize)> {
     }
     if let Some(at) = github_at(line) {
         return Some(("secrets.github_token", at));
+    }
+    if let Some(at) = slack_webhook_at(line) {
+        return Some(("secrets.slack_webhook", at));
     }
     if let Some(at) = slack_at(line) {
         return Some(("secrets.slack_token", at));
@@ -277,7 +296,11 @@ fn github_at(line: &str) -> Option<usize> {
 /// The documented example and a low-entropy string are not keys.
 fn aws_secret_at(line: &str) -> Option<usize> {
     let lower = line.to_ascii_lowercase();
-    if !lower.contains("secret_access_key") && !lower.contains("secretaccesskey") {
+    if !lower.contains("secret_access_key")
+        && !lower.contains("secretaccesskey")
+        && !lower.contains("secret_key")
+        && !lower.contains("secretkey")
+    {
         return None;
     }
     let bytes = line.as_bytes();
@@ -387,14 +410,57 @@ fn slack_at(line: &str) -> Option<usize> {
     None
 }
 
-fn stripe_at(line: &str) -> Option<usize> {
-    for at in token_ats(line, "sk_live_", 16, |c| c.is_ascii_alphanumeric()) {
-        let body = token_body(line, at, "sk_live_".len(), |c| c.is_ascii_alphanumeric());
-        if credential_signal(body) {
-            return Some(at);
+fn slack_webhook_at(line: &str) -> Option<usize> {
+    const PATH: &str = "https://hooks.slack.com/services/";
+    let mut remaining = line;
+    let mut offset = 0;
+    while let Some(start) = remaining.find(PATH) {
+        let next = start + PATH.len();
+        let path_at = offset + next;
+        offset += next;
+        remaining = &remaining[next..];
+        let mut segments = line[path_at..].split('/');
+        let Some(team) = segments.next() else {
+            continue;
+        };
+        let Some(channel) = segments.next() else {
+            continue;
+        };
+        let Some(token) = segments.next() else {
+            continue;
+        };
+        let token_len = token.bytes().take_while(u8::is_ascii_alphanumeric).count();
+        if slack_resource_id(team, b'T')
+            && slack_resource_id(channel, b'B')
+            && token_len >= 24
+            && credential_signal(&token[..token_len])
+        {
+            return Some(path_at + team.len() + channel.len() + 2);
         }
     }
     None
+}
+
+fn slack_resource_id(value: &str, prefix: u8) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() >= 9
+        && bytes.first() == Some(&prefix)
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit())
+}
+
+fn stripe_at(line: &str) -> Option<usize> {
+    let mut found = None;
+    for (prefix, min_tail) in [("sk_live_", 16), ("rk_live_", 24)] {
+        for at in token_ats(line, prefix, min_tail, |c| c.is_ascii_alphanumeric()) {
+            let body = token_body(line, at, prefix.len(), |c| c.is_ascii_alphanumeric());
+            if credential_signal(body) {
+                found = Some(found.map_or(at, |previous: usize| previous.min(at)));
+            }
+        }
+    }
+    found
 }
 
 fn token_body(line: &str, at: usize, prefix_len: usize, tail: impl Fn(char) -> bool) -> &str {
@@ -504,6 +570,43 @@ mod tests {
     }
 
     #[test]
+    fn flags_a_slack_incoming_webhook_and_ignores_placeholder_shapes() {
+        let body = mixed_tail(24);
+        let line =
+            format!("SLACK_WEBHOOK=https://hooks.slack.com/services/T04827361/B07719283/{body}");
+        let findings = secrets_in_text(&line, "config.env");
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].rule, "secrets.slack_webhook");
+        assert!(findings[0].message.contains("revoke the webhook in Slack"));
+        assert!(findings[0]
+            .suggested_action
+            .as_deref()
+            .unwrap()
+            .contains("revoke"));
+        assert_eq!(
+            findings[0].span.as_ref().unwrap().start_col as usize,
+            line.find(&body).unwrap() + 1
+        );
+
+        for url in [
+            format!("https://hooks.slack.com/services/T1234567/B07719283/{body}"),
+            format!(
+                "https://hooks.slack.com/services/T04827361/B07719283/{}Z",
+                mixed_tail(22)
+            ),
+            format!(
+                "https://hooks.slack.com/services/T04827361/B07719283/{}",
+                "A".repeat(24)
+            ),
+        ] {
+            assert!(
+                secrets_in_text(&url, "config.env").is_empty(),
+                "invalid or placeholder webhook must not match: {url}"
+            );
+        }
+    }
+
+    #[test]
     fn does_not_ignore_a_mixed_token_that_embeds_zero_runs() {
         // Build the body in pieces so this source file does not match itself.
         let body = ["Ab3k", "000000", "Qm9ZnR4pLx7w", "Ab3k", "Qm9ZnR4pLx"].concat();
@@ -587,6 +690,52 @@ mod tests {
             secrets_in_text(&bare, "app.py").is_empty(),
             "a 40-character value with no secret-key assignment is not a finding"
         );
+    }
+
+    #[test]
+    fn flags_a_terraform_aws_secret_key_and_ignores_low_entropy() {
+        let key = sample_secret();
+        let text = format!("provider \"aws\" {{ secret_key = \"{key}\" }}\n");
+        let findings = secrets_in_text(&text, "main.tf");
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].rule, "secrets.aws_secret_key");
+        assert!(findings[0].message.contains("AWS secret access key"));
+
+        let documented = format!("secret_key = \"{AWS_DOCUMENTED_SECRET}\"\n");
+        assert!(
+            secrets_in_text(&documented, "main.tf").is_empty(),
+            "the documented AWS example must not match"
+        );
+
+        let low_entropy = format!("secret_key = \"{}\"\n", "A".repeat(40));
+        assert!(
+            secrets_in_text(&low_entropy, "main.tf").is_empty(),
+            "a low-entropy value must not match"
+        );
+    }
+
+    #[test]
+    fn flags_stripe_secret_and_restricted_live_keys() {
+        for (prefix, tail_len) in [("sk_live_", 16), ("rk_live_", 24)] {
+            let body = mixed_tail(tail_len);
+            let line = format!("STRIPE={prefix}{body}");
+            let findings = secrets_in_text(&line, "config.env");
+            assert_eq!(findings.len(), 1, "{prefix} {findings:?}");
+            assert_eq!(findings[0].rule, "secrets.stripe_key");
+            assert_eq!(
+                findings[0].span.as_ref().unwrap().start_col as usize,
+                line.find(prefix).unwrap() + 1
+            );
+        }
+
+        let short = format!("STRIPE=rk_live_{}Z", mixed_tail(22));
+        let low_entropy = format!("STRIPE=rk_live_{}", "A".repeat(24));
+        for text in [short, low_entropy] {
+            assert!(
+                secrets_in_text(&text, "config.env").is_empty(),
+                "short or low-entropy Stripe value must not match: {text}"
+            );
+        }
     }
 
     fn sample_secret() -> String {

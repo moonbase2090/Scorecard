@@ -8,6 +8,8 @@
 
 The secrets scan checks files up to 64 MiB even when they contain NUL bytes. It skips gitignored large files. A non-ignored file over 64 MiB produces `secrets.partial`.
 
+The secrets gate recognizes Slack incoming webhooks, Stripe restricted live keys (`rk_live_`), and AWS provider secret keys in Terraform, alongside the existing token and key formats.
+
 ## Quickstart
 
 Download `sc` for your platform and run it on a project:
