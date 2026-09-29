@@ -7,11 +7,11 @@
 //!
 //! - correctness: `compile`, `tests`, `config`, `lint`, and `html` findings
 //! - maintainability: `complexity`, `crap`, and `coverage` findings
-//! - efficiency: `perf` findings (none in M1, so this stays 1.0)
+//! - efficiency: `perf` findings (only when `engines.perf` is on)
 //! - security: `secrets` and `sca` findings (`sca` warnings subtract 0.01)
 //! - a11y: `a11y` findings
 
-use crate::{Finding, Gate, Scores};
+use crate::{Finding, Gate, Scorecard, Scores};
 
 pub fn compute_scores(findings: &[Finding]) -> Scores {
     let mut correctness: f64 = 1.0;
@@ -70,24 +70,26 @@ pub fn exceeds_threshold(crap: f64, threshold: u32) -> bool {
     crap > f64::from(threshold)
 }
 
-pub fn verdict_fails(gates: &[Gate], fail_on: &[String]) -> bool {
+/// Whether any enforced gate failed, independent of the requested exit code.
+pub fn verdict_fails(gates: &[Gate]) -> bool {
+    gates.iter().any(|gate| gate.enforced && !gate.pass)
+}
+
+/// Resolve the report verdict without allowing an enforced failure to appear
+/// as a pass, even if a caller supplied an inconsistent scorecard.
+pub fn report_verdict(card: &Scorecard) -> &str {
+    if verdict_fails(&card.gates) {
+        "fail"
+    } else {
+        &card.verdict
+    }
+}
+
+/// Whether a failed enforced gate selected by `fail_on` should set exit 1.
+pub fn exit_code_fails(gates: &[Gate], fail_on: &[String]) -> bool {
     gates
         .iter()
         .any(|gate| gate.enforced && !gate.pass && fail_on.iter().any(|id| id == &gate.id))
-}
-
-/// Reconcile each gate's `enforced` flag with the run's `--fail-on` set.
-///
-/// A gate only fails the run when it is both statically enforced and named
-/// in `fail_on`. Folding the set into the flag keeps every renderer (HTML,
-/// terminal, markdown, JSON) honest: a failing gate outside `--fail-on`
-/// reports as "reported only" instead of claiming "enforced: yes" on a
-/// passing verdict. Verdict behavior is unchanged; `verdict_fails` already
-/// requires both conditions.
-pub fn apply_fail_on(gates: &mut [Gate], fail_on: &[String]) {
-    for gate in gates {
-        gate.enforced = gate.enforced && fail_on.iter().any(|id| id == &gate.id);
-    }
 }
 
 #[cfg(test)]
@@ -106,14 +108,15 @@ mod tests {
     }
 
     #[test]
-    fn unenforced_gates_do_not_fail_the_verdict() {
+    fn unenforced_gates_do_not_fail_the_verdict_or_exit_code() {
         let gates = vec![Gate {
             id: "crap".into(),
             pass: false,
             enforced: false,
             reason: Some("not provided by this pack".into()),
         }];
-        assert!(!verdict_fails(&gates, &["crap".into()]));
+        assert!(!verdict_fails(&gates));
+        assert!(!exit_code_fails(&gates, &["crap".into()]));
     }
 
     fn failing_gate(id: &str) -> Gate {
@@ -126,22 +129,20 @@ mod tests {
     }
 
     #[test]
-    fn apply_fail_on_clears_enforced_outside_the_set() {
-        // Dogfood case: --fail-on "" with a failing crap gate. The verdict
-        // passes, so the gate must report as reported-only, not enforced.
-        let mut gates = vec![failing_gate("crap"), failing_gate("tests")];
-        apply_fail_on(&mut gates, &[]);
-        assert!(gates.iter().all(|gate| !gate.enforced));
-        assert!(!verdict_fails(&gates, &[]));
+    fn fail_on_changes_exit_code_without_changing_the_verdict() {
+        let gates = vec![failing_gate("crap"), failing_gate("tests")];
+        assert!(verdict_fails(&gates));
+        assert!(!exit_code_fails(&gates, &[]));
+        assert!(exit_code_fails(&gates, &["crap".into()]));
+        assert!(gates.iter().all(|gate| gate.enforced));
     }
 
     #[test]
-    fn apply_fail_on_keeps_enforced_inside_the_set() {
-        let mut gates = vec![failing_gate("crap"), failing_gate("tests")];
-        apply_fail_on(&mut gates, &["crap".into()]);
-        assert!(gates[0].enforced);
-        assert!(!gates[1].enforced);
-        assert!(verdict_fails(&gates, &["crap".into()]));
+    fn report_verdict_corrects_a_pass_with_an_enforced_failure() {
+        let mut card = Scorecard::skeleton("demo", 30);
+        card.verdict = "pass".into();
+        card.gates = vec![failing_gate("lint")];
+        assert_eq!(report_verdict(&card), "fail");
     }
 
     #[test]

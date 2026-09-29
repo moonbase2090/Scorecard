@@ -92,6 +92,7 @@ def run_blocks(sc: Path, network: bool) -> list[str]:
                 env.update(
                     HOME=str(home),
                     PATH=f"{sc_dir}{os.pathsep}{env.get('PATH', '')}",
+                    SCORECARD_DOCS_BINARY=str(sc.resolve()),
                     NO_COLOR="1",
                     GIT_AUTHOR_NAME="docs",
                     GIT_AUTHOR_EMAIL="docs@example.invalid",
@@ -189,7 +190,7 @@ def check_invocations(options: dict[str, set[str]]) -> list[str]:
             for match in INVOCATION.finditer(line):
                 words = match.group(1).split()
                 if not words or words[0][0].isdigit():
-                    continue  # bare `sc`, or a version line such as `sc 0.1.3`
+                    continue  # bare `sc`, or a version line such as `sc 0.1.4`
                 parts: list[str] = []
                 index = 0
                 if not words[0].startswith("-"):

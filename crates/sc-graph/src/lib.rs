@@ -32,17 +32,20 @@ pub struct SourceFacts {
     pub local_names: Vec<String>,
 }
 
-pub fn inspect_source(text: &str, rel: &str) -> Option<SourceFacts> {
+pub fn inspect_source(text: &str, rel: &str, perf_enabled: bool) -> Option<SourceFacts> {
     let file = syn::parse_file(text).ok()?;
     Some(SourceFacts {
         functions: functions_in_source(&file, rel),
         imports: imports_in_file(&file, rel),
-        perf: perf_in_file(&file, rel),
+        perf: perf_in_file(&file, rel, perf_enabled),
         items: pub_items_in_file(&file, rel),
         local_names: local_names_in_file(&file),
     })
 }
 pub use discover::{is_excluded, scan, source_files, source_files_under, Scan};
 pub use imports::{imports_in_file, local_names_in_file, ImportHit};
-pub use perf::{perf_in_file, PerfHit};
+pub use perf::{
+    cfg_test_coverage, is_cfg_test_only, module_subtree_prefix, out_of_line_cfg_test_paths,
+    out_of_line_cfg_test_paths_from_source, perf_in_file, PerfHit,
+};
 pub use pubs::{pub_items_in_file, PubItem};

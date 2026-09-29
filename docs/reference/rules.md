@@ -13,13 +13,14 @@ Every finding has a rule id. Severity `error` counts against the gate; `warning`
 | `coverage.unmatched` | warning | ask | Coverage ran, but some functions have no coverage record. | Check that those functions are built into the test run. `evidence.functions` lists them. |
 | `lint.failed` | error | fix | The linter reported problems. A Clippy finding uses the first error with a file, line, and lint name, or the first warning with those details if no such error exists. | Run the lint command from the finding and fix what it reports. |
 | `secrets.aws_access_key` | error | fix | An AWS access key id is in the tree. | Remove it, rotate the key, and rewrite history if it was pushed. |
-| `secrets.aws_secret_key` | error | fix | An AWS secret access key is in the tree. | Remove it, rotate the key, and rewrite history if it was pushed. |
+| `secrets.aws_secret_key` | error | fix | An AWS secret access key is in the tree, including a Terraform AWS provider `secret_key` assignment. | Remove it, rotate the key, and rewrite history if it was pushed. |
 | `secrets.github_token` | error | fix | A GitHub token is in the tree. | Remove it and revoke the token. |
-| `secrets.slack_token` | error | fix | A Slack token is in the tree. | Remove it and revoke the token. |
-| `secrets.stripe_key` | error | fix | A Stripe live key is in the tree. | Remove it and roll the key. |
-| `secrets.private_key` | error | fix | A private-key block is in the tree. | Remove it and replace the key. |
+| `secrets.slack_token` | error | fix | A Slack bot or app token is in the tree. | Remove it and revoke the token. |
+| `secrets.slack_webhook` | error | fix | A Slack incoming webhook URL is in the tree. | Remove it and revoke the webhook. |
+| `secrets.stripe_key` | error | fix | A Stripe live secret or restricted key is in the tree. | Remove it and roll the key. |
+| `secrets.private_key` | error | fix | A private-key block is in the tree, including PEM split across source string lines or YAML list items. | Remove it and replace the key. |
 | `secrets.unreadable` | error | fix | A file the secrets scan should read could not be opened, so the gate does not pass. | Restore read access, or exclude the path with `exclude = ["path"]` under `[scope]` in `analyzer.toml`. |
-| `secrets.partial` | error | fix | A text file over 64 MiB was not read, so the scan was partial and the gate does not pass. A lockfile over 1 MiB is still scanned. A NUL or a gitignore entry skips a larger build output instead. | Exclude that path with `exclude = ["path"]` under `[scope]` in `analyzer.toml`, or move the secret out of the large file. |
+| `secrets.partial` | error | fix | A file over 64 MiB was not read, so the scan was partial and the gate does not pass. A file over 1 MiB is still scanned (including when it contains NUL bytes) unless git ignores it. | Exclude that path with `exclude = ["path"]` under `[scope]` in `analyzer.toml`, or move the secret out of the large file. |
 | `sca.hallucinated_import` | warning | ask | An import is not a local module, not installed, and not on the package index. | Remove the import or correct the module name. |
 | `sca.undeclared_dependency` | warning | ask | An installed or published package is imported and is not declared. | Add it to the manifest (`Cargo.toml`, `pyproject.toml`, and so on). |
 | `sca.import_unresolved` | warning | ask | An import is not local and not installed, and the package index was not checked. | Add the package to the manifest or remove the import. |
@@ -27,6 +28,8 @@ Every finding has a rule id. Severity `error` counts against the gate; `warning`
 | `spec.missing_item` | error | fix | A public item named in `--spec` does not exist. | Add the item, or fix the spec. |
 | `spec.llm_gap` | warning | ask | The LLM review found a gap between the spec and the code. | Update the code or the spec. |
 | `mutation.survivor` | error | fix | A mutant survived the tests. | Add a test that fails for that mutant. |
+| `perf.nested_loop` | warning | ignore | A loop inside a loop (only when `engines.perf = true`). | Consider a lookup table or a single pass. |
+| `perf.clone_in_loop` | warning | ignore | A value is cloned on every loop iteration (only when `engines.perf = true`). | Clone once outside the loop, or borrow. |
 | `html.parse` | error | fix | The page does not parse cleanly. | Fix the markup at the location shown. |
 | `html.doctype` | error | fix | The page has no `<!doctype html>`. | Add it as the first line. |
 | `html.viewport` | error | fix | The page has no viewport `meta` tag. | Add `<meta name="viewport" content="width=device-width, initial-scale=1">`. |

@@ -21,7 +21,7 @@ Only the first file found is read. Command-line flags override the matching keys
 
 | Key | Default | Meaning |
 |---|---|---|
-| `gates.fail_on` | `["types", "tests", "crap", "secrets", "lint"]` | [Gates](gates.md) that fail the run. `--fail-on` overrides. An unknown gate name is an error (exit 2). |
+| `gates.fail_on` | `["types", "tests", "crap", "secrets", "lint"]` | [Gates](gates.md) whose failures set exit 1. `--fail-on` overrides; already enforced failures remain in the report verdict. An unknown gate name is an error (exit 2). |
 | `gates.crap_threshold` | `30` | A function with a [CRAP](../crap.md) score above this fails the `crap` gate. |
 | `gates.new_fn_untested_cc` | `15` | A function at or above this complexity with 0% measured coverage fails the `crap` gate (`complexity.untested`). With `--diff`, only new functions count. |
 
@@ -37,6 +37,7 @@ Only the first file found is read. Command-line flags override the matching keys
 |---|---|---|
 | `engines.coverage` | `true` | Run tests with coverage. `false` skips coverage; no CRAP scores are reported and nothing is treated as 0% coverage. |
 | `engines.sca` | `true` | Check that imports are declared dependencies. |
+| `engines.perf` | `false` | When true, Rust nested loops and `.clone()` inside a loop become `perf.*` findings (disposition `ignore`). Paths under `tests/` or `benches/`, `src/test.rs` / `src/tests.rs`, inline `#[cfg(test)]` / `#[…::test]` items, files from an out-of-line `#[cfg(test)] mod name;` (whole-tree lookup, including `--diff`), and children under that module's directory, are not scanned. Off by default so ordinary Rust does not change the report. |
 
 ### `[commands]`
 

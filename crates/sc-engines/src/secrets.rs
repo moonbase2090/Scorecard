@@ -52,14 +52,9 @@ pub fn secrets_in_text(text: &str, rel: &str) -> Vec<Finding> {
                 end_col: col.saturating_add(1),
             }),
             symbol: None,
-            message: format!(
-                "{} on line {line_no}. Remove it from the tree and rotate it if it was used.",
-                secret_name(rule)
-            ),
+            message: secret_message(rule, line_no),
             evidence: serde_json::json!({"rule": rule}),
-            suggested_action: Some(
-                "Remove the secret from source and rotate it if it is real".into(),
-            ),
+            suggested_action: Some(secret_action(rule).into()),
             disposition: String::new(),
         });
     }
@@ -72,9 +67,30 @@ fn secret_name(rule: &str) -> &'static str {
         "secrets.aws_secret_key" => "AWS secret access key",
         "secrets.github_token" => "GitHub token",
         "secrets.slack_token" => "Slack token",
+        "secrets.slack_webhook" => "Slack incoming webhook",
         "secrets.stripe_key" => "Stripe live key",
         "secrets.private_key" => "private key block",
         _ => "secret",
+    }
+}
+
+fn secret_message(rule: &str, line_no: u32) -> String {
+    if rule == "secrets.slack_webhook" {
+        return format!(
+            "Slack incoming webhook on line {line_no} can post to its destination. Remove it and revoke the webhook in Slack."
+        );
+    }
+    format!(
+        "{} on line {line_no}. Remove it from the tree and rotate it if it was used.",
+        secret_name(rule)
+    )
+}
+
+fn secret_action(rule: &str) -> &'static str {
+    if rule == "secrets.slack_webhook" {
+        "Remove it from source and revoke the webhook in Slack"
+    } else {
+        "Remove the secret from source and rotate it if it is real"
     }
 }
 
@@ -87,6 +103,9 @@ fn match_line(line: &str) -> Option<(&'static str, usize)> {
     }
     if let Some(at) = github_at(line) {
         return Some(("secrets.github_token", at));
+    }
+    if let Some(at) = slack_webhook_at(line) {
+        return Some(("secrets.slack_webhook", at));
     }
     if let Some(at) = slack_at(line) {
         return Some(("secrets.slack_token", at));
@@ -136,22 +155,86 @@ fn has_inline_pem_material(line: &str) -> bool {
 fn pem_block_has_body(lines: &[&str], header_idx: usize) -> bool {
     let mut material = String::new();
     for line in lines.iter().skip(header_idx + 1).take(64) {
-        let trimmed = line.trim();
-        if trimmed.starts_with("-----END ") && trimmed.contains(pem_end()) {
+        let payload = pem_line_payload(line);
+        if payload.starts_with("-----END ") && payload.contains(pem_end()) {
             break;
         }
-        if trimmed.starts_with("-----") {
+        if payload.starts_with("-----") {
             break;
         }
-        if trimmed.len() >= 16
-            && trimmed
+        if payload.len() >= 16
+            && payload
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
         {
-            material.push_str(trimmed);
+            material.push_str(&payload);
         }
     }
     material.len() >= 32 && shannon(&material) >= 3.0
+}
+
+/// Drop common source-language wrappers from a PEM body line.
+fn pem_line_payload(line: &str) -> String {
+    let mut s = line.trim();
+
+    if let Some(item) = s.strip_prefix("- ") {
+        s = item.trim_start();
+    }
+    if let Some(rest) = s.strip_prefix('+') {
+        let candidate = rest.trim_start();
+        let quoted = candidate.starts_with('"')
+            || candidate.starts_with('\'')
+            || candidate.starts_with('\x60')
+            || ["br", "rb", "fr", "rf", "b", "B", "r", "R", "f", "F"]
+                .iter()
+                .any(|prefix| {
+                    candidate
+                        .strip_prefix(prefix)
+                        .is_some_and(|value| value.starts_with('"') || value.starts_with('\''))
+                });
+        if quoted {
+            s = candidate;
+        }
+    }
+    if let Some(stripped) = s.strip_suffix(',') {
+        s = stripped.trim_end();
+    }
+
+    if let Some(before_operator) = s.strip_suffix('+') {
+        let before_operator = before_operator.trim_end();
+        if before_operator.ends_with('"')
+            || before_operator.ends_with('\'')
+            || before_operator.ends_with('\x60')
+        {
+            s = before_operator;
+        }
+    }
+
+    for prefix in ["br", "rb", "fr", "rf", "b", "B", "r", "R", "f", "F"] {
+        if let Some(rest) = s.strip_prefix(prefix) {
+            if rest.starts_with('"') || rest.starts_with('\'') {
+                s = rest;
+                break;
+            }
+        }
+    }
+
+    for delimiter in ["'''", "\"\"\"", "\x60", "\"", "'"] {
+        if s.starts_with(delimiter) && s.ends_with(delimiter) && s.len() > delimiter.len() * 2 {
+            s = &s[delimiter.len()..s.len() - delimiter.len()];
+            break;
+        }
+    }
+    if let Some(stripped) = s.strip_suffix("\\r\\n") {
+        s = stripped;
+    }
+    if let Some(stripped) = s.strip_suffix("\\n") {
+        s = stripped;
+    }
+    if let Some(stripped) = s.strip_suffix("\\r") {
+        s = stripped;
+    }
+    s.trim().to_string()
 }
 
 /// The two PEM markers live on separate lines so this file does not match itself.
@@ -166,7 +249,7 @@ fn pem_end() -> &'static str {
 fn aws_key_at(line: &str) -> Option<usize> {
     let mut found = None;
     for prefix in ["AKIA", "ASIA"] {
-        if let Some(at) = token_at(line, prefix, 16, |c| {
+        for at in token_ats(line, prefix, 16, |c| {
             c.is_ascii_uppercase() || c.is_ascii_digit()
         }) {
             let token = aws_access_token(line, at);
@@ -194,7 +277,7 @@ fn github_at(line: &str) -> Option<usize> {
     for prefix in ["github_pat_", "ghp_", "gho_", "ghu_", "ghs_", "ghr_"] {
         let min_tail = if prefix == "github_pat_" { 20 } else { 36 };
         let allow_underscore = prefix == "github_pat_";
-        if let Some(at) = token_at(line, prefix, min_tail, |c| {
+        for at in token_ats(line, prefix, min_tail, |c| {
             c.is_ascii_alphanumeric() || (allow_underscore && c == '_')
         }) {
             let token = token_body(line, at, prefix.len(), |c| {
@@ -213,7 +296,11 @@ fn github_at(line: &str) -> Option<usize> {
 /// The documented example and a low-entropy string are not keys.
 fn aws_secret_at(line: &str) -> Option<usize> {
     let lower = line.to_ascii_lowercase();
-    if !lower.contains("secret_access_key") && !lower.contains("secretaccesskey") {
+    if !lower.contains("secret_access_key")
+        && !lower.contains("secretaccesskey")
+        && !lower.contains("secret_key")
+        && !lower.contains("secretkey")
+    {
         return None;
     }
     let bytes = line.as_bytes();
@@ -323,10 +410,57 @@ fn slack_at(line: &str) -> Option<usize> {
     None
 }
 
+fn slack_webhook_at(line: &str) -> Option<usize> {
+    const PATH: &str = "https://hooks.slack.com/services/";
+    let mut remaining = line;
+    let mut offset = 0;
+    while let Some(start) = remaining.find(PATH) {
+        let next = start + PATH.len();
+        let path_at = offset + next;
+        offset += next;
+        remaining = &remaining[next..];
+        let mut segments = line[path_at..].split('/');
+        let Some(team) = segments.next() else {
+            continue;
+        };
+        let Some(channel) = segments.next() else {
+            continue;
+        };
+        let Some(token) = segments.next() else {
+            continue;
+        };
+        let token_len = token.bytes().take_while(u8::is_ascii_alphanumeric).count();
+        if slack_resource_id(team, b'T')
+            && slack_resource_id(channel, b'B')
+            && token_len >= 24
+            && credential_signal(&token[..token_len])
+        {
+            return Some(path_at + team.len() + channel.len() + 2);
+        }
+    }
+    None
+}
+
+fn slack_resource_id(value: &str, prefix: u8) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() >= 9
+        && bytes.first() == Some(&prefix)
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit())
+}
+
 fn stripe_at(line: &str) -> Option<usize> {
-    let at = token_at(line, "sk_live_", 16, |c| c.is_ascii_alphanumeric())?;
-    let body = token_body(line, at, "sk_live_".len(), |c| c.is_ascii_alphanumeric());
-    credential_signal(body).then_some(at)
+    let mut found = None;
+    for (prefix, min_tail) in [("sk_live_", 16), ("rk_live_", 24)] {
+        for at in token_ats(line, prefix, min_tail, |c| c.is_ascii_alphanumeric()) {
+            let body = token_body(line, at, prefix.len(), |c| c.is_ascii_alphanumeric());
+            if credential_signal(body) {
+                found = Some(found.map_or(at, |previous: usize| previous.min(at)));
+            }
+        }
+    }
+    found
 }
 
 fn token_body(line: &str, at: usize, prefix_len: usize, tail: impl Fn(char) -> bool) -> &str {
@@ -335,25 +469,37 @@ fn token_body(line: &str, at: usize, prefix_len: usize, tail: impl Fn(char) -> b
     &after[..count]
 }
 
-fn token_at(
-    line: &str,
-    prefix: &str,
+/// Every offset where `prefix` is followed by at least `min_tail` tail
+/// characters. Callers that reject a candidate (a placeholder, or no
+/// credential signal) keep looking instead of stopping at the first one,
+// so a placeholder earlier on the line cannot hide a real key later on it.
+fn token_ats<'a>(
+    line: &'a str,
+    prefix: &'a str,
     min_tail: usize,
-    tail: impl Fn(char) -> bool,
-) -> Option<usize> {
+    tail: impl Fn(char) -> bool + 'a,
+) -> impl Iterator<Item = usize> + 'a {
     let mut rest = line;
     let mut offset = 0;
-    while let Some(start) = rest.find(prefix) {
-        let after = &rest[start + prefix.len()..];
-        let count = after.chars().take_while(|c| tail(*c)).count();
-        if count >= min_tail {
-            return Some(offset + start);
+    let mut done = false;
+    std::iter::from_fn(move || {
+        if done {
+            return None;
         }
-        let next = start + prefix.len();
-        offset += next;
-        rest = &rest[next..];
-    }
-    None
+        while let Some(start) = rest.find(prefix) {
+            let after = &rest[start + prefix.len()..];
+            let count = after.chars().take_while(|c| tail(*c)).count();
+            let at = offset + start;
+            let next = start + prefix.len();
+            offset += next;
+            rest = &rest[next..];
+            if count >= min_tail {
+                return Some(at);
+            }
+        }
+        done = true;
+        None
+    })
 }
 
 #[cfg(test)]
@@ -391,6 +537,71 @@ mod tests {
             assert!(
                 findings.is_empty(),
                 "should ignore placeholder in {text:?}, got {findings:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_placeholder_earlier_on_a_line_does_not_hide_a_real_key() {
+        // Placeholder first, real key second on the same line: each key is
+        // caught when alone, so the placeholder must not excuse the key.
+        let aws = format!("{}{}", "AKIA", "QWERTYUIOPASDFGH");
+        let ghp_body = ["k7Qm9", "Lx4wAb3Z", "nR8pY2cF9wQx", "T6vB1nM5sDe"].concat();
+        let stripe_body = ["51Hq8vN2mK", "x7pL4wZr9T", "cYbQ3aF6d"].concat();
+        let cases = [
+            (
+                format!("# aws: replace AKIAIOSFODNN7EXAMPLE with {aws}\n"),
+                "secrets.aws_access_key",
+            ),
+            (
+                format!("# token ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA real ghp_{ghp_body}\n"),
+                "secrets.github_token",
+            ),
+            (
+                format!("# stripe sk_live_0000000000000000 real sk_live_{stripe_body}\n"),
+                "secrets.stripe_key",
+            ),
+        ];
+        for (text, rule) in cases {
+            let findings = secrets_in_text(&text, "notes.txt");
+            assert_eq!(findings.len(), 1, "{text:?} got {findings:?}");
+            assert_eq!(findings[0].rule, rule);
+        }
+    }
+
+    #[test]
+    fn flags_a_slack_incoming_webhook_and_ignores_placeholder_shapes() {
+        let body = mixed_tail(24);
+        let line =
+            format!("SLACK_WEBHOOK=https://hooks.slack.com/services/T04827361/B07719283/{body}");
+        let findings = secrets_in_text(&line, "config.env");
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].rule, "secrets.slack_webhook");
+        assert!(findings[0].message.contains("revoke the webhook in Slack"));
+        assert!(findings[0]
+            .suggested_action
+            .as_deref()
+            .unwrap()
+            .contains("revoke"));
+        assert_eq!(
+            findings[0].span.as_ref().unwrap().start_col as usize,
+            line.find(&body).unwrap() + 1
+        );
+
+        for url in [
+            format!("https://hooks.slack.com/services/T1234567/B07719283/{body}"),
+            format!(
+                "https://hooks.slack.com/services/T04827361/B07719283/{}Z",
+                mixed_tail(22)
+            ),
+            format!(
+                "https://hooks.slack.com/services/T04827361/B07719283/{}",
+                "A".repeat(24)
+            ),
+        ] {
+            assert!(
+                secrets_in_text(&url, "config.env").is_empty(),
+                "invalid or placeholder webhook must not match: {url}"
             );
         }
     }
@@ -481,6 +692,52 @@ mod tests {
         );
     }
 
+    #[test]
+    fn flags_a_terraform_aws_secret_key_and_ignores_low_entropy() {
+        let key = sample_secret();
+        let text = format!("provider \"aws\" {{ secret_key = \"{key}\" }}\n");
+        let findings = secrets_in_text(&text, "main.tf");
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].rule, "secrets.aws_secret_key");
+        assert!(findings[0].message.contains("AWS secret access key"));
+
+        let documented = format!("secret_key = \"{AWS_DOCUMENTED_SECRET}\"\n");
+        assert!(
+            secrets_in_text(&documented, "main.tf").is_empty(),
+            "the documented AWS example must not match"
+        );
+
+        let low_entropy = format!("secret_key = \"{}\"\n", "A".repeat(40));
+        assert!(
+            secrets_in_text(&low_entropy, "main.tf").is_empty(),
+            "a low-entropy value must not match"
+        );
+    }
+
+    #[test]
+    fn flags_stripe_secret_and_restricted_live_keys() {
+        for (prefix, tail_len) in [("sk_live_", 16), ("rk_live_", 24)] {
+            let body = mixed_tail(tail_len);
+            let line = format!("STRIPE={prefix}{body}");
+            let findings = secrets_in_text(&line, "config.env");
+            assert_eq!(findings.len(), 1, "{prefix} {findings:?}");
+            assert_eq!(findings[0].rule, "secrets.stripe_key");
+            assert_eq!(
+                findings[0].span.as_ref().unwrap().start_col as usize,
+                line.find(prefix).unwrap() + 1
+            );
+        }
+
+        let short = format!("STRIPE=rk_live_{}Z", mixed_tail(22));
+        let low_entropy = format!("STRIPE=rk_live_{}", "A".repeat(24));
+        for text in [short, low_entropy] {
+            assert!(
+                secrets_in_text(&text, "config.env").is_empty(),
+                "short or low-entropy Stripe value must not match: {text}"
+            );
+        }
+    }
+
     fn sample_secret() -> String {
         let parts = ["Ab", "3/", "Kq", "9Z", "mN", "4+", "pL", "7x"];
         parts.iter().cycle().take(20).copied().collect()
@@ -541,5 +798,159 @@ mod tests {
         assert_eq!(findings.len(), 1, "{findings:?}");
         assert_eq!(findings[0].rule, "secrets.private_key");
         assert_eq!(findings[0].span.as_ref().unwrap().start_line, 1);
+    }
+
+    #[test]
+    fn flags_pem_written_as_python_string_literals() {
+        let body = ["MIIEowIBAAKCAQEA0Z3VS5J4", "Ab3kQm9ZnR4pLx7wKq9ZmN4p"].concat();
+        assert!(body.len() >= 32);
+        let mid = body.len() / 2;
+        let text = format!(
+            "KEY = (\n    \"{}RSA {}\\n\"\n    \"{}\\n\"\n    \"{}\\n\"\n    \"-----END RSA {}\\n\"\n)\n",
+            super::pem_begin(),
+            super::pem_end(),
+            &body[..mid],
+            &body[mid..],
+            super::pem_end()
+        );
+        let findings = secrets_in_text(&text, "src/config.py");
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].rule, "secrets.private_key");
+        assert_eq!(findings[0].span.as_ref().unwrap().start_line, 2);
+    }
+
+    #[test]
+    fn flags_pem_written_as_javascript_string_array() {
+        let body = ["MIIEowIBAAKCAQEA0Z3VS5J4", "Ab3kQm9ZnR4pLx7wKq9ZmN4p"].concat();
+        assert!(body.len() >= 32);
+        let mid = body.len() / 2;
+        let text = format!(
+            "const key = [\n  '{}{}',\n  '{}',\n  '{}',\n  '-----END {}',\n].join('\\n');\n",
+            super::pem_begin(),
+            super::pem_end(),
+            &body[..mid],
+            &body[mid..],
+            super::pem_end()
+        );
+        let findings = secrets_in_text(&text, "src/key.js");
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].rule, "secrets.private_key");
+        assert_eq!(findings[0].span.as_ref().unwrap().start_line, 2);
+    }
+
+    #[test]
+    fn flags_pem_written_as_go_string_concatenation() {
+        let body = ["MIIEowIBAAKCAQEA0Z3VS5J4", "Ab3kQm9ZnR4pLx7wKq9ZmN4p"].concat();
+        let mid = body.len() / 2;
+        let text = format!(
+            "var key = \"{}RSA {}\\n\" +\n    \"{}\\n\" +\n    \"{}\\n\" +\n    \"-----END RSA {}\\n\"\n",
+            super::pem_begin(),
+            super::pem_end(),
+            &body[..mid],
+            &body[mid..],
+            super::pem_end()
+        );
+        let findings = secrets_in_text(&text, "src/key.go");
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].rule, "secrets.private_key");
+    }
+
+    #[test]
+    fn flags_pem_written_as_java_string_concatenation() {
+        let body = ["MIIEowIBAAKCAQEA0Z3VS5J4", "Ab3kQm9ZnR4pLx7wKq9ZmN4p"].concat();
+        let mid = body.len() / 2;
+        let text = format!(
+            "String key = \"{}RSA {}\\n\" +\n    + \"{}\\n\" +\n    + \"{}\\n\" +\n    + \"-----END RSA {}\\n\";\n",
+            super::pem_begin(),
+            super::pem_end(),
+            &body[..mid],
+            &body[mid..],
+            super::pem_end()
+        );
+        let findings = secrets_in_text(&text, "src/Key.java");
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].rule, "secrets.private_key");
+    }
+
+    #[test]
+    fn flags_pem_written_with_backtick_literals() {
+        let body = ["MIIEowIBAAKCAQEA0Z3VS5J4", "Ab3kQm9ZnR4pLx7wKq9ZmN4p"].concat();
+        let mid = body.len() / 2;
+        let text = format!(
+            "const key = [\n  \x60{}RSA {}\x60,\n  \x60{}\x60,\n  \x60{}\x60,\n  \x60-----END {}\x60,\n];\n",
+            super::pem_begin(),
+            super::pem_end(),
+            &body[..mid],
+            &body[mid..],
+            super::pem_end()
+        );
+        let findings = secrets_in_text(&text, "src/key.js");
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].rule, "secrets.private_key");
+    }
+
+    #[test]
+    fn flags_pem_written_with_python_string_prefixes() {
+        let body = ["MIIEowIBAAKCAQEA0Z3VS5J4", "Ab3kQm9ZnR4pLx7wKq9ZmN4p"].concat();
+        let mid = body.len() / 2;
+        for prefix in ["b", "r", "f"] {
+            let text = format!(
+                "key = (\n    {prefix}\"{}RSA {}\\n\"\n    {prefix}\"{}\\n\"\n    {prefix}\"{}\\n\"\n    {prefix}\"-----END RSA {}\\n\"\n)\n",
+                super::pem_begin(),
+                super::pem_end(),
+                &body[..mid],
+                &body[mid..],
+                super::pem_end()
+            );
+            let findings = secrets_in_text(&text, "src/key.py");
+            assert_eq!(findings.len(), 1, "prefix {prefix}: {findings:?}");
+            assert_eq!(findings[0].rule, "secrets.private_key");
+        }
+    }
+
+    #[test]
+    fn flags_pem_written_as_yaml_list_items() {
+        let body = ["MIIEowIBAAKCAQEA0Z3VS5J4", "Ab3kQm9ZnR4pLx7wKq9ZmN4p"].concat();
+        let mid = body.len() / 2;
+        let variants = [
+            format!(
+                "private_key:\n  - \"{}RSA {}\"\n  - \"{}\"\n  - {}\n  - \"-----END RSA {}\"\n",
+                super::pem_begin(),
+                super::pem_end(),
+                &body[..mid],
+                &body[mid..],
+                super::pem_end()
+            ),
+            format!(
+                "private_key:\n  - {}RSA {}\n  - {}\n  - {}\n  - -----END RSA {}\n",
+                super::pem_begin(),
+                super::pem_end(),
+                &body[..mid],
+                &body[mid..],
+                super::pem_end()
+            ),
+        ];
+        for text in variants {
+            let findings = secrets_in_text(&text, "config/keys.yml");
+            assert_eq!(findings.len(), 1, "{findings:?}");
+            assert_eq!(findings[0].rule, "secrets.private_key");
+        }
+    }
+
+    #[test]
+    fn flags_pem_written_as_per_line_triple_quoted_literals() {
+        let body = ["MIIEowIBAAKCAQEA0Z3VS5J4", "Ab3kQm9ZnR4pLx7wKq9ZmN4p"].concat();
+        let mid = body.len() / 2;
+        let text = format!(
+            "key = (\n    \"\"\"{}RSA {}\"\"\",\n    \"\"\"{}\"\"\",\n    \"\"\"{}\"\"\",\n    \"\"\"-----END RSA {}\"\"\",\n)\n",
+            super::pem_begin(),
+            super::pem_end(),
+            &body[..mid],
+            &body[mid..],
+            super::pem_end()
+        );
+        let findings = secrets_in_text(&text, "src/key.py");
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].rule, "secrets.private_key");
     }
 }

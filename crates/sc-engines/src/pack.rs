@@ -165,13 +165,11 @@ pub enum Detected {
     Ambiguous(Vec<PackId>),
 }
 
-/// Above this size, a NUL prefix is build output and is not scanned.
+/// Above this size, a file takes the large-file path (gitignore check, then
+/// scan up to [`MAX_TEXT_BYTES`], or `secrets.partial` when larger).
 const MAX_SECRET_BYTES: u64 = 1024 * 1024;
-/// A text file larger than this is not read, and the gate says the scan was partial.
+/// A file larger than this is not read, and the gate says the scan was partial.
 const MAX_TEXT_BYTES: u64 = 64 * 1024 * 1024;
-/// More than one NUL in this prefix means a large file is binary. One NUL can
-/// sit in text and must not hide a secret.
-const BINARY_PROBE: usize = 8192;
 
 pub fn text_secrets(root: &Path, exclude: &[String]) -> Vec<sc_core::Finding> {
     let mut files = Vec::new();
@@ -196,14 +194,11 @@ pub fn text_secrets(root: &Path, exclude: &[String]) -> Vec<sc_core::Finding> {
             .replace('\\', "/");
         match path.metadata() {
             Ok(meta) if meta.len() > MAX_SECRET_BYTES => {
-                // A Go build writes a binary named after the package. A NUL in
-                // the first bytes marks that output. Text over the limit, such
-                // as a lockfile, is still scanned unless git ignores it.
-                match binary_prefix(&path) {
-                    Ok(true) => continue,
-                    Ok(false) => big_text.push((path, rel, meta.len())),
-                    Err(err) => findings.push(unreadable(&rel, &err)),
-                }
+                // Large files (lockfiles, assets, build output) share one path:
+                // gitignored trees are skipped; others are scanned lossily up to
+                // the text limit. NUL bytes do not skip — every secret pattern
+                // is ASCII, and two NULs are too weak a binary signal.
+                big_text.push((path, rel, meta.len()));
                 continue;
             }
             Ok(_) => {}
@@ -270,14 +265,6 @@ fn unreadable(rel: &str, err: &std::io::Error) -> sc_core::Finding {
         ),
         disposition: String::new(),
     }
-}
-
-fn binary_prefix(path: &std::path::Path) -> std::io::Result<bool> {
-    let mut file = std::fs::File::open(path)?;
-    let mut buf = [0u8; BINARY_PROBE];
-    let n = std::io::Read::read(&mut file, &mut buf)?;
-    let nuls = buf[..n].iter().filter(|byte| **byte == 0).count();
-    Ok(nuls > 1)
 }
 
 fn partial_scan(paths: &[String]) -> sc_core::Finding {
@@ -948,6 +935,32 @@ mod tests {
                 finding.file == "config.js" && finding.rule == "secrets.aws_access_key"
             }),
             "{findings:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn two_nuls_in_a_large_file_do_not_hide_a_key() {
+        // Reproduce #155: a >1 MiB file that starts with two NULs used to be
+        // skipped as "binary" with no secrets.partial and no finding.
+        let key = planted_access_key();
+        let root = temp("secrets-two-nul");
+        let mut bytes = vec![0u8, 0u8];
+        bytes.resize(1_200_000, b'a');
+        bytes.extend(format!("\nK=\"{key}\"\n").into_bytes());
+        fs::write(root.join("assets.bin"), &bytes).unwrap();
+        let findings = text_secrets(&root, &[]);
+        assert!(
+            findings.iter().any(|finding| {
+                finding.file == "assets.bin" && finding.rule == "secrets.aws_access_key"
+            }),
+            "{findings:?}"
+        );
+        assert!(
+            !findings
+                .iter()
+                .any(|finding| finding.rule == "secrets.partial"),
+            "under 64 MiB must be scanned, not partial: {findings:?}"
         );
         let _ = fs::remove_dir_all(&root);
     }

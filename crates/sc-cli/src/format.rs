@@ -13,7 +13,9 @@ use sc_core::Scorecard;
 /// assert_eq!(value["verdict"], "fail");
 /// ```
 pub fn to_json(card: &Scorecard) -> String {
-    serde_json::to_string_pretty(card).unwrap_or_else(|_| "{}".to_string())
+    let mut report = card.clone();
+    report.verdict = sc_core::report_verdict(card).to_string();
+    serde_json::to_string_pretty(&report).unwrap_or_else(|_| "{}".to_string())
 }
 
 /// Render a scorecard as Markdown.
@@ -72,19 +74,27 @@ pub fn to_markdown(card: &Scorecard) -> String {
 
 fn push_markdown_header(out: &mut String, card: &Scorecard) {
     let head = card.git.head.as_deref().unwrap_or("none");
-    let dirty = if card.git.dirty { "dirty" } else { "clean" };
+    let dirty = escape_markdown(&card.git.status_label());
     out.push_str("# scorecard\n\n");
     let outcome = Outcome::of(card);
+    let verdict = sc_core::report_verdict(card);
     match (outcome, outcome.note()) {
         (Outcome::ReportOnly(_), Some(note)) => out.push_str(&format!(
             "**Verdict:** {} (report only: {note})\n\n",
-            card.verdict
+            verdict
         )),
-        (_, Some(note)) => out.push_str(&format!("**Verdict:** {} ({note})\n\n", card.verdict)),
-        (_, None) => out.push_str(&format!("**Verdict:** {}\n\n", card.verdict)),
+        (_, Some(note)) => out.push_str(&format!("**Verdict:** {} ({note})\n\n", verdict)),
+        (_, None) => out.push_str(&format!("**Verdict:** {}\n\n", verdict)),
     }
     out.push_str(&format!("**Repo:** {}\n\n", card.repo));
     out.push_str(&format!("**Git:** {head} ({dirty})\n\n"));
+    let changed_paths = card.git.changed_paths_label();
+    if !changed_paths.is_empty() {
+        out.push_str(&format!(
+            "**Changed paths:** {}\n\n",
+            escape_markdown(&changed_paths)
+        ));
+    }
     let paths = match card.scope.paths.len() {
         0 => String::new(),
         1 => ", 1 path".into(),
@@ -113,6 +123,17 @@ fn push_markdown_header(out: &mut String, card: &Scorecard) {
             card.engines_skipped.join(", ")
         ));
     }
+}
+
+fn escape_markdown(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for ch in text.chars() {
+        if matches!(ch, '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' | '|') {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
 }
 
 fn push_markdown_gates(out: &mut String, card: &Scorecard) {
@@ -401,7 +422,7 @@ mod tests {
     #[test]
     fn markdown_includes_verdict_and_crap() {
         let mut card = Scorecard::skeleton(".", 30);
-        card.verdict = "fail".into();
+        card.verdict = "pass".into();
         card.gates.push(Gate {
             id: "crap".into(),
             pass: false,
@@ -435,6 +456,21 @@ mod tests {
         assert!(md.contains("**Verdict:** fail"));
         assert!(md.contains("classify"));
         assert!(md.contains("crap.over_threshold"));
+    }
+
+    #[test]
+    fn json_does_not_pass_when_an_enforced_gate_fails() {
+        let mut card = Scorecard::skeleton(".", 30);
+        card.verdict = "pass".into();
+        card.gates.push(Gate {
+            id: "lint".into(),
+            pass: false,
+            enforced: true,
+            reason: Some("lint failed".into()),
+        });
+        let value: serde_json::Value = serde_json::from_str(&to_json(&card)).unwrap();
+        assert_eq!(value["verdict"], "fail");
+        assert_eq!(value["gates"][0]["enforced"], true);
     }
 
     #[test]

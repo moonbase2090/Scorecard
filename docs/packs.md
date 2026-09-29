@@ -31,7 +31,7 @@ A gate with `enforced: false` is reported and does not fail the process. Rust en
 | C++ | `.sc/coverage/cpp.info` from lcov after CTest |
 | Go | `go test -coverprofile` |
 
-Node runs c8 or nyc with `--all`. Python passes each directory that holds a scored function to pytest-cov as a `--cov` source, and the `coverage.py` fallback uses the same directories as `--source`. In both packs, a file the tests never load is scored at 0% coverage instead of being left out.
+Node runs c8 or nyc with `--all`. For a Python `src/` layout, `sc` puts each source root first on `PYTHONPATH` while pytest or the `coverage.py` fallback runs. Tests import the checkout that coverage measures, even when another package copy is installed. Python passes each directory that holds a scored function to pytest-cov as a `--cov` source, and the fallback uses the same directories as `--source`. A file the tests never load is scored at 0% coverage instead of being left out.
 
 The command pack has no coverage runner. When a pack writes no coverage report, no function is scored: the CRAP table is empty, and the `crap` gate is advisory with the reason that some functions have no coverage record and were not scored. The run reports `coverage.missing`.
 
@@ -62,6 +62,6 @@ Flags, output formats, and exit status are in the [CLI reference](reference/cli.
 
 In tree mode the scorecard fields `loc_changed`, `files_changed`, and `coverage_changed` describe the analyzed `src` tree, not a git diff. `hallucinated_imports` and `undeclared_dependencies` are 0. `mutation.status` is `skipped`. In `--diff` mode `scope.base` records the resolved base ref (omitted in other modes), and `crap_over_threshold` counts only changed functions.
 
-A nested loop, and a `.clone()` that the loop collects, are not findings.
+A nested loop, and a `.clone()` that the loop collects, are not findings unless `engines.perf = true` in `analyzer.toml`. When that setting is on, those patterns are `perf.*` findings (disposition `ignore`) on product Rust. Each warning lowers the efficiency score by 0.05. Skipped: paths under `tests/` or `benches/` (mainly relevant with `--paths`), `src/test.rs` / `src/tests.rs`, inline `#[cfg(test)]` / `#[…::test]` items, files loaded by an out-of-line `#[cfg(test)] mod name;` (looked up from the whole tree, including on `--diff`), and children under that module's directory. A `#[cfg(all(test, …))]` or `#[cfg(any(test, …))]` item is still scanned.
 
 `.github` is not required. `action/action.yml` installs `sc`, runs it, and uploads SARIF when the format is `sarif` or `all`.

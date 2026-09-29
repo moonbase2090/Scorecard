@@ -5,16 +5,17 @@
 ## Terminal layout
 
 ```text
-sc 0.1.3  .  python  99b879c dirty  scope tree
+sc 0.1.4  .  python  99b879c dirty  scope tree
+changed paths: src/vectorvault/config.py
 ```
 
-The header: `sc` version, analyzed path, [pack](packs.md), git commit, `clean` or `dirty`, and scope. Scope is `tree` (everything), `diff` (`--diff`), or `paths` (`--paths`). A `diff` report lists the changed paths and a one-line count of the other source paths still in the tree.
+The header: `sc` version, analyzed path, [pack](packs.md), git commit, and Git state. A dirty report names up to three changed paths on the next line; JSON includes every path in `git.dirty_paths`. Dirty paths are relative to the repository root, matching `git status`, including when the analyzed project is in a subdirectory. Scorecard's saved report, parse cache, coverage output, and earlier outputs from `--out` do not make a clean checkout dirty. Scope is `tree` (everything), `diff` (`--diff`), or `paths` (`--paths`). A `diff` report lists the changed paths, relative to the project directory, and a one-line count of the other source paths still in the tree. A crate in a subdirectory of the repository is scored the same way as a crate at the repository root.
 
 ```text
 PASS  2 advisory gates failing
 ```
 
-The verdict. `PASS` means every enforced gate passed. Advisory gates can still fail under a `PASS`; the note counts them. `FAIL` means an enforced gate failed and the exit status is 1.
+The verdict. `PASS` means every enforced gate passed. Advisory gates can still fail under a `PASS`; the note counts them. `FAIL` means at least one enforced gate failed. `--fail-on` controls the process exit code, so it can be 0 while the report says `FAIL` if none of the selected gates failed. Naming an advisory gate can enforce it; omitting an already enforced gate from the exit list does not change the report verdict.
 
 ```text
 gates
@@ -23,7 +24,7 @@ gates
   ✗  sca              advisory  16 undeclared dependencies (advisory; does not fail the process)
 ```
 
-One row per gate: result, `enforced` or `advisory`, and the reason when it did not pass. Only enforced gates change the exit status. [Gates](reference/gates.md) lists them and how to enforce an advisory one.
+One row per gate: result, `enforced` or `advisory`, and the reason when it did not pass. Enforced gates determine the report verdict. `--fail-on` selects which enforced failures set exit 1. [Gates](reference/gates.md) lists the gates and how to enforce an advisory one.
 
 ```text
 scores
@@ -63,7 +64,7 @@ Each finding: severity, [rule id](reference/rules.md), location, and a suggested
 ```text
 engines run: compile, tests, crap, sca, secrets, lint
 engines skipped: complexity, mutation, llm
-exit 0: gates passed
+exit 0: enforced gates passed
 ```
 
 Which checks ran, which did not, and the exit status. An engine is skipped when its tool is missing or when it is off by default (`mutation`, `llm`, `spec`). A skip caused by a missing tool also appears as an `engine.unavailable` finding with the reason.
@@ -85,7 +86,8 @@ Top-level fields of `.sc/last-scorecard.json` and `--format json`:
 | Field | Contents |
 |---|---|
 | `verdict` | `pass` or `fail` |
-| `pack`, `repo`, `git`, `scope` | What was analyzed |
+| `pack`, `repo`, `scope` | What was analyzed |
+| `git` | `head`, `dirty`, and `dirty_paths` (all changed paths relative to the repository root; omitted when clean) |
 | `gates` | `id`, `pass`, `enforced`, and `reason` per gate |
 | `scores` | The score rows above |
 | `metrics` | Changed lines and files, `coverage_changed`, `crap_max`, `crap_over_threshold`, `hallucinated_imports` |
@@ -93,6 +95,8 @@ Top-level fields of `.sc/last-scorecard.json` and `--format json`:
 | `findings` | `rule`, `engine`, `severity`, `file`, `span`, `symbol`, `message`, `suggested_action`, `disposition`, `evidence` |
 | `engines_run`, `engines_skipped` | As in the terminal footer |
 | `runs` | Every command `sc` ran, with exit code and duration |
+
+`verdict` is `fail` when any enforced gate fails. The `--fail-on` list selects the process exit code; it does not hide failures from gates that remain enforced.
 
 List the findings an agent should fix:
 
@@ -108,7 +112,7 @@ sc analyze . --format all --out sc-report >/dev/null
 ls sc-report.json sc-report.md sc-report.sarif sc-report.html
 ```
 
-`--format all --out NAME` writes JSON, Markdown, SARIF, and a self-contained HTML page next to `NAME`. The HTML page is described in [HTML report](html-report.md). SARIF is for GitHub code scanning; see [CI](how-to/ci.md).
+`--format all --out NAME` writes JSON, Markdown, SARIF, and a self-contained HTML page next to `NAME`. The HTML page is described in [HTML report](html-report.md). SARIF is for GitHub code scanning; see [CI](how-to/ci.md). GitHub counts every SARIF `error` as a high severity security alert, so only `secrets.*` findings use level `error`. A failing test or missing coverage report is level `warning` in SARIF, stays severity `error` in the JSON report, and still fails its gate.
 
 ## The `.sc/` directory
 

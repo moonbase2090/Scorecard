@@ -78,7 +78,7 @@ pub fn to_pretty(card: &Scorecard, opts: &PrettyOpts) -> String {
 }
 
 fn push_header(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize) {
-    let state = if card.git.dirty { "dirty" } else { "clean" };
+    let state = card.git.status_label();
     let line = format!(
         "sc {}  {}  {}  {} {}  scope {}",
         opts.version,
@@ -90,6 +90,10 @@ fn push_header(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usi
     );
     out.push_str(&fit(&line, width, opts.color));
     out.push('\n');
+    let changed_paths = card.git.changed_paths_label();
+    if !changed_paths.is_empty() {
+        out.push_str(&format!("changed paths: {changed_paths}\n"));
+    }
     out.push('\n');
 }
 
@@ -309,13 +313,15 @@ fn push_footer(out: &mut String, card: &Scorecard, opts: &PrettyOpts) {
     out.push_str(&exit_line(
         opts.exit_code,
         matches!(Outcome::of(card), Outcome::ReportOnly(_)),
+        sc_core::report_verdict(card) != "pass",
     ));
 }
 
-fn exit_line(code: i32, report_only: bool) -> String {
+fn exit_line(code: i32, report_only: bool, verdict_failed: bool) -> String {
     let meaning = match code {
         0 if report_only => "no enforced gate failed",
-        0 => "gates passed",
+        0 if verdict_failed => "no selected gate failed",
+        0 => "enforced gates passed",
         1 => "a gate failed",
         _ => "the analyzer could not finish",
     };
@@ -560,7 +566,7 @@ mod tests {
         assert!(text.contains("PASS"));
         assert!(!text.contains('\u{1b}'));
         assert!(text.contains("[ok]") || text.contains("(none)"));
-        assert!(text.contains("exit 0: gates passed"));
+        assert!(text.contains("exit 0: enforced gates passed"));
     }
 
     #[test]
@@ -586,6 +592,31 @@ mod tests {
         assert!(text.contains("REPORT ONLY  1 failing gate, none enforced"));
         assert!(!text.contains("PASS"));
         assert!(text.contains("exit 0: no enforced gate failed"));
+    }
+
+    #[test]
+    fn enforced_failure_stays_visible_when_exit_code_is_zero() {
+        let mut card = Scorecard::skeleton("demo", 30);
+        card.verdict = "pass".into();
+        card.gates.push(Gate {
+            id: "lint".into(),
+            pass: false,
+            enforced: true,
+            reason: Some("lint failed".into()),
+        });
+        let text = to_pretty(
+            &card,
+            &PrettyOpts {
+                color: false,
+                width: 80,
+                version: "0.1.0".into(),
+                report: None,
+                exit_code: 0,
+            },
+        );
+        assert!(text.contains("\nFAIL\n\n"));
+        assert!(text.contains("exit 0: no selected gate failed"));
+        assert!(!text.contains("PASS"));
     }
 
     #[test]
@@ -618,7 +649,7 @@ mod tests {
         );
         assert!(text.contains("PASS  1 advisory gate failing"));
         assert!(!text.contains("REPORT ONLY"));
-        assert!(text.contains("exit 0: gates passed"));
+        assert!(text.contains("exit 0: enforced gates passed"));
     }
 
     #[test]

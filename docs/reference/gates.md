@@ -1,13 +1,13 @@
 # Gates
 
-A gate is a pass or fail check. Enforced gates decide the exit status; advisory gates are reported only. `gates.fail_on` (or `--fail-on`) is the list of enforced gates.
+A gate is a pass or fail check. Any failed enforced gate makes the report verdict `FAIL`; advisory gates are reported without affecting the verdict. `gates.fail_on` (or `--fail-on`) selects which enforced gate failures set process exit 1. Naming an advisory gate can enforce it; leaving an already enforced gate out of the exit list does not hide its failure from the report.
 
 | Gate | Enforced by default | Fails when | Rules |
 |---|---|---|---|
 | `types` | yes | The project does not build or type-check | `compile.error`, `compile.failed` |
 | `tests` | yes | A test fails | `test.failed` |
 | `crap` | yes | A function's CRAP score is over `gates.crap_threshold`, or a complex function has 0% coverage | `crap.over_threshold`, `complexity.untested` |
-| `secrets` | yes | A token or private key is in the tree | `secrets.*` |
+| `secrets` | yes | A token or private key is in the tree, including PEM split across source string lines or YAML list items | `secrets.*` |
 | `lint` | yes | The linter reports problems | `lint.failed` |
 | `sca` | no | An import is undeclared, hallucinated, or not classified | `sca.undeclared_dependency`, `sca.hallucinated_import`, `sca.import_unresolved` |
 | `spec` | only with `--spec` | A file or public item named in the spec is missing | `spec.missing_file`, `spec.missing_item`, `spec.llm_gap` |
