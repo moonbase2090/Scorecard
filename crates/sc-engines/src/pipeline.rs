@@ -2112,9 +2112,18 @@ fn git_info(root: &Path, generated_paths: &[PathBuf]) -> GitInfo {
             Some(trimmed.to_string())
         }
     });
-    let report_path = root.join(".sc/last-scorecard.json");
-    let cache_dir = root.join(".sc/cache");
-    let coverage_dir = root.join(".sc/coverage");
+    let analysis_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let report_path = analysis_root.join(".sc/last-scorecard.json");
+    let cache_dir = analysis_root.join(".sc/cache");
+    let coverage_dir = analysis_root.join(".sc/coverage");
+    let status_root = run_git(root, &["rev-parse", "--show-toplevel"])
+        .map(|path| PathBuf::from(path.trim()))
+        .and_then(|path| std::fs::canonicalize(path).map_err(|_| ()))
+        .unwrap_or_else(|_| analysis_root.clone());
+    let generated_paths: Vec<PathBuf> = generated_paths
+        .iter()
+        .map(|path| canonical_git_path(&analysis_root, path))
+        .collect();
     let dirty_paths: Vec<String> = run_git(
         root,
         &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
@@ -2123,7 +2132,9 @@ fn git_info(root: &Path, generated_paths: &[PathBuf]) -> GitInfo {
         parse_git_status_paths(&status)
             .into_iter()
             .filter(|path| {
-                let status_path = normalize_git_path(&root.join(path));
+                // `git status` reports paths from the worktree root, even when
+                // analysis starts in a project subdirectory.
+                let status_path = normalize_git_path(&status_root.join(path));
                 status_path != report_path
                     && !status_path.starts_with(&cache_dir)
                     && !status_path.starts_with(&coverage_dir)
@@ -2154,6 +2165,24 @@ fn normalize_git_path(path: &Path) -> PathBuf {
         }
     }
     normalized
+}
+
+fn canonical_git_path(root: &Path, path: &Path) -> PathBuf {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    };
+    let normalized = normalize_git_path(&absolute);
+    normalized
+        .parent()
+        .and_then(|parent| std::fs::canonicalize(parent).ok())
+        .and_then(|parent| {
+            normalized
+                .file_name()
+                .map(|file_name| parent.join(file_name))
+        })
+        .unwrap_or(normalized)
 }
 
 fn parse_git_status_paths(status: &str) -> Vec<String> {
