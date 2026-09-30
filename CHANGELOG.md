@@ -4,6 +4,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-09-30
+
+### Added
+
+- Scans skip common build and dependency folders, plus source files marked `@generated` or `Code generated ... DO NOT EDIT`. Use `scope.include_generated` to inspect selected generated paths; reports identify generated paths that were included and suggest excluding them.
+
 ## [0.1.4] - 2026-09-29
 
 ### Added
