@@ -77,6 +77,8 @@ A dirty report lists up to three changed paths. JSON includes every path in `git
 
 `sc analyze . --diff BASE` scores only what changed against that git ref. When the project is a subdirectory of a larger repository, the changed paths are still relative to the project (`src/a.rs`).
 
+Scans honor nested `.gitignore` files and skip common build and vendor directories such as `build/`, `target/`, `dist/`, and `node_modules/`. See [scan scope configuration](docs/reference/config.md#scope) to add exclusions or include generated paths.
+
 `sc analyze . --format sarif` writes SARIF for GitHub code scanning. Only `secrets.*` findings are level `error`, which code scanning counts as a security vulnerability. Every other rule, including a failing test or missing coverage, is level `warning` and still fails its gate ([CI](docs/how-to/ci.md)).
 
 Clippy findings use the first error with a file, line, and lint name. If no such error exists, they use the first warning with those details:

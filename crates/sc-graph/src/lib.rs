@@ -10,6 +10,7 @@ mod discover;
 mod imports;
 mod perf;
 mod pubs;
+mod walk;
 
 pub use complexity::{cyclomatic_of_block, functions_in_source, FunctionInfo};
 
@@ -42,10 +43,16 @@ pub fn inspect_source(text: &str, rel: &str, perf_enabled: bool) -> Option<Sourc
         local_names: local_names_in_file(&file),
     })
 }
-pub use discover::{is_excluded, scan, source_files, source_files_under, Scan};
+pub use discover::{
+    is_excluded, scan, source_files, source_files_under, source_files_under_with_generated, Scan,
+};
 pub use imports::{imports_in_file, local_names_in_file, ImportHit};
 pub use perf::{
     cfg_test_coverage, is_cfg_test_only, module_subtree_prefix, out_of_line_cfg_test_paths,
     out_of_line_cfg_test_paths_from_source, perf_in_file, PerfHit,
 };
 pub use pubs::{pub_items_in_file, PubItem};
+pub use walk::{
+    analyzed_generated_files, filter_paths, walk, walk_files, Walk, WalkEntry, WalkItem, WalkKind,
+    GENERATED_SKIP_DIRS,
+};

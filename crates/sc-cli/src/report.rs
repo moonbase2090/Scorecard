@@ -28,6 +28,7 @@ pub fn to_html(card: &Scorecard) -> String {
     a11y_section(&mut out, card);
     gates(&mut out, card);
     crap(&mut out, card);
+    generated_files_warning(&mut out, card);
     findings(&mut out, card);
     llm_section(&mut out, card);
     deep(&mut out, card);
@@ -38,6 +39,21 @@ pub fn to_html(card: &Scorecard) -> String {
     out.push_str(&esc(&card.version));
     out.push_str("</footer>\n</main>\n</body>\n</html>\n");
     out
+}
+
+fn generated_files_warning(out: &mut String, card: &Scorecard) {
+    let Some(warning) = card.generated_files_warning.as_ref() else {
+        return;
+    };
+    out.push_str("<h2>generated files analyzed</h2>\n<div class=\"card\"><p>");
+    out.push_str(&esc(&warning.suggested_action));
+    out.push_str("</p><ul class=\"pathlist\">");
+    for file in &warning.files {
+        out.push_str("<li><code>");
+        out.push_str(&esc(file));
+        out.push_str("</code></li>");
+    }
+    out.push_str("</ul></div>\n");
 }
 
 const CSS: &str = r#"

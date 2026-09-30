@@ -29,7 +29,12 @@ Only the first file found is read. Command-line flags override the matching keys
 
 | Key | Default | Meaning |
 |---|---|---|
-| `scope.exclude` | `["target/**", "generated/**"]` | Globs left out of complexity, CRAP, and the secrets walk. Complexity and CRAP match `target/**` and `generated/**` at any depth, so `src/generated` is not scored. The secrets walk anchors a pattern that does not start with `**/` to the project root, so `src/target/keys.py` is still scanned. `**/target/**` skips that path in the secrets walk too. |
+| `scope.exclude` | `[]` | Additional paths to leave out of scans. A matching exclusion wins over `scope.include_generated`. |
+| `scope.include_generated` | `[]` | Paths that may reopen built-in generated or vendored directory skips, or generated file markers. `.gitignore` rules still apply. |
+
+All recursive scans respect `.gitignore`, including nested files. They also skip `.git`, `.hg`, `.svn`, `.sc`, and other dot-directories. The built-in generated and vendored directories are `target`, `dist`, `build`, `out`, `coverage`, `generated`, `vendor`, `node_modules`, `__pycache__`, `.next`, `.nuxt`, `.output`, `.turbo`, `.parcel-cache`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.tox`, `.venv`, `venv`, `.gradle`, `.yarn`, `bin`, `obj`, `Pods`, `Carthage`, `bower_components`, and `storybook-static`.
+
+Scorecard also skips source files whose first 16 KiB contain `@generated`, or both `Code generated` and `DO NOT EDIT`. Add an explicit path pattern to `scope.include_generated` to scan one of these files or reopen one of the listed directories. If `.gitignore` also excludes the path, remove that ignore rule or add a negation there. `scope.exclude` always takes precedence. When a generated or vendored path is scanned, every report lists it and suggests adding it to `scope.exclude`.
 
 ### `[engines]`
 

@@ -15,7 +15,7 @@ pub struct Scan {
 
 pub fn source_files(root: &Path, exclude: &[String]) -> Vec<std::path::PathBuf> {
     let dirs = [root.join("src")];
-    source_files_under(root, &dirs, exclude)
+    source_files_under_with_generated(root, &dirs, exclude, &[])
 }
 
 /// Rust files under each directory, relative to `root` after the walk.
@@ -27,6 +27,15 @@ pub fn source_files_under(
     src_dirs: &[std::path::PathBuf],
     exclude: &[String],
 ) -> Vec<std::path::PathBuf> {
+    source_files_under_with_generated(root, src_dirs, exclude, &[])
+}
+
+pub fn source_files_under_with_generated(
+    root: &Path,
+    src_dirs: &[std::path::PathBuf],
+    exclude: &[String],
+    include_generated: &[String],
+) -> Vec<std::path::PathBuf> {
     let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     let mut files = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
@@ -35,7 +44,15 @@ pub fn source_files_under(
         if !src.is_dir() || !seen.insert(src.clone()) {
             continue;
         }
-        walk(&src, &root, exclude, &mut files);
+        for entry in crate::walk(&root, &src, exclude, include_generated, None) {
+            if let crate::WalkItem::Entry(entry) = entry {
+                if entry.kind == crate::WalkKind::File
+                    && entry.path.extension().and_then(|ext| ext.to_str()) == Some("rs")
+                {
+                    files.push(entry.path);
+                }
+            }
+        }
     }
     files.sort();
     files.dedup();
@@ -71,32 +88,6 @@ pub fn scan(root: &Path, exclude: &[String]) -> Scan {
         files: paths.len() as u64,
         loc,
         paths,
-    }
-}
-
-fn walk(dir: &Path, root: &Path, exclude: &[String], out: &mut Vec<std::path::PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let rel = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .replace('\\', "/");
-        if is_excluded(&rel, exclude) {
-            continue;
-        }
-        let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-        if path.is_dir() {
-            if name == ".git" {
-                continue;
-            }
-            walk(&path, root, exclude, out);
-        } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
-            out.push(path);
-        }
     }
 }
 

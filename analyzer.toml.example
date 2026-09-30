@@ -16,8 +16,10 @@ crap_threshold = 30
 new_fn_untested_cc = 15
 
 [scope]
-# Rust complexity walks src/**/*.rs. Paths are relative to the project root.
-exclude = ["target/**", "generated/**"]
+# Paths are relative to the project root. Add project-specific paths here.
+exclude = []
+# Reopen selected built-in generated/vendor skips when you need to inspect them.
+# include_generated = ["build/**"]
 
 [mutation]
 mode = "off"

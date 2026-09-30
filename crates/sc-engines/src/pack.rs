@@ -171,20 +171,33 @@ const MAX_SECRET_BYTES: u64 = 1024 * 1024;
 /// A file larger than this is not read, and the gate says the scan was partial.
 const MAX_TEXT_BYTES: u64 = 64 * 1024 * 1024;
 
+#[cfg(test)]
 pub fn text_secrets(root: &Path, exclude: &[String]) -> Vec<sc_core::Finding> {
+    text_secrets_with_generated(root, exclude, &[])
+}
+
+pub fn text_secrets_with_generated(
+    root: &Path,
+    exclude: &[String],
+    include_generated: &[String],
+) -> Vec<sc_core::Finding> {
     let mut files = Vec::new();
-    let mut seen_dirs = std::collections::HashSet::new();
-    let mut seen_files = std::collections::HashSet::new();
     let mut findings = Vec::new();
-    collect_text(
-        root,
-        root,
-        exclude,
-        &mut files,
-        &mut seen_dirs,
-        &mut seen_files,
-        &mut findings,
-    );
+    for item in sc_graph::walk(root, root, exclude, include_generated, None) {
+        match item {
+            sc_graph::WalkItem::Entry(entry) if entry.kind == sc_graph::WalkKind::File => {
+                files.push(entry.path);
+            }
+            sc_graph::WalkItem::Error { path, message } => {
+                let rel = path
+                    .as_deref()
+                    .map(|path| rel_path(root, path))
+                    .unwrap_or_else(|| ".".into());
+                findings.push(unreadable_message(&rel, &message));
+            }
+            _ => {}
+        }
+    }
     let mut big_text = Vec::new();
     for path in files {
         let rel = path
@@ -209,18 +222,8 @@ pub fn text_secrets(root: &Path, exclude: &[String]) -> Vec<sc_core::Finding> {
         }
         scan_file(&path, &rel, &mut findings);
     }
-    let ignored = git_ignored(
-        root,
-        &big_text
-            .iter()
-            .map(|(_, rel, _)| rel.clone())
-            .collect::<Vec<_>>(),
-    );
     let mut oversized = Vec::new();
     for (path, rel, len) in big_text {
-        if ignored.contains(&rel) {
-            continue;
-        }
         if len > MAX_TEXT_BYTES {
             oversized.push(rel);
             continue;
@@ -248,6 +251,10 @@ fn scan_file(path: &Path, rel: &str, findings: &mut Vec<sc_core::Finding>) {
 }
 
 fn unreadable(rel: &str, err: &std::io::Error) -> sc_core::Finding {
+    unreadable_message(rel, &err.to_string())
+}
+
+fn unreadable_message(rel: &str, error: &str) -> sc_core::Finding {
     sc_core::Finding {
         id: format!("secrets:unreadable:{rel}"),
         rule: "secrets.unreadable".into(),
@@ -257,9 +264,9 @@ fn unreadable(rel: &str, err: &std::io::Error) -> sc_core::Finding {
         span: None,
         symbol: None,
         message: format!(
-            "could not read {rel} ({err}), so the secrets scan does not pass. Restore read access, or exclude it with `exclude = [\"{rel}\"]` under `[scope]` in analyzer.toml."
+            "could not read {rel} ({error}), so the secrets scan does not pass. Restore read access, or exclude it with `exclude = [\"{rel}\"]` under `[scope]` in analyzer.toml."
         ),
-        evidence: serde_json::json!({ "error": err.to_string() }),
+        evidence: serde_json::json!({ "error": error }),
         suggested_action: Some(
             "Restore read access, or add the path to scope.exclude in analyzer.toml".into(),
         ),
@@ -297,82 +304,6 @@ fn partial_scan(paths: &[String]) -> sc_core::Finding {
     }
 }
 
-fn collect_text(
-    root: &Path,
-    dir: &Path,
-    exclude: &[String],
-    out: &mut Vec<std::path::PathBuf>,
-    seen_dirs: &mut std::collections::HashSet<std::path::PathBuf>,
-    seen_files: &mut std::collections::HashSet<std::path::PathBuf>,
-    findings: &mut Vec<sc_core::Finding>,
-) {
-    let dir_key = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
-    if !seen_dirs.insert(dir_key) {
-        return;
-    }
-    let entries = match std::fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(err) => {
-            findings.push(unreadable(&rel_path(root, dir), &err));
-            return;
-        }
-    };
-    for entry in entries {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(err) => {
-                findings.push(unreadable(&rel_path(root, dir), &err));
-                continue;
-            }
-        };
-        let path = entry.path();
-        let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-        let meta = match path.symlink_metadata() {
-            Ok(meta) => meta,
-            Err(err) => {
-                findings.push(unreadable(&rel_path(root, &path), &err));
-                continue;
-            }
-        };
-        // A directory symlink can loop, or walk the same tree twice, once the
-        // depth cap is gone.
-        if meta.file_type().is_symlink() && path.is_dir() {
-            continue;
-        }
-        if path.is_dir() {
-            if name == "cache" && dir.file_name().and_then(|part| part.to_str()) == Some(".yarn") {
-                continue;
-            }
-            if skip_dir(name, dir == root) {
-                continue;
-            }
-            let rel = path
-                .strip_prefix(root)
-                .unwrap_or(&path)
-                .to_string_lossy()
-                .replace('\\', "/");
-            if secrets_excluded(&rel, exclude) {
-                continue;
-            }
-            collect_text(root, &path, exclude, out, seen_dirs, seen_files, findings);
-        } else {
-            let rel = path
-                .strip_prefix(root)
-                .unwrap_or(&path)
-                .to_string_lossy()
-                .replace('\\', "/");
-            if secrets_excluded(&rel, exclude) {
-                continue;
-            }
-            let file_key = path.canonicalize().unwrap_or_else(|_| path.clone());
-            if !seen_files.insert(file_key) {
-                continue;
-            }
-            out.push(path);
-        }
-    }
-}
-
 fn rel_path(root: &Path, path: &Path) -> String {
     let rel = path
         .strip_prefix(root)
@@ -386,75 +317,11 @@ fn rel_path(root: &Path, path: &Path) -> String {
     }
 }
 
-/// `target/**` matches only the root `target/` directory in the secrets walk.
-/// Complexity and CRAP keep the shared glob, which also matches `src/generated/`.
-fn secrets_excluded(rel: &str, patterns: &[String]) -> bool {
-    patterns.iter().any(|pattern| {
-        let pattern = pattern.trim().trim_start_matches("./");
-        if let Some(body) = pattern.strip_suffix("/**") {
-            if !body.starts_with("**/") {
-                let body = body.trim_matches('/');
-                return body.is_empty() || rel == body || rel.starts_with(&format!("{body}/"));
-            }
-        }
-        sc_graph::is_excluded(rel, &[pattern.to_string()])
-    })
-}
-
-fn git_ignored(root: &Path, rels: &[String]) -> std::collections::HashSet<String> {
-    if rels.is_empty() {
-        return std::collections::HashSet::new();
-    }
-    let mut child = match std::process::Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .arg("check-ignore")
-        .arg("-z")
-        .arg("--stdin")
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(_) => return std::collections::HashSet::new(),
-    };
-    if let Some(mut stdin) = child.stdin.take() {
-        for rel in rels {
-            let _ = std::io::Write::write_all(&mut stdin, rel.as_bytes());
-            let _ = std::io::Write::write_all(&mut stdin, b"\0");
-        }
-    }
-    let Ok(output) = child.wait_with_output() else {
-        return std::collections::HashSet::new();
-    };
-    output
-        .stdout
-        .split(|byte| *byte == 0)
-        .filter(|item| !item.is_empty())
-        .filter_map(|item| String::from_utf8(item.to_vec()).ok())
-        .collect()
-}
-
-fn skip_dir(name: &str, at_root: bool) -> bool {
-    matches!(
-        name,
-        ".git"
-            | ".sc"
-            | ".venv"
-            | "venv"
-            | "node_modules"
-            | ".tox"
-            | ".mypy_cache"
-            | ".pytest_cache"
-            | ".next"
-            | ".nuxt"
-            | ".cache"
-            | ".gradle"
-    ) || (at_root && matches!(name, "target" | "dist"))
-}
-
-pub fn detect(root: &Path, override_pack: &str) -> Result<Detected, String> {
+pub fn detect_with_generated(
+    root: &Path,
+    override_pack: &str,
+    include_generated: &[String],
+) -> Result<Detected, String> {
     let override_pack = override_pack.trim();
     if !override_pack.is_empty() {
         let id = PackId::parse(override_pack)
@@ -466,7 +333,9 @@ pub fn detect(root: &Path, override_pack: &str) -> Result<Detected, String> {
         found.push(PackId::Rust);
     }
     // package.json next to only shell scripts is a shell program, not Node.
-    if root.join("package.json").is_file() && (has_node_source(root) || !has_shell(root)) {
+    if root.join("package.json").is_file()
+        && (has_node_source(root, include_generated) || !has_shell(root, include_generated))
+    {
         found.push(PackId::Node);
     }
     if root.join("pyproject.toml").is_file()
@@ -485,28 +354,33 @@ pub fn detect(root: &Path, override_pack: &str) -> Result<Detected, String> {
     {
         found.push(PackId::Java);
     }
-    if has_project_file(root, &["csproj", "sln"]) {
+    if has_project_file(root, &["csproj", "sln"], include_generated) {
         found.push(PackId::CSharp);
     }
     if root.join("composer.json").is_file() {
         found.push(PackId::Php);
     }
-    if is_c_family(root) {
+    if is_c_family(root, include_generated) {
         found.push(PackId::Cpp);
     }
-    Ok(resolve_markers(root, found))
+    Ok(resolve_markers(root, found, include_generated))
 }
 
-fn resolve_markers(root: &Path, found: Vec<PackId>) -> Detected {
+#[cfg(test)]
+pub(crate) fn detect(root: &Path, override_pack: &str) -> Result<Detected, String> {
+    detect_with_generated(root, override_pack, &[])
+}
+
+fn resolve_markers(root: &Path, found: Vec<PackId>, include_generated: &[String]) -> Detected {
     match found.len() {
-        0 if has_root_html(root) => Detected::Pack(PackId::Web),
-        0 if has_shell(root) => Detected::Pack(PackId::Bash),
+        0 if has_root_html(root, include_generated) => Detected::Pack(PackId::Web),
+        0 if has_shell(root, include_generated) => Detected::Pack(PackId::Bash),
         0 => Detected::Unknown,
         1 => Detected::Pack(found[0]),
         _ => {
             // A file count must not choose a pack. One language owns the tree
             // only when every other marker has no source files.
-            let counts = source_counts(root);
+            let counts = source_counts(root, include_generated);
             let owners: Vec<PackId> = found
                 .iter()
                 .copied()
@@ -520,7 +394,7 @@ fn resolve_markers(root: &Path, found: Vec<PackId>) -> Detected {
     }
 }
 
-fn is_c_family(root: &Path) -> bool {
+fn is_c_family(root: &Path, include_generated: &[String]) -> bool {
     if root.join("CMakeLists.txt").is_file() {
         return true;
     }
@@ -533,16 +407,20 @@ fn is_c_family(root: &Path) -> bool {
     ]
     .iter()
     .any(|name| root.join(name).is_file());
-    build && has_project_file(root, &["c", "cc", "cpp", "cxx"])
+    build && has_project_file(root, &["c", "cc", "cpp", "cxx"], include_generated)
 }
 
-fn has_node_source(root: &Path) -> bool {
-    has_project_file(root, &["js", "jsx", "mjs", "cjs", "ts", "tsx"])
+fn has_node_source(root: &Path, include_generated: &[String]) -> bool {
+    has_project_file(
+        root,
+        &["js", "jsx", "mjs", "cjs", "ts", "tsx"],
+        include_generated,
+    )
 }
 
-fn has_project_file(root: &Path, exts: &[&str]) -> bool {
+fn has_project_file(root: &Path, exts: &[&str], include_generated: &[String]) -> bool {
     let mut found = false;
-    visit(root, 0, &mut 0, &mut |path| {
+    visit(root, 8, 4000, include_generated, &mut |path| {
         if ext_is(path, exts) {
             found = true;
             return false;
@@ -568,9 +446,9 @@ fn pack_index(id: PackId) -> usize {
     }
 }
 
-fn source_counts(root: &Path) -> [usize; 11] {
+fn source_counts(root: &Path, include_generated: &[String]) -> [usize; 11] {
     let mut counts = [0; 11];
-    visit(root, 0, &mut 0, &mut |path| {
+    visit(root, 8, 4000, include_generated, &mut |path| {
         if let Some(id) = pack_for_ext(path) {
             counts[pack_index(id)] += 1;
         }
@@ -601,82 +479,42 @@ fn ext_is(path: &Path, exts: &[&str]) -> bool {
         .is_some_and(|ext| exts.iter().any(|wanted| wanted.eq_ignore_ascii_case(ext)))
 }
 
-fn visit(dir: &Path, depth: u32, seen: &mut usize, on_file: &mut dyn FnMut(&Path) -> bool) {
-    if depth > 8 || *seen > 4000 {
-        return;
-    }
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        if *seen > 4000 {
+fn visit(
+    root: &Path,
+    max_depth: usize,
+    max_files: usize,
+    include_generated: &[String],
+    on_file: &mut dyn FnMut(&Path) -> bool,
+) {
+    let mut seen = 0usize;
+    for item in sc_graph::walk(root, root, &[], include_generated, Some(max_depth)) {
+        if seen >= max_files {
             return;
         }
-        let path = entry.path();
-        let name = path
-            .file_name()
-            .and_then(|item| item.to_str())
-            .unwrap_or("");
-        if detect_skip_dir(name) {
-            continue;
-        }
-        if path.is_dir() {
-            if path
-                .symlink_metadata()
-                .map(|meta| meta.file_type().is_symlink())
-                .unwrap_or(false)
-            {
-                continue;
-            }
-            visit(&path, depth + 1, seen, on_file);
-        } else {
-            *seen += 1;
-            if !on_file(&path) {
-                return;
+        if let sc_graph::WalkItem::Entry(entry) = item {
+            if entry.kind == sc_graph::WalkKind::File {
+                seen += 1;
+                if !on_file(&entry.path) {
+                    return;
+                }
             }
         }
     }
 }
 
-fn detect_skip_dir(name: &str) -> bool {
-    matches!(
-        name,
-        ".git"
-            | ".hg"
-            | ".svn"
-            | "target"
-            | "node_modules"
-            | "dist"
-            | "vendor"
-            | ".venv"
-            | "venv"
-            | ".sc"
-    ) || name.starts_with('.')
+fn has_extension(root: &Path, exts: &[&str], include_generated: &[String]) -> bool {
+    sc_graph::walk_files(root, root, &[], include_generated, Some(1))
+        .iter()
+        .any(|path| ext_is(path, exts))
 }
 
-fn has_extension(root: &Path, exts: &[&str]) -> bool {
-    let Ok(entries) = std::fs::read_dir(root) else {
-        return false;
-    };
-    entries.flatten().any(|entry| {
-        entry
-            .path()
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| exts.iter().any(|wanted| wanted.eq_ignore_ascii_case(ext)))
-    })
+fn has_root_html(root: &Path, include_generated: &[String]) -> bool {
+    has_extension(root, &["html", "htm"], include_generated)
 }
 
-fn has_root_html(root: &Path) -> bool {
-    if root.join("index.html").is_file() || root.join("index.htm").is_file() {
-        return true;
-    }
-    has_extension(root, &["html", "htm"])
-}
-
-fn has_shell(root: &Path) -> bool {
+fn has_shell(root: &Path, include_generated: &[String]) -> bool {
     for dir in [root.to_path_buf(), root.join("scripts"), root.join("bin")] {
-        if has_extension(&dir, &["sh", "bash"]) {
+        if has_extension(&dir, &["sh", "bash"], include_generated) {
             return true;
         }
     }

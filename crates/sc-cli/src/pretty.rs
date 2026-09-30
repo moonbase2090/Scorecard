@@ -71,10 +71,28 @@ pub fn to_pretty(card: &Scorecard, opts: &PrettyOpts) -> String {
     push_gates(&mut out, card, opts, width);
     push_scores(&mut out, card, opts, width);
     push_crap(&mut out, card, opts, width);
+    push_generated_files(&mut out, card, opts, width);
     push_findings(&mut out, card, opts, width);
     push_llm(&mut out, card, opts, width);
     push_footer(&mut out, card, opts);
     out
+}
+
+fn push_generated_files(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize) {
+    let Some(warning) = card.generated_files_warning.as_ref() else {
+        return;
+    };
+    out.push_str("generated files analyzed\n");
+    for file in &warning.files {
+        out.push_str(&fit(&format!("  {file}"), width, opts.color));
+        out.push('\n');
+    }
+    out.push_str(&fit(
+        &format!("  {}", warning.suggested_action),
+        width,
+        opts.color,
+    ));
+    out.push_str("\n\n");
 }
 
 fn push_header(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize) {

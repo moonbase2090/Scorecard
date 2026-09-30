@@ -33,14 +33,16 @@ struct Step {
     advisory_failure: bool,
 }
 
-pub fn run(
+pub fn run_with_generated(
     pack: PackId,
     root: &Path,
     deadline: Instant,
     user_lint: Option<&str>,
     coverage: bool,
+    exclude: &[String],
+    include_generated: &[String],
 ) -> ToolReport {
-    let mut steps = plan(pack, root, coverage);
+    let mut steps = plan_with_generated(pack, root, coverage, exclude, include_generated);
     if let Some(lint) = user_lint {
         steps.retain(|step| step.gate != "lint");
         steps.push(Step {
@@ -65,21 +67,53 @@ pub fn run(
     report
 }
 
-fn plan(pack: PackId, root: &Path, coverage: bool) -> Vec<Step> {
+#[cfg(test)]
+pub fn run(
+    pack: PackId,
+    root: &Path,
+    deadline: Instant,
+    user_lint: Option<&str>,
+    coverage: bool,
+) -> ToolReport {
+    run_with_generated(pack, root, deadline, user_lint, coverage, &[], &[])
+}
+
+fn plan_with_generated(
+    pack: PackId,
+    root: &Path,
+    coverage: bool,
+    exclude: &[String],
+    include_generated: &[String],
+) -> Vec<Step> {
     match pack {
-        PackId::Node => node_plan(root, coverage),
-        PackId::Bash => bash_plan(root),
+        PackId::Node => node_plan(root, coverage, exclude, include_generated),
+        PackId::Bash => bash_plan(root, exclude, include_generated),
         PackId::Go => go_plan(root),
-        PackId::Java => java_plan(root),
+        PackId::Java => java_plan_with_generated(root, exclude, include_generated),
         PackId::CSharp => csharp_plan(),
-        PackId::Php => php_plan(root),
-        PackId::Cpp => cpp_plan(root),
+        PackId::Php => php_plan(root, exclude, include_generated),
+        PackId::Cpp => cpp_plan_with_generated(root, exclude, include_generated),
         PackId::Command | PackId::Rust | PackId::Python | PackId::Web => Vec::new(),
     }
 }
 
-fn node_plan(root: &Path, coverage: bool) -> Vec<Step> {
-    let files = list_files(root, &["js", "jsx", "mjs", "cjs", "ts", "tsx"]);
+#[cfg(test)]
+fn plan(pack: PackId, root: &Path, coverage: bool) -> Vec<Step> {
+    plan_with_generated(pack, root, coverage, &[], &[])
+}
+
+fn node_plan(
+    root: &Path,
+    coverage: bool,
+    exclude: &[String],
+    include_generated: &[String],
+) -> Vec<Step> {
+    let files = list_files(
+        root,
+        &["js", "jsx", "mjs", "cjs", "ts", "tsx"],
+        exclude,
+        include_generated,
+    );
     let ts = files
         .iter()
         .any(|file| file.ends_with(".ts") || file.ends_with(".tsx"));
@@ -139,8 +173,8 @@ fn node_plan(root: &Path, coverage: bool) -> Vec<Step> {
     ]
 }
 
-fn bash_plan(root: &Path) -> Vec<Step> {
-    let files = list_files(root, &["sh", "bash"]);
+fn bash_plan(root: &Path, exclude: &[String], include_generated: &[String]) -> Vec<Step> {
+    let files = list_files(root, &["sh", "bash"], exclude, include_generated);
     vec![
         Step {
             gate: "types",
@@ -157,7 +191,7 @@ fn bash_plan(root: &Path) -> Vec<Step> {
         Step {
             gate: "tests",
             engine: "tests",
-            command: bash_tests(root),
+            command: bash_tests(root, exclude, include_generated),
             absent: "bats is not installed or no .bats suite exists".into(),
             enforce: true,
             advisory_failure: false,
@@ -214,8 +248,12 @@ fn go_plan(root: &Path) -> Vec<Step> {
     ]
 }
 
-fn java_plan(root: &Path) -> Vec<Step> {
-    let files = list_files(root, &["java"]);
+fn java_plan_with_generated(
+    root: &Path,
+    exclude: &[String],
+    include_generated: &[String],
+) -> Vec<Step> {
+    let files = list_files(root, &["java"], exclude, include_generated);
     let has_pom = root.join("pom.xml").is_file();
     let has_gradle = root.join("build.gradle").is_file() || root.join("build.gradle.kts").is_file();
     let javac_cmd = if files.is_empty() {
@@ -284,6 +322,11 @@ fn java_plan(root: &Path) -> Vec<Step> {
     ]
 }
 
+#[cfg(test)]
+fn java_plan(root: &Path) -> Vec<Step> {
+    java_plan_with_generated(root, &[], &[])
+}
+
 fn csharp_plan() -> Vec<Step> {
     let prefix = "mkdir -p .sc/coverage .sc/nuget .sc/dotnet && DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 DOTNET_CLI_HOME=\"$PWD/.sc/dotnet\" NUGET_PACKAGES=\"$PWD/.sc/nuget\"";
     vec![
@@ -314,8 +357,8 @@ fn csharp_plan() -> Vec<Step> {
     ]
 }
 
-fn php_plan(root: &Path) -> Vec<Step> {
-    let files = list_files(root, &["php"]);
+fn php_plan(root: &Path, exclude: &[String], include_generated: &[String]) -> Vec<Step> {
+    let files = list_files(root, &["php"], exclude, include_generated);
     vec![
         Step {
             gate: "types",
@@ -334,7 +377,7 @@ fn php_plan(root: &Path) -> Vec<Step> {
             engine: "tests",
             command: if root.join("vendor/bin/phpunit").is_file() {
                 via("php", php_test("vendor/bin/phpunit"))
-            } else if has_php_tests(root) {
+            } else if has_php_tests(root, exclude, include_generated) {
                 via("phpunit", php_test("phpunit"))
             } else {
                 None
@@ -368,13 +411,17 @@ fn php_plan(root: &Path) -> Vec<Step> {
     ]
 }
 
-fn cpp_plan(root: &Path) -> Vec<Step> {
-    let files = list_files(root, &["c", "cc", "cpp", "cxx"]);
+fn cpp_plan_with_generated(
+    root: &Path,
+    exclude: &[String],
+    include_generated: &[String],
+) -> Vec<Step> {
+    let files = list_files(root, &["c", "cc", "cpp", "cxx"], exclude, include_generated);
     let (c_files, cxx_files) = split_c_family(&files);
     let flags = if c_files.is_empty() && cxx_files.is_empty() {
         MakefileFlags::none()
     } else {
-        MakefileFlags::read(root)
+        MakefileFlags::read_with_generated(root, exclude, include_generated)
     };
     let build_db = types_enforced(root);
     vec![
@@ -411,6 +458,11 @@ fn cpp_plan(root: &Path) -> Vec<Step> {
             advisory_failure: false,
         },
     ]
+}
+
+#[cfg(test)]
+fn cpp_plan(root: &Path) -> Vec<Step> {
+    cpp_plan_with_generated(root, &[], &[])
 }
 
 #[inline(never)]
@@ -530,12 +582,12 @@ fn apply(root: &Path, deadline: Instant, step: Step, report: &mut ToolReport) {
     }
 }
 
-fn bash_tests(root: &Path) -> Option<String> {
-    let bats = list_files(root, &["bats"]);
+fn bash_tests(root: &Path, exclude: &[String], include_generated: &[String]) -> Option<String> {
+    let bats = list_files(root, &["bats"], exclude, include_generated);
     if bats.is_empty() {
         return None;
     }
-    let libs: Vec<String> = list_files(root, &["sh"])
+    let libs: Vec<String> = list_files(root, &["sh"], exclude, include_generated)
         .into_iter()
         .filter(|file| {
             file.starts_with("scripts/")
@@ -726,10 +778,10 @@ fn cpp_coverage() -> String {
     "cmake -S . -B .sc/cmake-build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_FLAGS=--coverage -DCMAKE_CXX_FLAGS=--coverage -DCMAKE_EXE_LINKER_FLAGS=--coverage && cmake --build .sc/cmake-build && ctest --test-dir .sc/cmake-build --output-on-failure; status=$?; mkdir -p .sc/coverage && lcov --capture --directory .sc/cmake-build --output-file .sc/coverage/cpp.info || true; exit $status".into()
 }
 
-fn has_php_tests(root: &Path) -> bool {
+fn has_php_tests(root: &Path, exclude: &[String], include_generated: &[String]) -> bool {
     root.join("phpunit.xml").is_file()
         || root.join("phpunit.xml.dist").is_file()
-        || list_files(root, &["php"])
+        || list_files(root, &["php"], exclude, include_generated)
             .iter()
             .any(|file| file.contains("Test") || file.contains("/tests/"))
 }
@@ -772,37 +824,29 @@ fn eslint_config(root: &Path) -> bool {
     .any(|name| root.join(name).is_file())
 }
 
-fn list_files(root: &Path, exts: &[&str]) -> Vec<String> {
-    let mut out = Vec::new();
-    walk(root, root, 0, exts, &mut out);
+fn list_files(
+    root: &Path,
+    exts: &[&str],
+    exclude: &[String],
+    include_generated: &[String],
+) -> Vec<String> {
+    let mut out: Vec<String> =
+        sc_graph::walk_files(root, root, exclude, include_generated, Some(5))
+            .into_iter()
+            .filter(|path| {
+                path.extension()
+                    .and_then(|ext| ext.to_str())
+                    .is_some_and(|ext| exts.contains(&ext))
+            })
+            .filter_map(|path| {
+                path.strip_prefix(root)
+                    .ok()
+                    .map(|rel| rel.to_string_lossy().replace('\\', "/"))
+            })
+            .collect();
+    out.sort();
+    out.truncate(200);
     out
-}
-
-fn walk(root: &Path, dir: &Path, depth: u32, exts: &[&str], out: &mut Vec<String>) {
-    if depth > 5 || out.len() >= 200 {
-        return;
-    }
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        if name.starts_with('.') || name == "node_modules" || name == "target" || name == "dist" {
-            continue;
-        }
-        if path.is_dir() {
-            walk(root, &path, depth + 1, exts, out);
-        } else if path
-            .extension()
-            .and_then(|e| e.to_str())
-            .is_some_and(|e| exts.contains(&e))
-        {
-            if let Ok(rel) = path.strip_prefix(root) {
-                out.push(rel.to_string_lossy().replace('\\', "/"));
-            }
-        }
-    }
 }
 
 fn filter_ext(files: &[String], exts: &[&str]) -> Vec<String> {
@@ -876,12 +920,12 @@ impl MakefileFlags {
         }
     }
 
-    fn read(root: &Path) -> Self {
+    fn read_with_generated(root: &Path, exclude: &[String], include_generated: &[String]) -> Self {
         let Some((name, text)) = makefile_source(root) else {
             return Self::none();
         };
         let mut shape = makefile_shape(&text);
-        if nested_makefile(root) {
+        if nested_makefile(root, exclude, include_generated) {
             shape.partial = true;
         }
         if !shape.skip_make {
@@ -900,6 +944,11 @@ impl MakefileFlags {
             cxx,
             uncertain: shape.skip_make || shape.partial || makefile_text_uncertain(&text),
         }
+    }
+
+    #[cfg(test)]
+    fn read(root: &Path) -> Self {
+        Self::read_with_generated(root, &[], &[])
     }
 }
 
@@ -1064,59 +1113,16 @@ fn known_make_variable(name: &str) -> bool {
     )
 }
 
-fn nested_makefile(root: &Path) -> bool {
-    fn walk(dir: &Path, depth: u32) -> bool {
-        if depth > 5 {
-            return false;
-        }
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return false;
-        };
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            if name.starts_with('.') || name == "node_modules" || name == "target" || name == "dist"
-            {
-                continue;
-            }
-            let Ok(kind) = entry.file_type() else {
-                continue;
-            };
-            if kind.is_symlink() {
-                continue;
-            }
-            if kind.is_dir() {
-                if walk(&entry.path(), depth + 1) {
-                    return true;
-                }
-            } else if kind.is_file()
-                && matches!(name.as_ref(), "Makefile" | "makefile" | "GNUmakefile")
-            {
-                return true;
-            }
-        }
-        false
-    }
-    let Ok(entries) = std::fs::read_dir(root) else {
-        return false;
-    };
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if name.starts_with('.') || name == "node_modules" || name == "target" || name == "dist" {
-            continue;
-        }
-        let Ok(kind) = entry.file_type() else {
-            continue;
-        };
-        if kind.is_symlink() || !kind.is_dir() {
-            continue;
-        }
-        if walk(&entry.path(), 1) {
-            return true;
-        }
-    }
-    false
+fn nested_makefile(root: &Path, exclude: &[String], include_generated: &[String]) -> bool {
+    sc_graph::walk_files(root, root, exclude, include_generated, Some(6))
+        .into_iter()
+        .any(|path| {
+            path.parent() != Some(root)
+                && matches!(
+                    path.file_name().and_then(|name| name.to_str()),
+                    Some("Makefile" | "makefile" | "GNUmakefile")
+                )
+        })
 }
 
 fn is_include_directive(line: &str) -> bool {

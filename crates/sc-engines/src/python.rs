@@ -52,13 +52,14 @@ pub struct PythonOutcome {
     pub crap_worst: Vec<sc_core::CrapFunction>,
 }
 
-pub fn run(
+pub fn run_with_generated(
     root: &Path,
     deadline: Instant,
     threshold: u32,
     untested_cc: u32,
     started: std::time::SystemTime,
     exclude: &[String],
+    include_generated: &[String],
     coverage_enabled: bool,
 ) -> PythonOutcome {
     let mut findings = Vec::new();
@@ -74,7 +75,8 @@ pub fn run(
         &mut ran,
         &mut skipped,
     );
-    let functions = crate::poly_cc::functions_for_pack(root, "python");
+    let scan = crate::poly_cc::scan_for_pack(root, "python", exclude, include_generated);
+    let functions = scan.functions;
     let (tests_enforced, tests_pass, tests_reason) = run_pytest(
         root,
         deadline,
@@ -94,7 +96,8 @@ pub fn run(
         &mut skipped,
     );
     let sca = check_imports(root, &mut findings, &mut ran);
-    let mut coverage = read_coverage(root, &functions, started);
+    let mut coverage =
+        read_coverage_with_generated(root, &functions, started, exclude, include_generated);
     let mut coverage_reason: Option<String> = None;
     let mut coverage_fix: Option<&'static str> = None;
     if !coverage_enabled {
@@ -107,7 +110,8 @@ pub fn run(
                 "Install coverage.py (`python3 -m pip install coverage`) and re-run `sc analyze`",
             );
         }
-        coverage = read_coverage(root, &functions, started);
+        coverage =
+            read_coverage_with_generated(root, &functions, started, exclude, include_generated);
     }
     if coverage.is_some() {
         if !ran.iter().any(|engine| engine == "coverage") {
@@ -176,7 +180,7 @@ pub fn run(
     let crap_untested = crap.untested;
     let crap_coverage_complete = crap.coverage_complete;
     let crap_worst = crap.worst;
-    let secrets = crate::pack::text_secrets(root, exclude);
+    let secrets = crate::pack::text_secrets_with_generated(root, exclude, include_generated);
     let secret_errors = secrets
         .iter()
         .filter(|finding| finding.severity == "error")
@@ -206,6 +210,28 @@ pub fn run(
         crap_coverage_complete,
         crap_worst,
     }
+}
+
+#[cfg(test)]
+pub fn run(
+    root: &Path,
+    deadline: Instant,
+    threshold: u32,
+    untested_cc: u32,
+    started: std::time::SystemTime,
+    exclude: &[String],
+    coverage_enabled: bool,
+) -> PythonOutcome {
+    run_with_generated(
+        root,
+        deadline,
+        threshold,
+        untested_cc,
+        started,
+        exclude,
+        &[],
+        coverage_enabled,
+    )
 }
 
 fn compile_tree(
@@ -1750,10 +1776,12 @@ fn shell(
 }
 
 #[inline(never)]
-fn read_coverage(
+fn read_coverage_with_generated(
     root: &Path,
     functions: &[sc_graph::FunctionInfo],
     since: std::time::SystemTime,
+    exclude: &[String],
+    include_generated: &[String],
 ) -> Option<crate::coverage::CoverageData> {
     let path = root.join(".sc").join("coverage").join("pytest.json");
     if !crate::pack_cov::written_during_run(&path, since) {
@@ -1762,7 +1790,8 @@ fn read_coverage(
     let text = std::fs::read_to_string(&path).ok()?;
     let value: serde_json::Value = serde_json::from_str(&text).ok()?;
     let files = value.get("files")?.as_object()?;
-    let extra = crate::poly_cc::coverage_paths(root, "python");
+    let extra =
+        crate::poly_cc::coverage_paths_with_scope(root, "python", exclude, include_generated);
     let known =
         crate::coverage::merge_known(functions.iter().map(|item| item.file.as_str()), &extra);
     let owners = crate::coverage::file_owners(files.keys().map(|name| name.as_str()), &known);
@@ -1806,6 +1835,15 @@ fn read_coverage(
         functions: covered,
         line_rate,
     })
+}
+
+#[cfg(test)]
+fn read_coverage(
+    root: &Path,
+    functions: &[sc_graph::FunctionInfo],
+    since: std::time::SystemTime,
+) -> Option<crate::coverage::CoverageData> {
+    read_coverage_with_generated(root, functions, since, &[], &[])
 }
 
 fn line_set(file: &serde_json::Value, key: &str) -> BTreeSet<u32> {

@@ -43,6 +43,9 @@ pub struct GatesConfig {
 #[serde(default)]
 pub struct ScopeConfig {
     pub exclude: Vec<String>,
+    /// Override built-in skips for generated or vendored directories and
+    /// generated source markers. `.gitignore` and `exclude` still apply.
+    pub include_generated: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -108,7 +111,8 @@ impl Default for GatesConfig {
 impl Default for ScopeConfig {
     fn default() -> Self {
         Self {
-            exclude: vec!["target/**".into(), "generated/**".into()],
+            exclude: Vec::new(),
+            include_generated: Vec::new(),
         }
     }
 }
@@ -285,7 +289,8 @@ mod tests {
             vec!["types", "tests", "crap", "secrets", "lint"]
         );
         assert_eq!(config.gates.crap_threshold, 30);
-        assert_eq!(config.scope.exclude, vec!["target/**", "generated/**"]);
+        assert!(config.scope.exclude.is_empty());
+        assert!(config.scope.include_generated.is_empty());
     }
 
     #[test]
