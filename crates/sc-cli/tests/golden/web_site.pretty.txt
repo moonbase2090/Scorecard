@@ -1,4 +1,4 @@
-sc 0.1.5  testdata/web_site  web  GITSHA STATE  scope tree
+sc 0.1.6  testdata/web_site  web  GITSHA STATE  scope tree
 
 PASS  1 advisory gate failing
 

@@ -1,4 +1,4 @@
-sc 0.1.5  testdata/failing_test  rust  2f0d4d9 clean  scope tree
+sc 0.1.6  testdata/failing_test  rust  2f0d4d9 clean  scope tree
 
 [1m[31mFAIL[0m
 
