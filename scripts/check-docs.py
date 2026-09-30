@@ -190,7 +190,7 @@ def check_invocations(options: dict[str, set[str]]) -> list[str]:
             for match in INVOCATION.finditer(line):
                 words = match.group(1).split()
                 if not words or words[0][0].isdigit():
-                    continue  # bare `sc`, or a version line such as `sc 0.1.5`
+                    continue  # bare `sc`, or a version line such as `sc 0.1.6`
                 parts: list[str] = []
                 index = 0
                 if not words[0].startswith("-"):
