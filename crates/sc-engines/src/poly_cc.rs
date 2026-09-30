@@ -111,37 +111,70 @@ pub fn javascript_in(rel: &str, text: &str, line_offset: u32) -> Vec<FunctionInf
     functions
 }
 
+#[derive(Debug, Default)]
+pub struct PackScan {
+    pub functions: Vec<FunctionInfo>,
+    pub paths: Vec<String>,
+}
+
+#[cfg(test)]
 pub fn functions_for_pack(root: &Path, pack: &str) -> Vec<FunctionInfo> {
-    match pack {
-        "python" => python_functions(root),
-        "node" => files_with(root, &["js", "jsx", "mjs", "cjs", "ts", "tsx"], Lang::C),
-        "go" => files_with(root, &["go"], Lang::Go),
-        "java" => files_with(root, &["java"], Lang::C),
-        "csharp" => files_with(root, &["cs"], Lang::C),
-        "php" => files_with(root, &["php"], Lang::C),
-        "cpp" => files_with(
-            root,
-            &["c", "cc", "cpp", "cxx", "h", "hh", "hpp", "hxx"],
-            Lang::C,
-        ),
-        "bash" => files_with(root, &["sh", "bash"], Lang::Bash),
-        "command" => {
-            let mut all = Vec::new();
-            for pack in [
-                "python", "node", "go", "java", "csharp", "php", "cpp", "bash",
-            ] {
-                all.extend(functions_for_pack(root, pack));
-            }
-            all
+    scan_for_pack(root, pack, &[], &[]).functions
+}
+
+pub fn scan_for_pack(
+    root: &Path,
+    pack: &str,
+    exclude: &[String],
+    include_generated: &[String],
+) -> PackScan {
+    if pack == "command" {
+        let mut combined = PackScan::default();
+        for name in [
+            "python", "node", "go", "java", "csharp", "php", "cpp", "bash",
+        ] {
+            let scanned = scan_for_pack(root, name, exclude, include_generated);
+            combined.functions.extend(scanned.functions);
+            combined.paths.extend(scanned.paths);
         }
-        _ => Vec::new(),
+        combined.paths.sort();
+        combined.paths.dedup();
+        return combined;
     }
+    let (exts, lang): (&[&str], Option<Lang>) = match pack {
+        "python" => (&["py"], None),
+        "node" => (&["js", "jsx", "mjs", "cjs", "ts", "tsx"], Some(Lang::C)),
+        "go" => (&["go"], Some(Lang::Go)),
+        "java" => (&["java"], Some(Lang::C)),
+        "csharp" => (&["cs"], Some(Lang::C)),
+        "php" => (&["php"], Some(Lang::C)),
+        "cpp" => (
+            &["c", "cc", "cpp", "cxx", "h", "hh", "hpp", "hxx"],
+            Some(Lang::C),
+        ),
+        "bash" => (&["sh", "bash"], Some(Lang::Bash)),
+        _ => return PackScan::default(),
+    };
+    let paths = collect(root, exts, exclude, include_generated);
+    let functions = match lang {
+        None => python_functions(root, &paths),
+        Some(lang) => files_with(root, &paths, &lang),
+    };
+    PackScan { functions, paths }
 }
 
 /// Paths a coverage report may name, including `vendor/`, `dist/`, and
 /// dot-directories. Those files own their hits. They are not scored.
 pub fn coverage_paths(root: &Path, pack: &str) -> Vec<String> {
-    let mut out = Vec::new();
+    coverage_paths_with_scope(root, pack, &[], &[])
+}
+
+pub fn coverage_paths_with_scope(
+    root: &Path,
+    pack: &str,
+    exclude: &[String],
+    include_generated: &[String],
+) -> Vec<String> {
     let exts: &[&str] = match pack {
         "python" => &["py"],
         "node" => &["js", "jsx", "mjs", "cjs", "ts", "tsx"],
@@ -156,14 +189,27 @@ pub fn coverage_paths(root: &Path, pack: &str) -> Vec<String> {
             for name in [
                 "python", "node", "go", "java", "csharp", "php", "cpp", "bash",
             ] {
-                all.extend(coverage_paths(root, name));
+                all.extend(coverage_paths_with_scope(
+                    root,
+                    name,
+                    exclude,
+                    include_generated,
+                ));
             }
             return all;
         }
         _ => return Vec::new(),
     };
-    collect(root, root, 0, exts, &mut out);
-    out
+    // Coverage can mention files that Scorecard deliberately does not score.
+    // Keep those paths available for ownership matching so their hits cannot
+    // be attributed to a similarly named in-scope file.
+    let mut attribution_includes = include_generated.to_vec();
+    attribution_includes.extend(
+        sc_graph::GENERATED_SKIP_DIRS
+            .iter()
+            .map(|dir| format!("{dir}/**")),
+    );
+    collect_all(root, exts, exclude, &attribution_includes)
 }
 
 enum Lang {
@@ -172,8 +218,7 @@ enum Lang {
     Bash,
 }
 
-fn python_functions(root: &Path) -> Vec<FunctionInfo> {
-    let files = py_files(root);
+fn python_functions(root: &Path, files: &[String]) -> Vec<FunctionInfo> {
     if files.is_empty() {
         return Vec::new();
     }
@@ -189,7 +234,6 @@ fn python_functions(root: &Path) -> Vec<FunctionInfo> {
         return Vec::new();
     };
     rows.into_iter()
-        .filter(|row| product_file(&row.file))
         .map(|row| FunctionInfo {
             file: row.file,
             symbol: row.symbol,
@@ -245,81 +289,78 @@ fn shell_quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
 }
 
-fn py_files(root: &Path) -> Vec<String> {
-    let mut out = Vec::new();
-    collect(root, root, 0, &["py"], &mut out);
-    out
-}
-
-fn files_with(root: &Path, exts: &[&str], lang: Lang) -> Vec<FunctionInfo> {
-    let mut paths = Vec::new();
-    collect(root, root, 0, exts, &mut paths);
+fn files_with(root: &Path, paths: &[String], lang: &Lang) -> Vec<FunctionInfo> {
     let mut functions = Vec::new();
     for rel in paths {
-        if !product_file(&rel) {
-            continue;
-        }
-        let Ok(text) = std::fs::read_to_string(root.join(&rel)) else {
+        let Ok(text) = std::fs::read_to_string(root.join(rel)) else {
             continue;
         };
-        functions.extend(scan_text(&rel, &text, &lang));
+        functions.extend(scan_text(rel, &text, lang));
     }
     functions
 }
 
-/// `vendor/`, `dist/`, and dot-directories are third-party trees. Scoring
-/// them makes one missing coverage record turn a measured CRAP failure advisory.
-fn product_file(rel: &str) -> bool {
-    !rel.split('/')
-        .rev()
-        .skip(1)
-        .any(|part| part == "vendor" || part == "dist" || part.starts_with('.'))
+fn collect(
+    root: &Path,
+    exts: &[&str],
+    exclude: &[String],
+    include_generated: &[String],
+) -> Vec<String> {
+    collect_matching(root, exts, exclude, include_generated, true)
 }
 
-fn collect(root: &Path, dir: &Path, depth: u32, exts: &[&str], out: &mut Vec<String>) {
-    if depth > 32 {
-        return;
-    }
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("");
-        if name == ".git"
-            || name == ".sc"
-            || name == ".venv"
-            || name == "node_modules"
-            || name == "target"
-            || name == "__pycache__"
+fn collect_all(
+    root: &Path,
+    exts: &[&str],
+    exclude: &[String],
+    include_generated: &[String],
+) -> Vec<String> {
+    collect_matching(root, exts, exclude, include_generated, false)
+}
+
+fn collect_matching(
+    root: &Path,
+    exts: &[&str],
+    exclude: &[String],
+    include_generated: &[String],
+    omit_tests: bool,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    for item in sc_graph::walk(root, root, exclude, include_generated, Some(32)) {
+        let sc_graph::WalkItem::Entry(entry) = item else {
+            continue;
+        };
+        if entry.kind != sc_graph::WalkKind::File {
+            continue;
+        }
+        let Some(rel) = entry.path.strip_prefix(root).ok() else {
+            continue;
+        };
+        let rel = rel.to_string_lossy().replace('\\', "/");
+        if !entry
+            .path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| exts.contains(&ext))
         {
             continue;
         }
-        if path.is_dir() {
-            if path
-                .symlink_metadata()
-                .map(|meta| meta.file_type().is_symlink())
-                .unwrap_or(false)
-            {
-                continue;
-            }
-            if !test_dir(name) {
-                collect(root, &path, depth + 1, exts, out);
-            }
-        } else if !test_file(name)
-            && path
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .is_some_and(|ext| exts.contains(&ext))
+        if omit_tests
+            && (test_file(
+                entry
+                    .path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or(""),
+            ) || rel.split('/').any(test_dir))
         {
-            if let Ok(rel) = path.strip_prefix(root) {
-                out.push(rel.to_string_lossy().replace('\\', "/"));
-            }
+            continue;
         }
+        out.push(rel);
     }
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// Test code is not scored for CRAP. A test helper is not product code that
@@ -734,8 +775,8 @@ mod tests {
         let deep = dir.join("a/b/c/d/e/f/g");
         std::fs::create_dir_all(&deep).unwrap();
         std::fs::write(deep.join("deep.js"), "function choose(){return 1}\n").unwrap();
-        let mut out = Vec::new();
-        collect(&dir, &dir, 0, &["js"], &mut out);
+        let include = vec!["vendor/**".into()];
+        let out = collect(&dir, &["js"], &[], &include);
         assert!(out.iter().any(|path| path == "vendor/index.js"), "{out:?}");
         assert!(out.iter().any(|path| path.ends_with("deep.js")), "{out:?}");
         let _ = std::fs::remove_dir_all(&dir);
@@ -779,7 +820,8 @@ mod tests {
             "def choose(n):\n    if n:\n        return 1\n    return 0\n",
         )
         .unwrap();
-        let fns = python_functions(&dir);
+        let paths = collect(&dir, &["py"], &[], &[]);
+        let fns = python_functions(&dir, &paths);
         assert_eq!(fns.len(), 1);
         assert_eq!(fns[0].symbol, "choose");
         assert!(fns[0].cc >= 2, "cc {}", fns[0].cc);

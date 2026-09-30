@@ -21,7 +21,7 @@ use crate::coverage::parse_coverage_json;
 use crate::crap::{evaluate, unmatched_functions};
 
 use crate::mutation::run_mutation;
-use crate::scope::{empty_selection, select, Selection};
+use crate::scope::{empty_selection, Selection};
 use crate::spec_check::{check_spec, gap_value};
 
 #[derive(Debug, Clone)]
@@ -73,7 +73,11 @@ pub fn analyze_with_generated_paths(
     // Snapshot Git state before any engine runs and exclude Scorecard's saved
     // report and requested output files from earlier runs.
     let git = git_info(&request.root, generated_paths);
-    match crate::pack::detect(&request.root, &request.config.pack) {
+    match crate::pack::detect_with_generated(
+        &request.root,
+        &request.config.pack,
+        &request.config.scope.include_generated,
+    ) {
         Ok(crate::pack::Detected::Pack(crate::pack::PackId::Rust)) => analyze_rust(request, git),
         Ok(crate::pack::Detected::Pack(crate::pack::PackId::Python)) => {
             analyze_python(request, git)
@@ -159,6 +163,7 @@ fn analyze_blocked(
         spec: SpecSection::empty(),
         intent: request.intent.clone(),
         llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),
+        generated_files_warning: None,
         runs: Vec::new(),
         analyzer_error: true,
     })
@@ -166,33 +171,48 @@ fn analyze_blocked(
 
 fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
     let mut findings = Vec::new();
-    let mut functions = crate::poly_cc::functions_for_pack(&request.root, "node");
-    for rel in html_files(&request.root) {
-        let Ok(text) = std::fs::read_to_string(request.root.join(&rel)) else {
+    let source_scan = crate::poly_cc::scan_for_pack(
+        &request.root,
+        "node",
+        &request.config.scope.exclude,
+        &request.config.scope.include_generated,
+    );
+    let mut functions = source_scan.functions;
+    let html = html_files(
+        &request.root,
+        &request.config.scope.exclude,
+        &request.config.scope.include_generated,
+    );
+    for rel in &html {
+        let Ok(text) = std::fs::read_to_string(request.root.join(rel)) else {
             continue;
         };
-        let (html, parsed) = crate::html_doc::html_findings(&rel, &text);
+        let (html, parsed) = crate::html_doc::html_findings(rel, &text);
         findings.extend(html);
         findings.extend(crate::links::link_findings(
             &request.root,
-            &rel,
+            rel,
             &parsed.elements,
         ));
         findings.extend(crate::a11y::check_elements(
-            &rel,
+            rel,
             &parsed.elements,
             &request.config.a11y.disable,
             true,
         ));
         for script in parsed.scripts {
             functions.extend(crate::poly_cc::javascript_in(
-                &rel,
+                rel,
                 &script.body,
                 script.line.saturating_sub(1),
             ));
         }
     }
-    let secrets = crate::pack::text_secrets(&request.root, &request.config.scope.exclude);
+    let secrets = crate::pack::text_secrets_with_generated(
+        &request.root,
+        &request.config.scope.exclude,
+        &request.config.scope.include_generated,
+    );
     let secret_errors = secrets
         .iter()
         .filter(|finding| finding.severity == "error")
@@ -329,7 +349,7 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         gates,
         metrics: sc_core::Metrics {
             loc_changed: 0,
-            files_changed: html_files(&request.root).len() as u64,
+            files_changed: html.len() as u64,
             coverage_changed: 0.0,
             crap_max: crap.crap_max,
             crap_over_threshold: crap.over,
@@ -342,82 +362,62 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         spec: SpecSection::empty(),
         intent: request.intent.clone(),
         llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),
+        generated_files_warning: sc_core::GeneratedFilesWarning::from_paths(
+            generated_files_warning(
+                &request.root,
+                &request.config.scope.exclude,
+                &request.config.scope.include_generated,
+            ),
+        ),
         runs: Vec::new(),
         analyzer_error: false,
     })
 }
 
-fn markup_files(root: &Path, exts: &[&str]) -> Vec<String> {
-    let mut out = Vec::new();
-    fn walk(root: &Path, dir: &Path, depth: u32, exts: &[&str], out: &mut Vec<String>) {
-        if depth > 6 || out.len() >= 200 {
-            return;
-        }
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("");
-            if name.starts_with('.') || name == "node_modules" || name == "dist" || name == "target"
-            {
-                continue;
-            }
-            if path.is_dir() {
-                walk(root, &path, depth + 1, exts, out);
-            } else if path
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .is_some_and(|ext| exts.contains(&ext))
-            {
-                if let Ok(rel) = path.strip_prefix(root) {
-                    out.push(rel.to_string_lossy().replace('\\', "/"));
-                }
-            }
-        }
-    }
-    walk(root, root, 0, exts, &mut out);
-    out.sort();
-    out
+fn markup_files(
+    root: &Path,
+    exts: &[&str],
+    exclude: &[String],
+    include_generated: &[String],
+) -> Vec<String> {
+    let mut files: Vec<String> =
+        sc_graph::walk_files(root, root, exclude, include_generated, Some(6))
+            .into_iter()
+            .filter(|path| {
+                path.extension()
+                    .and_then(|ext| ext.to_str())
+                    .is_some_and(|ext| exts.contains(&ext))
+            })
+            .filter_map(|path| {
+                path.strip_prefix(root)
+                    .ok()
+                    .map(|rel| rel.to_string_lossy().replace('\\', "/"))
+            })
+            .collect();
+    files.sort();
+    files.dedup();
+    files.truncate(200);
+    files
 }
 
-fn html_files(root: &Path) -> Vec<String> {
-    let mut out = Vec::new();
-    fn walk(root: &Path, dir: &Path, depth: u32, out: &mut Vec<String>) {
-        if depth > 6 || out.len() >= 200 {
-            return;
-        }
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("");
-            if name.starts_with('.') || name == "node_modules" || name == "dist" || name == "target"
-            {
-                continue;
-            }
-            if path.is_dir() {
-                walk(root, &path, depth + 1, out);
-            } else if matches!(
-                path.extension().and_then(|ext| ext.to_str()),
-                Some("html" | "htm")
-            ) {
-                if let Ok(rel) = path.strip_prefix(root) {
-                    out.push(rel.to_string_lossy().replace('\\', "/"));
-                }
-            }
-        }
-    }
-    walk(root, root, 0, &mut out);
-    out.sort();
-    out
+fn generated_files_warning(
+    root: &Path,
+    exclude: &[String],
+    include_generated: &[String],
+) -> Vec<String> {
+    let paths: Vec<String> = sc_graph::walk_files(root, root, exclude, include_generated, None)
+        .into_iter()
+        .filter_map(|path| {
+            path.strip_prefix(root)
+                .ok()
+                .map(|rel| rel.to_string_lossy().replace('\\', "/"))
+        })
+        .collect();
+    sc_graph::analyzed_generated_files(root, &paths, include_generated)
+}
+
+fn html_files(root: &Path, exclude: &[String], include_generated: &[String]) -> Vec<String> {
+    markup_files(root, &["html", "htm"], exclude, include_generated)
 }
 
 fn html_gate_enforced(config: &sc_core::Config, fail_on: &[String]) -> bool {
@@ -476,26 +476,37 @@ fn analyze_unsupported(
     };
     let started = crate::pack_cov::run_start();
     crate::pack_cov::clear(&request.root);
-    let tools = crate::toolchain::run(
+    let tools = crate::toolchain::run_with_generated(
         pack,
         &request.root,
         Instant::now() + request.budget,
         user_lint.as_deref(),
         request.config.engines.coverage,
+        &request.config.scope.exclude,
+        &request.config.scope.include_generated,
     );
     let mut findings = tools.findings;
     findings.push(unavailable(
         "sca",
         "dependency check is not implemented for this pack",
     ));
-    let secrets = crate::pack::text_secrets(&request.root, &request.config.scope.exclude);
+    let secrets = crate::pack::text_secrets_with_generated(
+        &request.root,
+        &request.config.scope.exclude,
+        &request.config.scope.include_generated,
+    );
     let secret_errors = secrets
         .iter()
         .filter(|finding| finding.severity == "error")
         .count();
     findings.extend(secrets);
     let jsx_files = if pack == crate::pack::PackId::Node {
-        markup_files(&request.root, &["jsx", "tsx"])
+        markup_files(
+            &request.root,
+            &["jsx", "tsx"],
+            &request.config.scope.exclude,
+            &request.config.scope.include_generated,
+        )
     } else {
         Vec::new()
     };
@@ -535,8 +546,19 @@ fn analyze_unsupported(
     let mut ran = tools.ran;
     let mut skipped = tools.skipped;
     let runs = tools.runs;
-    let functions = crate::poly_cc::functions_for_pack(&request.root, pack.as_str());
-    let known = crate::poly_cc::coverage_paths(&request.root, pack.as_str());
+    let scan = crate::poly_cc::scan_for_pack(
+        &request.root,
+        pack.as_str(),
+        &request.config.scope.exclude,
+        &request.config.scope.include_generated,
+    );
+    let functions = scan.functions;
+    let known = crate::poly_cc::coverage_paths_with_scope(
+        &request.root,
+        pack.as_str(),
+        &request.config.scope.exclude,
+        &request.config.scope.include_generated,
+    );
     let coverage = if pack == crate::pack::PackId::Go {
         std::fs::read_to_string(crate::toolchain::go_cover_path(&request.root))
             .ok()
@@ -656,6 +678,13 @@ fn analyze_unsupported(
         spec: SpecSection::empty(),
         intent: request.intent.clone(),
         llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),
+        generated_files_warning: sc_core::GeneratedFilesWarning::from_paths(
+            generated_files_warning(
+                &request.root,
+                &request.config.scope.exclude,
+                &request.config.scope.include_generated,
+            ),
+        ),
         runs,
         analyzer_error: false,
     })
@@ -665,13 +694,16 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
     let deadline = Instant::now() + request.budget;
     let started = crate::pack_cov::run_start();
     crate::pack_cov::clear(&request.root);
-    let outcome = crate::python::run(
+    let outcome = crate::python::run_with_generated(
         &request.root,
         deadline,
         request.config.gates.crap_threshold,
         request.config.gates.new_fn_untested_cc,
         started,
-        &request.config.scope.exclude,
+        crate::scope::ScanScope {
+            exclude: &request.config.scope.exclude,
+            include_generated: &request.config.scope.include_generated,
+        },
         request.config.engines.coverage,
     );
     let gates = vec![
@@ -741,6 +773,13 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         spec: SpecSection::empty(),
         intent: request.intent.clone(),
         llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),
+        generated_files_warning: sc_core::GeneratedFilesWarning::from_paths(
+            generated_files_warning(
+                &request.root,
+                &request.config.scope.exclude,
+                &request.config.scope.include_generated,
+            ),
+        ),
         runs: outcome.runs,
         analyzer_error: false,
     })
@@ -750,9 +789,12 @@ fn analyze_rust(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
     let deadline = Instant::now() + request.budget;
     let root = &request.root;
     let threshold = request.config.gates.crap_threshold;
-    let (selection, select_error) = match select(
+    let (selection, select_error) = match crate::scope::select_with_generated(
         root,
-        &request.config.scope.exclude,
+        crate::scope::ScanScope {
+            exclude: &request.config.scope.exclude,
+            include_generated: &request.config.scope.include_generated,
+        },
         request.diff_base.as_deref(),
         request.diff_head.as_deref(),
         &request.path_list,
@@ -1231,6 +1273,7 @@ fn assemble_rust_report(
         selection,
         root,
         &request.config.scope.exclude,
+        &request.config.scope.include_generated,
         &mut state.ran,
         &mut state.findings,
     );
@@ -1312,6 +1355,13 @@ fn assemble_rust_report(
         spec: spec.section,
         intent: request.intent.clone(),
         llm,
+        generated_files_warning: sc_core::GeneratedFilesWarning::from_paths(
+            generated_files_warning(
+                root,
+                &request.config.scope.exclude,
+                &request.config.scope.include_generated,
+            ),
+        ),
         runs: state.runs,
         analyzer_error: state.analyzer_error,
     })
@@ -1339,6 +1389,7 @@ struct Draft {
     spec: SpecSection,
     intent: Option<String>,
     llm: Option<LlmSection>,
+    generated_files_warning: Option<sc_core::GeneratedFilesWarning>,
     runs: Vec<RunRecord>,
     analyzer_error: bool,
 }
@@ -1377,6 +1428,7 @@ fn finish(mut draft: Draft) -> AnalyzeOutput {
         },
         mutation: draft.mutation,
         findings: draft.findings,
+        generated_files_warning: draft.generated_files_warning,
         spec: draft.spec,
         llm: draft.llm,
         runs: draft.runs,
@@ -2382,12 +2434,17 @@ fn secret_and_perf(
     selection: &Selection,
     root: &Path,
     exclude: &[String],
+    include_generated: &[String],
     ran: &mut Vec<String>,
     findings: &mut Vec<Finding>,
 ) {
     ran.push("secrets".into());
     ran.push("perf".into());
-    findings.extend(crate::pack::text_secrets(root, exclude));
+    findings.extend(crate::pack::text_secrets_with_generated(
+        root,
+        exclude,
+        include_generated,
+    ));
     for file in &selection.files {
         for hit in &file.perf {
             findings.push(Finding {
@@ -2962,6 +3019,30 @@ mod tests {
             },
             cc: 3,
         }
+    }
+
+    #[test]
+    fn generated_warning_lists_opted_in_directories_and_marked_sources() {
+        let root =
+            std::env::temp_dir().join(format!("sc-generated-warning-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("build")).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("build/parser.rs"), "fn parse() {}\n").unwrap();
+        std::fs::write(root.join("build/secret.txt"), "private output\n").unwrap();
+        std::fs::write(
+            root.join("src/generated.rs"),
+            "// Code generated by parser; DO NOT EDIT.\nfn generated() {}\n",
+        )
+        .unwrap();
+        let include = vec!["build/**".into(), "src/generated.rs".into()];
+        let exclude = vec!["build/secret.txt".into()];
+
+        assert_eq!(
+            generated_files_warning(&root, &exclude, &include),
+            ["build/parser.rs", "src/generated.rs"]
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

@@ -295,6 +295,25 @@ pub struct RunRecord {
     pub budget_ms: Option<u64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GeneratedFilesWarning {
+    pub files: Vec<String>,
+    pub suggested_action: String,
+}
+
+impl GeneratedFilesWarning {
+    pub fn from_paths(files: Vec<String>) -> Option<Self> {
+        if files.is_empty() {
+            return None;
+        }
+        Some(Self {
+            files,
+            suggested_action: "Add these paths to scope.exclude in analyzer.toml to skip them."
+                .into(),
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Scorecard {
     pub version: String,
@@ -320,6 +339,9 @@ pub struct Scorecard {
     pub crap: CrapSection,
     pub mutation: MutationSection,
     pub findings: Vec<Finding>,
+    /// Generated or vendored source files included in this scan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generated_files_warning: Option<GeneratedFilesWarning>,
     pub spec: SpecSection,
     /// Set when `--llm on` ran, or when it was turned on and then skipped.
     /// Omitted when llm is off. Old scorecards load without this field.
@@ -369,6 +391,7 @@ impl Scorecard {
             },
             mutation: MutationSection::skipped(),
             findings: Vec::new(),
+            generated_files_warning: None,
             spec: SpecSection::empty(),
             llm: None,
             runs: Vec::new(),
@@ -509,6 +532,7 @@ mod tests {
                 suggested_action: Some("Add tests covering branches or split the function".into()),
                 disposition: String::new(),
             }],
+            generated_files_warning: None,
             spec: SpecSection {
                 path: Some("TASK.md".into()),
                 gaps: vec![],

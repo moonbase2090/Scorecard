@@ -1,5 +1,23 @@
 # Examples
 
+## Generated and vendored files
+
+Recursive scans honor root and nested `.gitignore` files. They also skip common build outputs, dependency trees, dot-directories, and source files marked with `@generated` or `Code generated ... DO NOT EDIT`.
+
+Add project-specific paths to `[scope].exclude`. To inspect a built-in generated or vendored directory, add it to `[scope].include_generated`:
+
+```toml
+[scope]
+exclude = ["src/generated/**"]
+include_generated = ["build/**"]
+```
+
+If `.gitignore` excludes `build/`, remove that rule or add a matching negation. `scope.exclude` still wins. Reports list any generated or vendored paths that the scan included and suggest adding them to `scope.exclude`.
+
+The HTML report lists each generated path that the scan included:
+
+![HTML report listing an included generated source file](../docs/images/generated-scan-report.png)
+
 ## Git status
 
 A clean checkout stays clean after Scorecard writes its report. When the tree has changes, the human-readable reports name up to three paths. JSON lists every changed path:

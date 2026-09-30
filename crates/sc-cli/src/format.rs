@@ -68,8 +68,20 @@ pub fn to_markdown(card: &Scorecard) -> String {
     push_markdown_gates(&mut out, card);
     push_markdown_scores(&mut out, card);
     push_markdown_crap(&mut out, card);
+    push_markdown_generated_files(&mut out, card);
     push_markdown_findings(&mut out, card);
     out
+}
+
+fn push_markdown_generated_files(out: &mut String, card: &Scorecard) {
+    let Some(warning) = card.generated_files_warning.as_ref() else {
+        return;
+    };
+    out.push_str("## Generated files analyzed\n\n");
+    for file in &warning.files {
+        out.push_str(&format!("- `{}`\n", cell(file)));
+    }
+    out.push_str(&format!("\n{}\n\n", warning.suggested_action));
 }
 
 fn push_markdown_header(out: &mut String, card: &Scorecard) {
@@ -273,7 +285,55 @@ fn fmt_num(value: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sc_core::{CrapFunction, CrapSection, Finding, Gate, LlmSection, Scorecard};
+    use sc_core::{
+        CrapFunction, CrapSection, Finding, Gate, GeneratedFilesWarning, LlmSection, Scorecard,
+    };
+
+    #[test]
+    fn generated_files_warning_appears_in_every_report_format() {
+        let mut card = Scorecard::skeleton("demo", 30);
+        card.generated_files_warning = Some(
+            GeneratedFilesWarning::from_paths(vec![
+                "build/parser.rs".into(),
+                "src/generated.rs".into(),
+            ])
+            .unwrap(),
+        );
+
+        let json: serde_json::Value = serde_json::from_str(&to_json(&card)).unwrap();
+        assert_eq!(
+            json["generated_files_warning"]["files"][0],
+            "build/parser.rs"
+        );
+        assert!(json["generated_files_warning"]["suggested_action"]
+            .as_str()
+            .unwrap()
+            .contains("scope.exclude"));
+
+        let md = to_markdown(&card);
+        assert!(md.contains("## Generated files analyzed"));
+        assert!(md.contains("`build/parser.rs`"));
+        assert!(md.contains("scope.exclude"));
+
+        let html = crate::report::to_html(&card);
+        assert!(html.contains("generated files analyzed"));
+        assert!(html.contains("build/parser.rs"));
+        assert!(html.contains("scope.exclude"));
+
+        let pretty = crate::pretty::to_pretty(
+            &card,
+            &crate::pretty::PrettyOpts {
+                color: false,
+                width: 100,
+                version: "0.1.0".into(),
+                report: None,
+                exit_code: 0,
+            },
+        );
+        assert!(pretty.contains("generated files analyzed"));
+        assert!(pretty.contains("build/parser.rs"));
+        assert!(pretty.contains("scope.exclude"));
+    }
 
     #[test]
     fn markdown_shows_llm_notes_and_a_plain_skip_reason() {

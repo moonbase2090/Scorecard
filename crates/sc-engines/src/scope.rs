@@ -9,6 +9,12 @@ use sc_graph::FunctionInfo;
 use crate::command::{run_cmd, CommandError};
 use crate::facts::{analyze_rels, AnalyzedFile};
 
+#[derive(Debug, Clone, Copy)]
+pub struct ScanScope<'a> {
+    pub exclude: &'a [String],
+    pub include_generated: &'a [String],
+}
+
 #[derive(Debug, Clone)]
 pub struct Selection {
     pub mode: String,
@@ -30,9 +36,33 @@ pub fn empty_selection() -> Selection {
     tree_like("tree", Vec::new(), false)
 }
 
+#[cfg(test)]
 pub fn select(
     root: &Path,
     exclude: &[String],
+    diff_base: Option<&str>,
+    diff_head: Option<&str>,
+    path_list: &[String],
+    toolchain_pin: &str,
+    perf_enabled: bool,
+) -> Result<Selection, String> {
+    select_with_generated(
+        root,
+        ScanScope {
+            exclude,
+            include_generated: &[],
+        },
+        diff_base,
+        diff_head,
+        path_list,
+        toolchain_pin,
+        perf_enabled,
+    )
+}
+
+pub fn select_with_generated(
+    root: &Path,
+    scope: ScanScope<'_>,
     diff_base: Option<&str>,
     diff_head: Option<&str>,
     path_list: &[String],
@@ -45,7 +75,7 @@ pub fn select(
     if let Some(base) = diff_base {
         return select_diff(
             root,
-            exclude,
+            scope,
             base,
             diff_head,
             crate::facts::is_workspace_root(root, toolchain_pin),
@@ -57,14 +87,19 @@ pub fn select(
         return Ok(select_paths(
             root,
             path_list,
+            scope,
             crate::facts::is_workspace_root(root, toolchain_pin),
             perf_enabled,
-            exclude,
             toolchain_pin,
         ));
     }
-    let (files, workspace_root) =
-        crate::facts::analyze_tree_with_workspace(root, exclude, toolchain_pin, perf_enabled);
+    let (files, workspace_root) = crate::facts::analyze_tree_with_generated(
+        root,
+        scope.exclude,
+        scope.include_generated,
+        toolchain_pin,
+        perf_enabled,
+    );
     Ok(tree_like("tree", files, workspace_root))
 }
 
@@ -94,26 +129,27 @@ fn tree_like(mode: &str, files: Vec<AnalyzedFile>, workspace_root: bool) -> Sele
 fn select_paths(
     root: &Path,
     path_list: &[String],
+    scope: ScanScope<'_>,
     workspace_root: bool,
     perf_enabled: bool,
-    exclude: &[String],
     toolchain_pin: &str,
 ) -> Selection {
-    let rels: Vec<String> = path_list
+    let requested: Vec<String> = path_list
         .iter()
         .map(|path| normalize_rel(root, path))
         .filter(|rel| rel.ends_with(".rs"))
         .collect();
+    let rels = sc_graph::filter_paths(root, &requested, scope.exclude, scope.include_generated);
     tree_like(
         "paths",
-        analyze_rels(root, &rels, perf_enabled, exclude, toolchain_pin),
+        analyze_rels(root, &rels, perf_enabled, scope.exclude, toolchain_pin),
         workspace_root,
     )
 }
 
 fn select_diff(
     root: &Path,
-    exclude: &[String],
+    scope: ScanScope<'_>,
     base: &str,
     head: Option<&str>,
     workspace_root: bool,
@@ -122,13 +158,18 @@ fn select_diff(
 ) -> Result<Selection, String> {
     let base = resolve_base(root, base)?;
     let deltas = diff_files(root, &base, head)?;
-    let exclude_hit = |rel: &str| sc_graph::is_excluded(rel, exclude);
+    let requested: Vec<String> = deltas
+        .iter()
+        .filter(|delta| delta.rel.contains("src/"))
+        .map(|delta| delta.rel.clone())
+        .collect();
+    let eligible = sc_graph::filter_paths(root, &requested, scope.exclude, scope.include_generated);
     let deltas: Vec<_> = deltas
         .into_iter()
-        .filter(|delta| !exclude_hit(&delta.rel) && delta.rel.contains("src/"))
+        .filter(|delta| eligible.contains(&delta.rel))
         .collect();
     let rels: Vec<String> = deltas.iter().map(|delta| delta.rel.clone()).collect();
-    let files = analyze_rels(root, &rels, perf_enabled, exclude, toolchain_pin);
+    let files = analyze_rels(root, &rels, perf_enabled, scope.exclude, toolchain_pin);
     let mut crap_functions = Vec::new();
     let mut new_symbols = BTreeSet::new();
     let mut loc_changed = 0u64;
@@ -159,7 +200,12 @@ fn select_diff(
     }
     let files_changed = files.len() as u64;
     let paths: Vec<String> = files.iter().map(|file| file.rel.clone()).collect();
-    let (tree_rels, _) = crate::facts::tree_source_rels(root, exclude, toolchain_pin);
+    let (tree_rels, _) = crate::facts::tree_source_rels_with_generated(
+        root,
+        scope.exclude,
+        scope.include_generated,
+        toolchain_pin,
+    );
     // Diff paths can include src/ files outside the cargo tree scan (deleted
     // members, non-member crates). Count tree paths that are not in the diff,
     // not `tree_len - diff_len`.
