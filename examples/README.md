@@ -14,6 +14,10 @@ include_generated = ["build/**"]
 
 If `.gitignore` excludes `build/`, remove that rule or add a matching negation. `scope.exclude` still wins. Reports list any generated or vendored paths that the scan included and suggest adding them to `scope.exclude`.
 
+The HTML report lists each generated path that the scan included:
+
+![HTML report listing an included generated source file](../docs/images/generated-scan-report.png)
+
 ## Git status
 
 A clean checkout stays clean after Scorecard writes its report. When the tree has changes, the human-readable reports name up to three paths. JSON lists every changed path:

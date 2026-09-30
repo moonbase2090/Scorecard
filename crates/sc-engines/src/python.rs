@@ -58,8 +58,7 @@ pub fn run_with_generated(
     threshold: u32,
     untested_cc: u32,
     started: std::time::SystemTime,
-    exclude: &[String],
-    include_generated: &[String],
+    scope: crate::scope::ScanScope<'_>,
     coverage_enabled: bool,
 ) -> PythonOutcome {
     let mut findings = Vec::new();
@@ -75,7 +74,8 @@ pub fn run_with_generated(
         &mut ran,
         &mut skipped,
     );
-    let scan = crate::poly_cc::scan_for_pack(root, "python", exclude, include_generated);
+    let scan =
+        crate::poly_cc::scan_for_pack(root, "python", scope.exclude, scope.include_generated);
     let functions = scan.functions;
     let (tests_enforced, tests_pass, tests_reason) = run_pytest(
         root,
@@ -96,8 +96,13 @@ pub fn run_with_generated(
         &mut skipped,
     );
     let sca = check_imports(root, &mut findings, &mut ran);
-    let mut coverage =
-        read_coverage_with_generated(root, &functions, started, exclude, include_generated);
+    let mut coverage = read_coverage_with_generated(
+        root,
+        &functions,
+        started,
+        scope.exclude,
+        scope.include_generated,
+    );
     let mut coverage_reason: Option<String> = None;
     let mut coverage_fix: Option<&'static str> = None;
     if !coverage_enabled {
@@ -110,8 +115,13 @@ pub fn run_with_generated(
                 "Install coverage.py (`python3 -m pip install coverage`) and re-run `sc analyze`",
             );
         }
-        coverage =
-            read_coverage_with_generated(root, &functions, started, exclude, include_generated);
+        coverage = read_coverage_with_generated(
+            root,
+            &functions,
+            started,
+            scope.exclude,
+            scope.include_generated,
+        );
     }
     if coverage.is_some() {
         if !ran.iter().any(|engine| engine == "coverage") {
@@ -180,7 +190,8 @@ pub fn run_with_generated(
     let crap_untested = crap.untested;
     let crap_coverage_complete = crap.coverage_complete;
     let crap_worst = crap.worst;
-    let secrets = crate::pack::text_secrets_with_generated(root, exclude, include_generated);
+    let secrets =
+        crate::pack::text_secrets_with_generated(root, scope.exclude, scope.include_generated);
     let secret_errors = secrets
         .iter()
         .filter(|finding| finding.severity == "error")
@@ -228,8 +239,10 @@ pub fn run(
         threshold,
         untested_cc,
         started,
-        exclude,
-        &[],
+        crate::scope::ScanScope {
+            exclude,
+            include_generated: &[],
+        },
         coverage_enabled,
     )
 }

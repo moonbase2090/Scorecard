@@ -39,7 +39,7 @@ pub struct GatesConfig {
     pub new_fn_untested_cc: u32,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct ScopeConfig {
     pub exclude: Vec<String>,
@@ -104,15 +104,6 @@ impl Default for GatesConfig {
             ],
             crap_threshold: 30,
             new_fn_untested_cc: 15,
-        }
-    }
-}
-
-impl Default for ScopeConfig {
-    fn default() -> Self {
-        Self {
-            exclude: Vec::new(),
-            include_generated: Vec::new(),
         }
     }
 }

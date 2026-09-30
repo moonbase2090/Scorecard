@@ -183,7 +183,17 @@ pub fn text_secrets_with_generated(
 ) -> Vec<sc_core::Finding> {
     let mut files = Vec::new();
     let mut findings = Vec::new();
-    for item in sc_graph::walk(root, root, exclude, include_generated, None) {
+    for item in sc_graph::walk_with_options(
+        root,
+        root,
+        exclude,
+        include_generated,
+        None,
+        sc_graph::WalkOptions {
+            include_hidden_directories: true,
+            root_directory_excludes: true,
+        },
+    ) {
         match item {
             sc_graph::WalkItem::Entry(entry) if entry.kind == sc_graph::WalkKind::File => {
                 files.push(entry.path);

@@ -53,6 +53,6 @@ pub use perf::{
 };
 pub use pubs::{pub_items_in_file, PubItem};
 pub use walk::{
-    analyzed_generated_files, filter_paths, walk, walk_files, Walk, WalkEntry, WalkItem, WalkKind,
-    GENERATED_SKIP_DIRS,
+    analyzed_generated_files, filter_paths, walk, walk_files, walk_with_options, Walk, WalkEntry,
+    WalkItem, WalkKind, WalkOptions, GENERATED_SKIP_DIRS,
 };

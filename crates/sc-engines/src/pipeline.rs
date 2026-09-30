@@ -184,25 +184,25 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         &request.config.scope.include_generated,
     );
     for rel in &html {
-        let Ok(text) = std::fs::read_to_string(request.root.join(&rel)) else {
+        let Ok(text) = std::fs::read_to_string(request.root.join(rel)) else {
             continue;
         };
-        let (html, parsed) = crate::html_doc::html_findings(&rel, &text);
+        let (html, parsed) = crate::html_doc::html_findings(rel, &text);
         findings.extend(html);
         findings.extend(crate::links::link_findings(
             &request.root,
-            &rel,
+            rel,
             &parsed.elements,
         ));
         findings.extend(crate::a11y::check_elements(
-            &rel,
+            rel,
             &parsed.elements,
             &request.config.a11y.disable,
             true,
         ));
         for script in parsed.scripts {
             functions.extend(crate::poly_cc::javascript_in(
-                &rel,
+                rel,
                 &script.body,
                 script.line.saturating_sub(1),
             ));
@@ -700,8 +700,10 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         request.config.gates.crap_threshold,
         request.config.gates.new_fn_untested_cc,
         started,
-        &request.config.scope.exclude,
-        &request.config.scope.include_generated,
+        crate::scope::ScanScope {
+            exclude: &request.config.scope.exclude,
+            include_generated: &request.config.scope.include_generated,
+        },
         request.config.engines.coverage,
     );
     let gates = vec![
@@ -789,8 +791,10 @@ fn analyze_rust(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
     let threshold = request.config.gates.crap_threshold;
     let (selection, select_error) = match crate::scope::select_with_generated(
         root,
-        &request.config.scope.exclude,
-        &request.config.scope.include_generated,
+        crate::scope::ScanScope {
+            exclude: &request.config.scope.exclude,
+            include_generated: &request.config.scope.include_generated,
+        },
         request.diff_base.as_deref(),
         request.diff_head.as_deref(),
         &request.path_list,

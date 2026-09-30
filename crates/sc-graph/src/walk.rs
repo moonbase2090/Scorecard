@@ -17,6 +17,7 @@ pub const GENERATED_SKIP_DIRS: &[&str] = &[
     "generated",
     "vendor",
     ".yarn",
+    ".cache",
     "node_modules",
     "__pycache__",
     ".next",
@@ -70,6 +71,15 @@ pub struct Walk {
     inner: IgnoreWalk,
 }
 
+/// Controls which directory names a project walk includes.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WalkOptions {
+    /// Include dot-directories other than `.git`, `.hg`, `.svn`, and `.sc`.
+    pub include_hidden_directories: bool,
+    /// Match `directory/**` exclusions from the project root only.
+    pub root_directory_excludes: bool,
+}
+
 /// Walk a project subtree with the shared defaults, nested `.gitignore`
 /// handling, and the user's additional exclusions.
 pub fn walk(
@@ -78,6 +88,25 @@ pub fn walk(
     exclude: &[String],
     include_generated: &[String],
     max_depth: Option<usize>,
+) -> Walk {
+    walk_with_options(
+        root,
+        start,
+        exclude,
+        include_generated,
+        max_depth,
+        WalkOptions::default(),
+    )
+}
+
+/// Walk a project subtree with custom directory inclusion options.
+pub fn walk_with_options(
+    root: &Path,
+    start: &Path,
+    exclude: &[String],
+    include_generated: &[String],
+    max_depth: Option<usize>,
+    options: WalkOptions,
 ) -> Walk {
     let root = root.to_path_buf();
     let start = start.to_path_buf();
@@ -88,24 +117,29 @@ pub fn walk(
         .hidden(false)
         .git_ignore(true)
         .git_exclude(true)
-        .git_global(true)
+        // Machine-wide ignores must not change a project's scan results.
+        .git_global(false)
         .ignore(true)
         .parents(true)
+        // Standalone project roots can still use `.gitignore` files.
+        .require_git(false)
         .follow_links(false)
         .max_depth(max_depth);
     let filter_root = root.clone();
     let filter_excludes = excludes.clone();
     let filter_includes = includes.clone();
+    let include_hidden_directories = options.include_hidden_directories;
+    let root_directory_excludes = options.root_directory_excludes;
     builder.filter_entry(move |entry| {
         let rel = relative_path(&filter_root, entry.path());
         if rel.is_empty() {
             return true;
         }
-        if crate::is_excluded(&rel, &filter_excludes) {
+        if is_excluded(&rel, &filter_excludes, root_directory_excludes) {
             return false;
         }
         let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
-        !is_dir || !skip_directory(&rel, &filter_includes)
+        !is_dir || !skip_directory(&rel, &filter_includes, include_hidden_directories)
     });
     Walk {
         root,
@@ -209,7 +243,7 @@ impl Iterator for Walk {
                 }
                 Err(err) => {
                     return Some(WalkItem::Error {
-                        path: None,
+                        path: error_path(&err),
                         message: err.to_string(),
                     });
                 }
@@ -225,11 +259,43 @@ fn relative_path(root: &Path, path: &Path) -> String {
         .replace('\\', "/")
 }
 
-fn skip_directory(rel: &str, includes: &[String]) -> bool {
-    rel.split('/').any(|name| {
+fn error_path(error: &ignore::Error) -> Option<PathBuf> {
+    match error {
+        ignore::Error::WithPath { path, .. } => Some(path.clone()),
+        ignore::Error::Partial(errors) => errors.iter().find_map(error_path),
+        ignore::Error::WithLineNumber { err, .. } | ignore::Error::WithDepth { err, .. } => {
+            error_path(err)
+        }
+        _ => None,
+    }
+}
+
+fn is_excluded(rel: &str, excludes: &[String], root_directory_excludes: bool) -> bool {
+    if !root_directory_excludes {
+        return crate::is_excluded(rel, excludes);
+    }
+    excludes.iter().any(|pattern| {
+        let pattern = pattern.trim().trim_start_matches("./");
+        if let Some(body) = pattern.strip_suffix("/**") {
+            if !body.starts_with("**/") {
+                let body = body.trim_matches('/');
+                return body.is_empty() || rel == body || rel.starts_with(&format!("{body}/"));
+            }
+        }
+        crate::is_excluded(rel, &[pattern.to_string()])
+    })
+}
+
+fn skip_directory(rel: &str, includes: &[String], include_hidden_directories: bool) -> bool {
+    rel.split('/').enumerate().any(|(index, name)| {
         ALWAYS_SKIP_DIRS.contains(&name)
-            || (name.starts_with('.') && !GENERATED_SKIP_DIRS.contains(&name))
-            || (GENERATED_SKIP_DIRS.contains(&name) && !included_generated_directory(rel, includes))
+            || (!include_hidden_directories
+                && name.starts_with('.')
+                && !GENERATED_SKIP_DIRS.contains(&name))
+            || (GENERATED_SKIP_DIRS.contains(&name)
+                // Cargo's default target directory is at the project root.
+                && (name != "target" || index == 0)
+                && !included_generated_directory(rel, includes))
     })
 }
 
@@ -289,11 +355,13 @@ mod tests {
     }
 
     fn paths(root: &Path, include_generated: &[String]) -> Vec<String> {
-        walk_files(root, root, &[], include_generated, None)
+        let mut paths: Vec<String> = walk_files(root, root, &[], include_generated, None)
             .into_iter()
             .filter_map(|path| path.strip_prefix(root).ok().map(Path::to_path_buf))
             .map(|path| path.to_string_lossy().replace('\\', "/"))
-            .collect()
+            .collect();
+        paths.sort();
+        paths
     }
 
     #[test]
@@ -314,7 +382,10 @@ mod tests {
         fs::write(root.join("src/nested/.gitignore"), "ignored.rs\n").unwrap();
 
         let actual = paths(&root, &[]);
-        assert_eq!(actual, ["src/visible/kept.rs"]);
+        assert_eq!(
+            actual,
+            [".gitignore", "src/nested/.gitignore", "src/visible/kept.rs"]
+        );
     }
 
     #[test]
@@ -346,12 +417,23 @@ mod tests {
     }
 
     #[test]
+    fn nested_target_is_source_but_root_target_is_generated() {
+        let root = temp("nested-target");
+        fs::create_dir_all(root.join("target")).unwrap();
+        fs::create_dir_all(root.join("src/target")).unwrap();
+        fs::write(root.join("target/build.rs"), "fn generated() {}\n").unwrap();
+        fs::write(root.join("src/target/source.rs"), "fn source() {}\n").unwrap();
+
+        assert_eq!(paths(&root, &[]), ["src/target/source.rs"]);
+    }
+
+    #[test]
     fn gitignore_negation_reincludes_a_nested_file() {
         let root = temp("negation");
         fs::create_dir_all(root.join("src")).unwrap();
         fs::write(root.join("src/skip.rs"), "fn skip() {}\n").unwrap();
         fs::write(root.join("src/keep.rs"), "fn keep() {}\n").unwrap();
         fs::write(root.join(".gitignore"), "src/*.rs\n!src/keep.rs\n").unwrap();
-        assert_eq!(paths(&root, &[]), ["src/keep.rs"]);
+        assert_eq!(paths(&root, &[]), [".gitignore", "src/keep.rs"]);
     }
 }
