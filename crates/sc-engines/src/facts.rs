@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use sc_core::Finding;
-use sc_graph::{source_files_under, FunctionInfo, ImportHit, PerfHit, PubItem};
+use sc_graph::{FunctionInfo, ImportHit, PerfHit, PubItem};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -28,13 +28,25 @@ pub struct AnalyzedFile {
 }
 
 /// Analyze project sources and return whether `root` is the Cargo workspace root.
+#[cfg(test)]
 pub(crate) fn analyze_tree_with_workspace(
     root: &Path,
     exclude: &[String],
     toolchain_pin: &str,
     perf_enabled: bool,
 ) -> (Vec<AnalyzedFile>, bool) {
-    let (rels, workspace_root) = tree_source_rels(root, exclude, toolchain_pin);
+    analyze_tree_with_generated(root, exclude, &[], toolchain_pin, perf_enabled)
+}
+
+pub(crate) fn analyze_tree_with_generated(
+    root: &Path,
+    exclude: &[String],
+    include_generated: &[String],
+    toolchain_pin: &str,
+    perf_enabled: bool,
+) -> (Vec<AnalyzedFile>, bool) {
+    let (rels, workspace_root) =
+        tree_source_rels_with_generated(root, exclude, include_generated, toolchain_pin);
     (
         analyze_rels(root, &rels, perf_enabled, exclude, toolchain_pin),
         workspace_root,
@@ -48,6 +60,15 @@ pub(crate) fn tree_source_rels(
     exclude: &[String],
     toolchain_pin: &str,
 ) -> (Vec<String>, bool) {
+    tree_source_rels_with_generated(root, exclude, &[], toolchain_pin)
+}
+
+pub(crate) fn tree_source_rels_with_generated(
+    root: &Path,
+    exclude: &[String],
+    include_generated: &[String],
+    toolchain_pin: &str,
+) -> (Vec<String>, bool) {
     let metadata = cargo_metadata(root, toolchain_pin);
     let workspace_root = metadata
         .as_ref()
@@ -57,7 +78,8 @@ pub(crate) fn tree_source_rels(
         dirs.extend(member_src_dirs(metadata.as_ref()));
     }
     let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
-    let paths = source_files_under(&root, &dirs, exclude);
+    let paths =
+        sc_graph::source_files_under_with_generated(&root, &dirs, exclude, include_generated);
     let mut rels: Vec<String> = paths
         .iter()
         .map(|path| {

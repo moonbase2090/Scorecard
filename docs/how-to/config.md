@@ -15,8 +15,11 @@ fail_on = ["types", "tests", "crap", "secrets", "lint", "sca"]
 crap_threshold = 40
 
 [scope]
-# Leave generated or vendored code out of complexity and CRAP.
-exclude = ["target/**", "generated/**", "vendor/**"]
+# Add project-specific paths to the built-in scan exclusions.
+exclude = ["src/generated/**"]
+# Reopen one built-in generated directory when you need to inspect it.
+# Remove or negate a matching .gitignore rule too.
+# include_generated = ["build/**"]
 
 [commands]
 # Lint command for the Rust and command packs. Empty skips lint.

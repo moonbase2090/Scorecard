@@ -39,10 +39,13 @@ pub struct GatesConfig {
     pub new_fn_untested_cc: u32,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct ScopeConfig {
     pub exclude: Vec<String>,
+    /// Override built-in skips for generated or vendored directories and
+    /// generated source markers. `.gitignore` and `exclude` still apply.
+    pub include_generated: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -101,14 +104,6 @@ impl Default for GatesConfig {
             ],
             crap_threshold: 30,
             new_fn_untested_cc: 15,
-        }
-    }
-}
-
-impl Default for ScopeConfig {
-    fn default() -> Self {
-        Self {
-            exclude: vec!["target/**".into(), "generated/**".into()],
         }
     }
 }
@@ -285,7 +280,8 @@ mod tests {
             vec!["types", "tests", "crap", "secrets", "lint"]
         );
         assert_eq!(config.gates.crap_threshold, 30);
-        assert_eq!(config.scope.exclude, vec!["target/**", "generated/**"]);
+        assert!(config.scope.exclude.is_empty());
+        assert!(config.scope.include_generated.is_empty());
     }
 
     #[test]

@@ -1,4 +1,4 @@
-sc 0.1.4  testdata/good_crate  rust  GITSHA STATE  scope tree
+sc 0.1.5  testdata/good_crate  rust  GITSHA STATE  scope tree
 
 PASS
 

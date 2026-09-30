@@ -15,7 +15,7 @@ The secrets gate recognizes Slack incoming webhooks, Stripe restricted live keys
 Download `sc` for your platform and run it on a project:
 
 ```bash doctest network
-VERSION=v0.1.4
+VERSION=v0.1.5
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64) TARGET=aarch64-apple-darwin ;;
   Darwin-x86_64) TARGET=x86_64-apple-darwin ;;
@@ -40,7 +40,7 @@ fi
 In a terminal the report looks like this (from `testdata/good_crate`):
 
 ```text
-sc 0.1.4  testdata/good_crate  rust  5ac851c clean  scope tree
+sc 0.1.5  testdata/good_crate  rust  5ac851c clean  scope tree
 
 PASS
 
@@ -76,6 +76,8 @@ Exit status: `1` a gate selected by `--fail-on` failed; `0` none did; `2` `sc` c
 A dirty report lists up to three changed paths. JSON includes every path in `git.dirty_paths`. Scorecard's saved report, cache and coverage files under `.sc/`, and files selected by `--out` do not make a clean checkout dirty.
 
 `sc analyze . --diff BASE` scores only what changed against that git ref. When the project is a subdirectory of a larger repository, the changed paths are still relative to the project (`src/a.rs`).
+
+Scans honor nested `.gitignore` files and skip common build and vendor directories such as `build/`, `target/`, `dist/`, and `node_modules/`. See [scan scope configuration](docs/reference/config.md#scope) to add exclusions or include generated paths.
 
 `sc analyze . --format sarif` writes SARIF for GitHub code scanning. Only `secrets.*` findings are level `error`, which code scanning counts as a security vulnerability. Every other rule, including a failing test or missing coverage, is level `warning` and still fails its gate ([CI](docs/how-to/ci.md)).
 
@@ -117,20 +119,20 @@ The secrets scan also finds PEM private keys split across source string literals
 
 ## Install
 
-Release [v0.1.4](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.4). Each `.tar.gz` holds `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md`.
+Release [v0.1.5](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.5). Each `.tar.gz` holds `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md`.
 
 | Platform | Asset |
 |---|---|
-| macOS, Apple silicon | `sc-v0.1.4-aarch64-apple-darwin.tar.gz` |
-| macOS, Intel | `sc-v0.1.4-x86_64-apple-darwin.tar.gz` |
-| macOS installer | `sc-v0.1.4-macos.pkg`, or `sc-v0.1.4-universal-apple-darwin.dmg`. Installs `sc` and `sc-mcp` to `/usr/local/bin` |
-| Linux, arm64 | `sc-v0.1.4-aarch64-unknown-linux-gnu.tar.gz` |
-| Linux, x86_64 | `sc-v0.1.4-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS, Apple silicon | `sc-v0.1.5-aarch64-apple-darwin.tar.gz` |
+| macOS, Intel | `sc-v0.1.5-x86_64-apple-darwin.tar.gz` |
+| macOS installer | `sc-v0.1.5-macos.pkg`, or `sc-v0.1.5-universal-apple-darwin.dmg`. Installs `sc` and `sc-mcp` to `/usr/local/bin` |
+| Linux, arm64 | `sc-v0.1.5-aarch64-unknown-linux-gnu.tar.gz` |
+| Linux, x86_64 | `sc-v0.1.5-x86_64-unknown-linux-gnu.tar.gz` |
 
 To check a download, fetch `SHA256SUMS` into the same directory and verify only the files you have:
 
 ```bash
-curl -fsSLO https://github.com/moonbase2090/Scorecard/releases/download/v0.1.4/SHA256SUMS
+curl -fsSLO https://github.com/moonbase2090/Scorecard/releases/download/v0.1.5/SHA256SUMS
 shasum -a 256 -c --ignore-missing SHA256SUMS   # Linux: sha256sum -c --ignore-missing SHA256SUMS
 ```
 
