@@ -5,8 +5,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const SKILL: &str = include_str!("../../../skills/scorecard/SKILL.md");
-
 pub fn run() -> i32 {
     let home = match std::env::var_os("HOME") {
         Some(home) => PathBuf::from(home),
@@ -28,8 +26,10 @@ fn run_at(home: &Path) -> i32 {
         ".agents/skills/scorecard",
     ] {
         let dir = home.join(rel);
+        let existing = dir.join("SKILL.md").is_file();
         match write_skill(&dir) {
-            Ok(path) => lines.push(format!("skill {}", path.display())),
+            Ok(path) if existing => lines.push(format!("skill preserved {}", path.display())),
+            Ok(path) => lines.push(format!("skill installed {}", path.display())),
             Err(err) => {
                 eprintln!("skill {}: {err}", dir.display());
                 return 2;
@@ -54,10 +54,7 @@ fn run_at(home: &Path) -> i32 {
 }
 
 fn write_skill(dir: &Path) -> Result<PathBuf, String> {
-    fs::create_dir_all(dir).map_err(|err| err.to_string())?;
-    let path = dir.join("SKILL.md");
-    fs::write(&path, SKILL).map_err(|err| err.to_string())?;
-    Ok(path)
+    crate::skills::write_preserving_skill(dir)
 }
 
 #[inline(never)]

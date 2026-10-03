@@ -12,9 +12,11 @@ pub const KNOWN_GATES: &[&str] = &[
     "types", "tests", "crap", "secrets", "sca", "spec", "mutation", "lint", "html", "links", "a11y",
 ];
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct Config {
+    /// Install or update the Scorecard agent skill during automatic install hooks.
+    pub install_agent_skills: bool,
     pub gates: GatesConfig,
     pub scope: ScopeConfig,
     pub mutation: MutationConfig,
@@ -29,6 +31,25 @@ pub struct Config {
     /// Rustup channel for check, test, coverage, and lint. Empty uses
     /// `rust-toolchain.toml` / `rust-toolchain` in the project root.
     pub toolchain: String,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            install_agent_skills: true,
+            gates: GatesConfig::default(),
+            scope: ScopeConfig::default(),
+            mutation: MutationConfig::default(),
+            llm: LlmConfig::default(),
+            engines: EnginesConfig::default(),
+            commands: CommandsConfig::default(),
+            html: HtmlConfig::default(),
+            links: LinksConfig::default(),
+            a11y: A11yConfig::default(),
+            pack: String::new(),
+            toolchain: String::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -255,6 +276,7 @@ mod tests {
     #[test]
     fn defaults_match_m1() {
         let config = Config::default();
+        assert!(config.install_agent_skills);
         assert_eq!(
             config.gates.fail_on,
             vec!["types", "tests", "crap", "secrets", "lint"]
@@ -269,6 +291,12 @@ mod tests {
         assert_eq!(config.mutation.mode, "off");
         assert_eq!(config.commands.lint, "cargo clippy --workspace");
         assert!(!config.commands.lint.contains("-D warnings"));
+    }
+
+    #[test]
+    fn agent_skill_installation_can_be_disabled_in_config() {
+        let config: Config = toml::from_str("install_agent_skills = false\n").unwrap();
+        assert!(!config.install_agent_skills);
     }
 
     #[test]

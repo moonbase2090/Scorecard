@@ -30,6 +30,16 @@ It does not replace a file you already have. To write it yourself:
   sc config init
   sc config path
 
+The package also installs the Scorecard agent skill for coding agents already
+configured on this Mac. It runs once per Scorecard version and does not replace
+an existing skill file that differs from the bundled copy. To opt out, set
+install_agent_skills = false in ~/.config/sc/analyzer.toml, or install from
+Terminal with SCORECARD_NO_AGENT_SKILLS=1 in the installer environment.
+To install or check the skill later:
+
+  sc skills install --agent detected
+  sc skills install --agent all --check
+
 To remove them later, delete the two files from wherever you put them:
 
   sudo rm /usr/local/bin/sc /usr/local/bin/sc-mcp

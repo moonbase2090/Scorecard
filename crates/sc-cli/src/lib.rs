@@ -7,6 +7,7 @@ mod format;
 mod pretty;
 mod report;
 mod setup;
+mod skills;
 mod user_config;
 
 use std::fs;
@@ -106,6 +107,11 @@ enum Commands {
     },
     /// Install the agent skill and register the sc-mcp server for this user.
     Setup,
+    /// Install the Scorecard skill for coding agents.
+    Skills {
+        #[command(subcommand)]
+        command: skills::SkillsCommand,
+    },
 }
 
 struct View<'a> {
@@ -119,6 +125,7 @@ pub fn run() -> i32 {
     let cli = Cli::parse();
     match cli.command {
         Commands::Setup => setup::run(),
+        Commands::Skills { command } => skills::run(command),
         Commands::Config { command } => match command {
             ConfigCmd::Path => user_config::run_path(),
             ConfigCmd::Init { force } => user_config::run_init(force),
@@ -507,4 +514,22 @@ fn early_card(repo: &str, rule: &str, engine: &str, message: &str) -> Scorecard 
     card.verdict = "fail".into();
     apply_disposition(&mut card.findings);
     card
+}
+
+#[cfg(test)]
+mod skill_command_docs_test {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn every_top_level_command_is_named_in_the_embedded_skill() {
+        let skill = include_str!("../../../skills/scorecard/SKILL.md");
+        for command in Cli::command().get_subcommands() {
+            let name = command.get_name();
+            assert!(
+                skill.contains(&format!("`sc {name}")),
+                "top-level command `sc {name}` is missing from skills/scorecard/SKILL.md"
+            );
+        }
+    }
 }

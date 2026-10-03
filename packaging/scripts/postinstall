@@ -18,4 +18,16 @@ if [ -z "$home" ]; then
   exit 0
 fi
 /usr/bin/sudo -u "$user" /usr/bin/env HOME="$home" "$sc" config init
+
+# Install only for agents already set up for this user. This command tracks
+# the Scorecard version itself and treats errors as warnings so pkg install
+# remains successful.
+if [ "${SCORECARD_NO_AGENT_SKILLS:-}" = "1" ]; then
+  echo "Scorecard agent skill installation skipped by SCORECARD_NO_AGENT_SKILLS=1."
+  exit 0
+fi
+agent_path="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$home/.local/bin:$home/.cargo/bin:$home/bin"
+if ! /usr/bin/sudo -u "$user" /usr/bin/env HOME="$home" PATH="$agent_path" "$sc" skills install --agent detected; then
+  echo "Could not install the Scorecard agent skill. Package installation will continue; run 'sc skills install --agent detected' later." >&2
+fi
 exit 0
