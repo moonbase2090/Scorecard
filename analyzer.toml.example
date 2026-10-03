@@ -4,6 +4,9 @@
 # sub-directories are not searched. --config PATH overrides both.
 # CLI flags override the matching settings. Reference: docs/reference/config.md
 
+# Install the Scorecard agent skill from automatic installer hooks.
+install_agent_skills = true
+
 # Set this when the repo contains more than one manifest. Same as --pack.
 # pack = "rust"   # rust, node, python, bash, go, java, csharp, php, cpp, web, or command
 
