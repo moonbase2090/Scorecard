@@ -24,7 +24,13 @@ use crate::mutation::run_mutation;
 use crate::scope::{empty_selection, Selection};
 use crate::spec_check::{check_spec, gap_value};
 
-#[derive(Debug, Clone)]
+/// Progress updates for a long analysis run (e.g. a CLI spinner).
+///
+/// Called with the current step label as each gate/pack command starts.
+/// Callbacks must be cheap and non-blocking; they never affect the result.
+pub type ProgressCallback = std::sync::Arc<dyn Fn(&str) + Send + Sync>;
+
+#[derive(Clone)]
 pub struct AnalyzeRequest {
     pub root: PathBuf,
     pub repo: String,
@@ -38,6 +44,34 @@ pub struct AnalyzeRequest {
     pub mutation_override: Option<String>,
     pub llm_override: Option<bool>,
     pub intent: Option<String>,
+    pub progress: Option<ProgressCallback>,
+}
+
+impl std::fmt::Debug for AnalyzeRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AnalyzeRequest")
+            .field("root", &self.root)
+            .field("repo", &self.repo)
+            .field("fail_on", &self.fail_on)
+            .field("budget", &self.budget)
+            .field("config", &self.config)
+            .field("diff_base", &self.diff_base)
+            .field("diff_head", &self.diff_head)
+            .field("path_list", &self.path_list)
+            .field("spec_path", &self.spec_path)
+            .field("mutation_override", &self.mutation_override)
+            .field("llm_override", &self.llm_override)
+            .field("intent", &self.intent)
+            .field("progress", &self.progress.as_ref().map(|_| "..."))
+            .finish()
+    }
+}
+
+/// Report the current analysis step to the request's progress callback, if any.
+fn report(request: &AnalyzeRequest, step: &str) {
+    if let Some(progress) = &request.progress {
+        progress(step);
+    }
 }
 
 const MAX_UNMATCHED_FUNCTION_EVIDENCE: usize = 20;
@@ -72,6 +106,7 @@ pub fn analyze_with_generated_paths(
 ) -> AnalyzeOutput {
     // Snapshot Git state before any engine runs and exclude Scorecard's saved
     // report and requested output files from earlier runs.
+    report(&request, "Detecting pack");
     let git = git_info(&request.root, generated_paths);
     match crate::pack::detect_with_generated(
         &request.root,
@@ -131,6 +166,7 @@ fn analyze_blocked(
         },
         gate("lint", false, message),
     ];
+    report(&request, "Writing report");
     finish(Draft {
         root: request.root.clone(),
         repo: request.repo,
@@ -170,6 +206,7 @@ fn analyze_blocked(
 }
 
 fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
+    report(&request, "Checking markup");
     let mut findings = Vec::new();
     let source_scan = crate::poly_cc::scan_for_pack(
         &request.root,
@@ -208,6 +245,7 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
             ));
         }
     }
+    report(&request, "Checking secrets");
     let secrets = crate::pack::text_secrets_with_generated(
         &request.root,
         &request.config.scope.exclude,
@@ -218,6 +256,7 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         .filter(|finding| finding.severity == "error")
         .count();
     findings.extend(secrets);
+    report(&request, "Scoring complexity (crap)");
     let html_errors = findings
         .iter()
         .filter(|finding| finding.engine == "html" && finding.severity == "error")
@@ -306,6 +345,7 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
             },
         ),
     ];
+    report(&request, "Writing report");
     finish(Draft {
         root: request.root.clone(),
         repo: request.repo,
@@ -476,6 +516,7 @@ fn analyze_unsupported(
     };
     let started = crate::pack_cov::run_start();
     crate::pack_cov::clear(&request.root);
+    report(&request, "Running tests");
     let tools = crate::toolchain::run_with_generated(
         pack,
         &request.root,
@@ -490,6 +531,7 @@ fn analyze_unsupported(
         "sca",
         "dependency check is not implemented for this pack",
     ));
+    report(&request, "Checking secrets");
     let secrets = crate::pack::text_secrets_with_generated(
         &request.root,
         &request.config.scope.exclude,
@@ -566,6 +608,7 @@ fn analyze_unsupported(
     } else {
         crate::pack_cov::load(pack.as_str(), &request.root, &functions, started)
     };
+    report(&request, "Scoring complexity (crap)");
     let crap = crate::crap::evaluate(
         &functions,
         coverage.as_ref(),
@@ -633,6 +676,7 @@ fn analyze_unsupported(
             format!("{secret_errors} secrets")
         },
     ));
+    report(&request, "Writing report");
     finish(Draft {
         root: request.root.clone(),
         repo: request.repo,
@@ -694,6 +738,7 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
     let deadline = Instant::now() + request.budget;
     let started = crate::pack_cov::run_start();
     crate::pack_cov::clear(&request.root);
+    report(&request, "Running tests");
     let outcome = crate::python::run_with_generated(
         &request.root,
         deadline,
@@ -743,6 +788,7 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
             },
         ),
     ];
+    report(&request, "Writing report");
     finish(Draft {
         root: request.root.clone(),
         repo: request.repo,
@@ -820,9 +866,12 @@ fn analyze_rust(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
     if !manifest.is_file() {
         missing_manifest(&mut state);
     } else {
+        report(&request, "Checking types (cargo check)");
         compile_phase(root, &manifest, deadline, &mut state);
 
+        report(&request, "Running tests (cargo test)");
         test_phase(root, &selection, &manifest, deadline, &mut state);
+        report(&request, "Measuring coverage");
         coverage_phase(
             root,
             &selection,
@@ -1213,6 +1262,7 @@ fn assemble_rust_report(
     git: GitInfo,
 ) -> AnalyzeOutput {
     let root = &request.root;
+    report(request, "Running lint (cargo clippy)");
     let report_lint = run_lint_engine(
         root,
         &request.config.commands.lint,
@@ -1229,6 +1279,7 @@ fn assemble_rust_report(
     );
 
     let untested_cc = request.config.gates.new_fn_untested_cc;
+    report(request, "Scoring complexity (crap)");
     let new_symbols = selection.new_symbols.clone();
     let narrow_untested = selection.narrow_untested;
     let crap = evaluate(
@@ -1261,6 +1312,7 @@ fn assemble_rust_report(
     );
     state.findings.extend(crap.findings);
 
+    report(request, "Checking dependencies");
     let undeclared = import_findings(
         root,
         selection,
@@ -1269,6 +1321,7 @@ fn assemble_rust_report(
         &mut state.skipped,
         &mut state.findings,
     );
+    report(request, "Checking secrets");
     secret_and_perf(
         selection,
         root,
@@ -1277,6 +1330,7 @@ fn assemble_rust_report(
         &mut state.ran,
         &mut state.findings,
     );
+    report(request, "Checking spec");
     let mut spec = spec_engine(
         request,
         selection,
@@ -1284,6 +1338,7 @@ fn assemble_rust_report(
         &mut state.skipped,
         &mut state.findings,
     );
+    report(request, "Running mutation");
     let mutation = mutation_engine(
         request,
         &mut state.ran,
@@ -1329,6 +1384,7 @@ fn assemble_rust_report(
         report_lint,
     );
 
+    report(request, "Writing report");
     finish(Draft {
         root: root.to_path_buf(),
         repo: request.repo.clone(),
@@ -3150,6 +3206,7 @@ mod tests {
             mutation_override: None,
             llm_override: Some(true),
             intent: Some("keep the header contrast".into()),
+            progress: None,
         };
         let spec = SpecRun {
             section: sc_core::SpecSection::empty(),
@@ -3515,6 +3572,7 @@ mod tests {
             mutation_override: Some("off".into()),
             llm_override: Some(false),
             intent: None,
+            progress: None,
         });
         let types = output
             .scorecard
@@ -3545,6 +3603,7 @@ mod tests {
                     mutation_override: Some("off".into()),
                     llm_override: Some(false),
                     intent: None,
+                    progress: None,
                 },
                 crate::pack::PackId::Command,
                 GitInfo {
@@ -3605,6 +3664,7 @@ mod tests {
             mutation_override: Some("off".into()),
             llm_override: Some(false),
             intent: None,
+            progress: None,
         });
         let types = output
             .scorecard
@@ -3665,6 +3725,7 @@ mod tests {
             mutation_override: Some("off".into()),
             llm_override: Some(false),
             intent: None,
+            progress: None,
         });
         let types = output
             .scorecard
@@ -3704,6 +3765,7 @@ mod tests {
             mutation_override: None,
             llm_override: None,
             intent: None,
+            progress: None,
         });
         assert_eq!(output.status, RunStatus::AnalyzerError);
         assert_eq!(output.scorecard.verdict, "fail");
@@ -3825,6 +3887,53 @@ mod tests {
     }
 
     #[test]
+    fn progress_callback_sees_steps_without_changing_the_scorecard() {
+        use std::sync::{Arc, Mutex};
+        // A clean repo with no detectable pack takes the fast blocked path.
+        let dir = git_repo("sc-git-progress");
+        let base = AnalyzeRequest {
+            root: dir.clone(),
+            repo: "blocked".into(),
+            fail_on: Vec::new(),
+            budget: Duration::from_secs(30),
+            config: Config::default(),
+            diff_base: None,
+            diff_head: None,
+            path_list: Vec::new(),
+            spec_path: None,
+            mutation_override: None,
+            llm_override: None,
+            intent: None,
+            progress: None,
+        };
+        let plain = analyze(base.clone());
+        let steps: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::clone(&steps);
+        let mut with_progress = base.clone();
+        with_progress.progress = Some(Arc::new(move |step: &str| {
+            seen.lock().unwrap().push(step.to_string());
+        }));
+        let reported = analyze(with_progress);
+        let steps = steps.lock().unwrap();
+        assert!(
+            steps.first().is_some_and(|step| step == "Detecting pack"),
+            "first step should name pack detection, got {steps:?}"
+        );
+        assert!(
+            steps.last().is_some_and(|step| step == "Writing report"),
+            "last step should name the report, got {steps:?}"
+        );
+        let mut plain_json = serde_json::to_value(&plain.scorecard).unwrap();
+        let mut reported_json = serde_json::to_value(&reported.scorecard).unwrap();
+        // Scorecard ids are unique per run; everything else must match.
+        plain_json["id"] = serde_json::Value::Null;
+        reported_json["id"] = serde_json::Value::Null;
+        assert_eq!(plain_json, reported_json);
+        assert_eq!(plain.status, reported.status);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn blocked_analysis_reports_pre_analysis_git_state() {
         // analyze() snapshots git before any engine runs: a clean repo with
         // no detectable pack reports clean with the committed head.
@@ -3842,6 +3951,7 @@ mod tests {
             mutation_override: None,
             llm_override: None,
             intent: None,
+            progress: None,
         });
         assert!(!output.scorecard.git.dirty);
         assert_eq!(output.scorecard.git.head.as_ref().unwrap().len(), 40);

@@ -5,6 +5,7 @@
 
 mod format;
 mod pretty;
+mod progress;
 mod report;
 mod setup;
 mod skills;
@@ -83,6 +84,9 @@ struct AnalyzeArgs {
     /// Path to analyzer.toml. Default: ./analyzer.toml, then ~/.config/sc/analyzer.toml.
     #[arg(long)]
     config: Option<PathBuf>,
+    /// Suppress the progress spinner on stderr.
+    #[arg(long)]
+    quiet: bool,
 }
 
 #[derive(Subcommand)]
@@ -165,6 +169,7 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
         intent,
         budget_seconds,
         config,
+        quiet,
     } = args;
     let tty = io::IsTerminal::is_terminal(&io::stdout());
     let stdout_format = pretty::stdout_format(format.as_deref(), tty);
@@ -284,6 +289,15 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
         None => Vec::new(),
     };
     let generated_paths = generated_output_paths(&root, out.as_deref(), &file_format);
+    // The spinner animates on stderr only; stdout stays byte-identical.
+    // It starts just before the long analysis run and is cleared before
+    // the report prints.
+    let stderr_tty = io::IsTerminal::is_terminal(&io::stderr());
+    let spinner = if progress::should_show_from_env(stderr_tty, quiet) {
+        Some(progress::Spinner::start("Detecting pack"))
+    } else {
+        None
+    };
     let output = analyze_with_generated_paths(
         AnalyzeRequest {
             root,
@@ -298,9 +312,13 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
             mutation_override: mutation,
             llm_override: llm.map(|value| value == "on"),
             intent,
+            progress: spinner.as_ref().map(progress::Spinner::updater),
         },
         &generated_paths,
     );
+    if let Some(spinner) = spinner {
+        spinner.finish();
+    }
     emit(
         &mut stdout,
         &view,

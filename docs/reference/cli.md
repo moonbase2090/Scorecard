@@ -28,6 +28,9 @@ sc help [COMMAND]
 | `--intent TEXT` | none | What the change is meant to do. Stored on the scorecard. With `--llm on` and no `--spec`, this is enough to run the review. |
 | `--budget-seconds N` | `120` | Wall-clock budget for pack commands, in seconds. One clock for the whole run. A command still running at the deadline is killed, including its child processes, and the report records the timeout. |
 | `--config PATH` | see [config](config.md#where-sc-looks) | Config file to use. |
+| `--quiet` | off | Suppress the progress spinner on stderr. |
+
+While analysis runs, a spinner with the current step and elapsed time animates on stderr when it is a terminal (silent when piped, in CI, with `NO_COLOR`/`TERM=dumb`, or from `sc-mcp`); stdout is unchanged, so JSON/SARIF pipes are unaffected.
 
 Command-line flags override the matching config keys.
 
