@@ -1948,6 +1948,57 @@ mod tests {
     }
 
     #[test]
+    fn cdk_out_assets_add_no_cov_source_and_no_functions() {
+        let root = std::env::temp_dir().join(format!("sc-py-cdkout-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("aws/infra/cdk.out/asset.123")).unwrap();
+        std::fs::create_dir_all(root.join("app")).unwrap();
+        std::fs::write(
+            root.join("aws/infra/cdk.out/asset.123/synth.py"),
+            "def handler(event):\n    return event\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("app/main.py"), "def main():\n    return 0\n").unwrap();
+        // Mirror the Cairn layout: the synthesized build output is git-ignored.
+        std::fs::write(root.join(".gitignore"), "cdk.out/\n").unwrap();
+
+        let scan = crate::poly_cc::scan_for_pack(&root, "python", &[], &[]);
+        assert!(
+            !scan.paths.iter().any(|path| path.contains("cdk.out")),
+            "{:?}",
+            scan.paths
+        );
+        assert!(
+            !scan
+                .functions
+                .iter()
+                .any(|function| function.file.contains("cdk.out")),
+            "{:?}",
+            scan.functions
+        );
+        assert!(
+            scan.functions
+                .iter()
+                .any(|function| function.file == "app/main.py"),
+            "{:?}",
+            scan.functions
+        );
+        let sources = cov_sources(&scan.functions);
+        assert!(
+            !sources.iter().any(|source| source.contains("cdk.out")),
+            "{sources:?}"
+        );
+        let command = pytest_command(
+            "python3 -m pytest -q",
+            &sources,
+            &root.join("cov.json"),
+            true,
+        );
+        assert!(!command.contains("cdk.out"), "{command}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn coverage_disabled_skips_collection_and_names_the_flag() {
         let root = std::env::temp_dir().join(format!("sc-py-nocov-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);

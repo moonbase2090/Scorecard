@@ -13,6 +13,7 @@ pub const GENERATED_SKIP_DIRS: &[&str] = &[
     "dist",
     "build",
     "out",
+    "cdk.out",
     "coverage",
     "generated",
     "vendor",
@@ -425,6 +426,30 @@ mod tests {
         fs::write(root.join("src/target/source.rs"), "fn source() {}\n").unwrap();
 
         assert_eq!(paths(&root, &[]), ["src/target/source.rs"]);
+    }
+
+    #[test]
+    fn skips_cdk_out_and_gitignored_generated_dirs() {
+        let root = temp("cdk-out");
+        fs::create_dir_all(root.join("aws/infra/cdk.out/asset.123")).unwrap();
+        fs::create_dir_all(root.join("synth-out")).unwrap();
+        fs::create_dir_all(root.join("app")).unwrap();
+        fs::write(
+            root.join("aws/infra/cdk.out/asset.123/synth.py"),
+            "def handler(event):\n    return event\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("synth-out/bundle.py"),
+            "def bundle():\n    return 1\n",
+        )
+        .unwrap();
+        fs::write(root.join("app/main.py"), "def main():\n    return 0\n").unwrap();
+        // cdk.out is skipped by name; synth-out is skipped because it is
+        // git-ignored, even though the name is not a well-known build dir.
+        fs::write(root.join(".gitignore"), "synth-out/\n").unwrap();
+
+        assert_eq!(paths(&root, &[]), [".gitignore", "app/main.py"]);
     }
 
     #[test]
