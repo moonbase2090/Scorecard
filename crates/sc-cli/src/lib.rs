@@ -44,7 +44,9 @@ struct AnalyzeArgs {
     /// Omitted: `pretty` when stdout is a terminal, otherwise `json`.
     #[arg(long, value_parser = ["json", "pretty", "md", "sarif", "html", "all"])]
     format: Option<String>,
-    /// Also write the report to this path.
+    /// Also write the report to this path. When stdout is a terminal,
+    /// only a short summary plus the path prints; piped stdout still
+    /// gets the full report.
     #[arg(long)]
     out: Option<PathBuf>,
     /// Gates that set exit 1 when they fail. The report verdict still reflects every enforced gate.
@@ -119,6 +121,19 @@ struct View<'a> {
     file_format: &'a str,
     color: bool,
     width: usize,
+    tty: bool,
+}
+
+/// Pick what lands on stdout. When `--out` is set and stdout is a
+/// terminal, print the short human summary (which names the file written)
+/// instead of dumping the raw report. Piped stdout still gets the full
+/// report so `sc analyze --format json | jq .` is unchanged.
+fn stdout_body_format(stdout_format: &str, has_out: bool, tty: bool) -> &str {
+    if has_out && tty {
+        "pretty"
+    } else {
+        stdout_format
+    }
 }
 
 pub fn run() -> i32 {
@@ -164,6 +179,7 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
             std::env::var("CLICOLOR").ok().as_deref(),
         ),
         width: pretty::term_width(),
+        tty,
     };
     let path = path.unwrap_or_else(|| PathBuf::from("."));
     let repo = display_repo(&path);
@@ -327,7 +343,7 @@ fn emit(
             code = 2;
         }
     }
-    let body = match view.stdout_format {
+    let body = match stdout_body_format(view.stdout_format, out.is_some(), view.tty) {
         "md" => md,
         "sarif" => sarif,
         // HTML to a terminal is noise; `all` keeps JSON+Markdown on stdout
@@ -529,6 +545,40 @@ mod skill_command_docs_test {
             assert!(
                 skill.contains(&format!("`sc {name}")),
                 "top-level command `sc {name}` is missing from skills/scorecard/SKILL.md"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod stdout_body_format_tests {
+    use super::*;
+
+    #[test]
+    fn out_on_a_terminal_prints_the_summary_otherwise_the_full_report() {
+        // (stdout_format, has_out, tty) -> body format
+        let cases = [
+            ("html", true, true, "pretty"),
+            ("md", true, true, "pretty"),
+            ("sarif", true, true, "pretty"),
+            ("json", true, true, "pretty"),
+            ("all", true, true, "pretty"),
+            ("pretty", true, true, "pretty"),
+            ("html", true, false, "html"),
+            ("md", true, false, "md"),
+            ("sarif", true, false, "sarif"),
+            ("json", true, false, "json"),
+            ("all", true, false, "all"),
+            ("html", false, true, "html"),
+            ("json", false, true, "json"),
+            ("json", false, false, "json"),
+            ("pretty", false, true, "pretty"),
+        ];
+        for (format, has_out, tty, expected) in cases {
+            assert_eq!(
+                stdout_body_format(format, has_out, tty),
+                expected,
+                "format={format} has_out={has_out} tty={tty}"
             );
         }
     }
