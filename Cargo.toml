@@ -20,7 +20,7 @@ homepage = "https://github.com/moonbase2090/Scorecard"
 readme = "README.md"
 keywords = ["quality", "testing", "metrics", "sarif", "gate"]
 categories = ["command-line-utilities", "development-tools"]
-rust-version = "1.85"
+rust-version = "1.88"
 
 [workspace.dependencies]
 clap = { version = "4", features = ["derive"] }

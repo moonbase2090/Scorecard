@@ -113,14 +113,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # Install 1.85 via rustup instead of a second dtolnay pin: two pins
+      # Install 1.88 via rustup instead of a second dtolnay pin: two pins
       # from the same action at different refs confuse Dependabot.
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-      - name: Install Rust 1.85
-        run: rustup toolchain install 1.85 --profile minimal
+      - name: Install Rust 1.88
+        run: rustup toolchain install 1.88 --profile minimal
       - name: Check MSRV
-        run: cargo +1.85 check --workspace --locked --all-targets
+        run: cargo +1.88 check --workspace --locked --all-targets
 
   # Workspace line coverage via cargo-llvm-cov, with the report as an
   # artifact. Push-only like dogfood: PRs already run the suite without

@@ -14,7 +14,7 @@ updates:
         update-types:
           - minor
           - patch
-    # Majors pinned for MSRV 1.85 / pending deliberate migration.
+    # Majors pinned for MSRV 1.88 / pending deliberate migration.
     ignore:
       - dependency-name: toml
         update-types: ["version-update:semver-major"]
