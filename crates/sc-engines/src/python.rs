@@ -2148,7 +2148,11 @@ mod tests {
         let before = crate::pack_cov::run_start() - std::time::Duration::from_secs(60);
         let data = read_coverage(&root, &functions, before).unwrap();
         assert_eq!(data.functions.len(), 1);
-        assert!(data.functions[0].coverage > 0.5);
+        assert!(
+            (data.functions[0].coverage - 2.0 / 3.0).abs() < 1e-9,
+            "coverage {}",
+            data.functions[0].coverage
+        );
         assert!(read_coverage(&root.join("missing"), &functions, before).is_none());
         // A report older than this run is left from an earlier one.
         let after = crate::pack_cov::run_start() + std::time::Duration::from_secs(60);
