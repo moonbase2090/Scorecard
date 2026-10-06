@@ -3,6 +3,7 @@
 
 mod a11y;
 mod cargo_test;
+mod clippy;
 mod command;
 mod compile;
 mod coverage;
