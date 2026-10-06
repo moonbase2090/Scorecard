@@ -798,13 +798,53 @@ cp "$3/SKILL.md" "$destination"
 
     #[test]
     fn report_state_handles_check_remediation_and_current_files() {
-        let path = Path::new("/tmp/scorecard-skill/SKILL.md");
-        report_state(Agent::Codex, FileState::Current, path, false);
-        report_state(Agent::Shared, FileState::Installed, path, false);
-        report_state(Agent::Codex, FileState::Preserved, path, false);
-        report_state(Agent::Cursor, FileState::Missing, path, true);
-        report_state(Agent::Muse, FileState::Changed, path, true);
-        report_state(Agent::Kiro, FileState::Missing, path, false);
-        report_state(Agent::Claude, FileState::Changed, path, false);
+        const CHILD_ENV: &str = "SC_REPORT_STATE_TEST_CHILD";
+        const BEGIN: &str = "__REPORT_STATE_BEGIN__\n";
+        const END: &str = "__REPORT_STATE_END__";
+
+        if std::env::var_os(CHILD_ENV).is_some() {
+            let path = Path::new("/tmp/scorecard-skill/SKILL.md");
+            print!("{BEGIN}");
+            report_state(Agent::Codex, FileState::Current, path, false);
+            report_state(Agent::Shared, FileState::Installed, path, false);
+            report_state(Agent::Codex, FileState::Preserved, path, false);
+            report_state(Agent::Cursor, FileState::Missing, path, true);
+            report_state(Agent::Muse, FileState::Changed, path, true);
+            report_state(Agent::Kiro, FileState::Missing, path, false);
+            report_state(Agent::Claude, FileState::Changed, path, false);
+            print!("{END}");
+            return;
+        }
+
+        let child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "skills::tests::report_state_handles_check_remediation_and_current_files",
+                "--nocapture",
+            ])
+            .env(CHILD_ENV, "1")
+            .output()
+            .expect("report_state child test should run");
+        assert!(
+            child.status.success(),
+            "report_state child test failed: {}",
+            String::from_utf8_lossy(&child.stderr)
+        );
+
+        let stdout = String::from_utf8(child.stdout).unwrap();
+        let start = stdout.find(BEGIN).expect("report_state output start") + BEGIN.len();
+        let end = start + stdout[start..].find(END).expect("report_state output end");
+        let path = "/tmp/scorecard-skill/SKILL.md";
+        let expected = [
+            format!("current {path}\n"),
+            format!("installed {path}\n"),
+            format!("preserved edited copy {path}; run `sc skills install --agent codex --force` to replace it.\n"),
+            format!("missing {path}; run `sc skills install --agent cursor` to install it.\n"),
+            format!("out of date or edited {path}; review it, then run `sc skills install --agent muse --force` to replace it.\n"),
+            format!("missing {path}\n"),
+            format!("out of date or edited {path}\n"),
+        ]
+        .concat();
+        assert_eq!(&stdout[start..end], expected);
     }
 }
