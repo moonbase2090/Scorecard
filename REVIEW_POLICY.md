@@ -53,7 +53,13 @@ Every PR meets these. Reviewers block on any miss.
 9. Every new flag or config key earns its place. Defaults beat options.
 10. Docs are tight and exact: no filler, no marketing tone, no restating the obvious.
 11. Every claim in a PR body or doc is verified by a command you ran.
-12. Tests assert real behavior (no snapshot-everything, no tautologies), and each one fails without the fix.
+12. Tests assert real behavior (no snapshot-everything, no tautologies), and each one fails without the fix. For every test, ask: would it fail if the behavior it names broke? If not, reject it. `sc analyze --mutation diff` runs cargo-mutants and reports each mutant the tests miss (`mutation.survivor`). Reject tests that:
+    - assert a value against itself, or a constant against the same constant
+    - compute the expected value with the code under test or a copy of its logic
+    - mock or stub the unit under test, then assert what the mock returns
+    - only check that something ran, was called, or didn't panic, with no assertion on the result
+    - compare against a snapshot or golden file regenerated from current output without review
+    - still pass when the implementation is deleted or replaced with a stub or default
 13. `sc` passes its own strict gates on this repository, with no new suppressions.
 
 ## 7. Merging
