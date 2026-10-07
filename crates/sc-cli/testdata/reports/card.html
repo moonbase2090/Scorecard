@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>scorecard: testdata/&lt;good&gt;&amp;&quot;crate&quot; — fail</title>
+<style>
+
+:root{--bg:#070b14;--card:#0b1428;--line:#22314f;--ink:#e8eefc;--dim:#8fa1c7;
+--accent:#6ea8ff;--ok:#59e3a5;--bad:#ff7a90;--warn:#ffcf6e}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{padding:28px clamp(12px,3vw,40px) 60px}
+h1{font-size:22px;margin:0}
+h2{font-size:15px;margin:28px 0 10px;color:var(--dim);text-transform:uppercase;
+letter-spacing:.08em}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+padding:16px 18px;margin-top:12px}
+.hero{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.hero>div{flex:1 1 220px;min-width:0;overflow-wrap:anywhere}
+.verdict{font-size:15px;font-weight:800;border-radius:999px;padding:8px 22px;
+letter-spacing:.06em}
+.verdict.pass{background:rgba(89,227,165,.14);color:var(--ok);
+border:1px solid var(--ok)}
+.verdict.fail{background:rgba(255,122,144,.12);color:var(--bad);
+border:1px solid var(--bad)}
+.verdict.report{background:rgba(110,168,255,.12);color:#c9d9ff;
+border:1px solid var(--accent)}
+details{margin-top:4px}
+summary{cursor:pointer;color:var(--accent);font-size:12px}
+.group{margin-top:12px}
+.group>summary{font-size:14px;color:var(--ink);padding:6px 0}
+.group>summary .pill{margin-left:4px}
+.more{color:var(--dim);font-size:12.5px;margin:10px 0 0}
+.fnlist{margin:6px 0 0;padding-left:18px;font-size:12.5px;color:var(--dim)}
+.fnlist .more{list-style:none;margin-left:-18px}
+.log pre{background:#04080f;border:1px solid #1b2a4e;border-radius:10px;
+padding:8px 12px;margin:6px 0 0;font-family:ui-monospace,Menlo,monospace;
+font-size:11.5px;max-height:320px;overflow:auto;white-space:pre}
+.pathlist{margin-top:6px;max-height:240px;overflow:auto}
+.pathlist div{margin:1px 0}
+.pathlist code{word-break:normal}
+.meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));
+gap:8px 20px;margin-top:14px;font-size:12.5px;color:var(--dim)}
+.meta>div{min-width:0;overflow:hidden}
+.meta b{color:var(--ink);font-weight:600}
+.meta code{display:block;max-width:100%;overflow-wrap:anywhere;word-break:break-all}
+.meta code,.card code{background:#16223f;padding:1px 6px;border-radius:6px;
+font-size:11.5px;color:var(--ink)}
+.flow{display:flex;align-items:stretch;gap:0;margin-top:12px;flex-wrap:wrap}
+.step{flex:1 1 0;min-width:120px;background:var(--card);
+border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:12px}
+.step b{display:block;font-size:12.5px;margin-bottom:2px}
+.step span{color:var(--dim);font-size:11.5px}
+.step.hi{border-color:var(--accent)}
+.sep{align-self:center;color:#3a5086;font-size:18px;padding:0 6px}
+.pill{display:inline-block;font-size:11px;border-radius:999px;
+padding:2px 10px;border:1px solid #3a5086;color:#bcd0ff;white-space:nowrap}
+.pill.pass{border-color:var(--ok);color:var(--ok)}
+.pill.fail{border-color:var(--bad);color:var(--bad)}
+.pill.warn{border-color:var(--warn);color:var(--warn)}
+.pill.info{border-color:var(--accent);color:#c9d9ff}
+.pill.dim{color:var(--dim)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+.card:has(>table){overflow-x:auto}
+th{text-align:left;color:var(--dim);font-weight:600;font-size:11px;
+text-transform:uppercase;letter-spacing:.06em;padding:6px 8px;
+border-bottom:1px solid var(--line)}
+td{padding:7px 8px;border-bottom:1px solid #16223f;vertical-align:top}
+tr:last-child td{border-bottom:none}
+.bar{height:8px;border-radius:4px;background:#16223f;overflow:hidden;
+min-width:90px}
+.bar i{display:block;height:100%;border-radius:4px}
+.cov{display:block;font-size:11.5px;color:var(--dim);margin-top:3px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));
+gap:10px;margin-top:12px}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:12px;
+padding:10px 14px}
+.tile b{display:block;font-size:20px}
+.tile span{font-size:11px;color:var(--dim)}
+.finding{border-left:4px solid var(--warn)}
+.finding.error{border-left-color:var(--bad)}
+.finding h3{margin:0 0 6px;font-size:13px;font-family:ui-monospace,Menlo,monospace;
+font-weight:600;word-break:break-all}
+.finding p{margin:6px 0;font-size:13px}
+.finding .row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+.suggest{color:var(--dim);font-size:12.5px}
+.term{background:#04080f;border:1px solid #1b2a4e;border-radius:10px;
+padding:8px 12px;margin:8px 0 0;font-family:ui-monospace,Menlo,monospace;
+font-size:11.5px;overflow-x:auto;white-space:nowrap}
+.term b{color:var(--ok)}
+td.cmd{width:100%;max-width:0}
+footer{margin-top:32px;color:var(--dim);font-size:11.5px;text-align:center}
+@media (max-width:600px){.card{padding:12px}th,td{padding:6px 5px}
+.bar{min-width:48px}}
+
+</style>
+</head>
+<body>
+<main>
+<h1>scorecard</h1>
+<div class="card"><div class="hero"><span class="verdict fail">FAIL</span><div><div style="font-size:16px;font-weight:700">testdata/&lt;good&gt;&amp;&quot;crate&quot;</div><div style="font-size:12px;color:var(--dim)">pack <code>unknown</code> · scope <code>tree</code> · <code>golden-report</code></div></div></div><div class="meta"><div><b>git</b><br/><code>none (clean)</code></div><div><b>tests</b><br/>full-suite</div><div><b>engines run</b><br/>—</div><div><b>engines skipped</b><br/>compile, tests, coverage, complexity, crap, llm, mutation</div></div></div>
+<h2>flow</h2>
+<div class="flow"><div class="step"><b>scope</b><span>tree</span></div><div class="sep">→</div><div class="step"><b>pack</b><span>unknown</span></div><div class="sep">→</div><div class="step"><b>engines</b><span>0 run · 7 skipped</span></div><div class="sep">→</div><div class="step hi"><b>gates</b><span>0/1 pass</span></div><div class="sep">→</div><div class="step"><b>verdict</b><span>fail</span></div></div>
+<h2>scores</h2>
+<div class="card"><table><tr><td style="width:140px">correctness</td><td><div class="bar"><i style="width:100%;background:#59e3a5"></i></div></td><td style="width:60px">1.00</td></tr><tr><td style="width:140px">efficiency</td><td><div class="bar"><i style="width:100%;background:#59e3a5"></i></div></td><td style="width:60px">1.00</td></tr><tr><td style="width:140px">maintainability</td><td><div class="bar"><i style="width:100%;background:#59e3a5"></i></div></td><td style="width:60px">1.00</td></tr><tr><td style="width:140px">security</td><td><div class="bar"><i style="width:100%;background:#59e3a5"></i></div></td><td style="width:60px">1.00</td></tr><tr><td style="width:140px">a11y</td><td><div class="bar"><i style="width:100%;background:#59e3a5"></i></div></td><td style="width:60px">1.00</td></tr></table></div>
+<div class="tiles"><div class="tile"><b>0</b><span>loc changed</span></div><div class="tile"><b>0</b><span>files changed</span></div><div class="tile"><b>—</b><span>coverage not measured</span></div><div class="tile"><b>0</b><span>crap max</span></div><div class="tile"><b>0</b><span>over threshold</span></div><div class="tile"><b>0</b><span>undeclared deps</span></div></div>
+<h2>accessibility</h2>
+<div class="card"><p style="color:var(--dim)">No accessibility findings.</p></div>
+<h2>gates</h2>
+<div class="card"><table><tr><th>gate</th><th>result</th><th>enforced</th><th>reason</th></tr><tr><td><code>crap</code></td><td><span class="pill fail">fail</span></td><td>yes</td><td>1 function over threshold</td></tr></table></div>
+<h2>worst crap · threshold 30</h2>
+<div class="card"><p style="color:var(--dim);margin:0 0 8px">Coverage was not measured, so no CRAP scores are reported and nothing is treated as 0% coverage.</p><table><tr><th>crap</th><th>cc</th><th>coverage</th><th>symbol</th><th>file</th></tr><tr><td><span class="pill fail">132</span></td><td>11</td><td><span class="cov">not measured</span></td><td><code>classify</code></td><td><code>src/lib.rs</code></td></tr></table></div>
+<h2>findings · 1</h2>
+<details class="group" open><summary><code>crap.over_threshold</code> · 1 <span class="pill fail">1 error</span></summary>
+<div class="card finding error"><h3>crap:src/lib.rs:classify</h3><div class="row"><span class="pill fail">error</span><span class="pill info">crap.over_threshold</span><span class="pill dim">fix</span><span class="pill dim">crap</span></div><p>CRAP 132 (CC=11, cov=0%) exceeds threshold 30</p><div style="font-size:12px;color:var(--dim)">src/lib.rs · <code>classify</code></div><div class="suggest">suggested: Add tests covering branches or split the function</div></div>
+</details>
+<h2>mutation · spec</h2>
+<div class="card"><div class="row" style="display:flex;gap:6px;flex-wrap:wrap"><span class="pill info">skipped</span><span class="pill dim">killed 0</span><span class="pill dim">survived 0</span><span class="pill dim">timeout 0</span></div><p style="font-size:12.5px;color:var(--dim)">no spec file requested.</p></div>
+<h2>runs</h2>
+<div class="card"><table><tr><th>engine</th><th>command</th><th>exit</th><th>ms</th></tr></table></div>
+<footer>generated by <code>sc analyze --format html</code> · scorecard golden-report · schema 0.1</footer>
+</main>
+</body>
+</html>
