@@ -31,25 +31,40 @@ impl ScaCounts {
     }
 }
 
+pub struct CheckOutcome {
+    pub pass: bool,
+    pub reason: String,
+}
+
+pub struct TestCheck {
+    pub enforced: bool,
+    pub pass: bool,
+    pub reason: String,
+}
+
+pub struct PythonChecks {
+    pub types: CheckOutcome,
+    pub tests: TestCheck,
+    pub lint: CheckOutcome,
+    pub sca: ScaCounts,
+    pub secret_errors: u64,
+}
+
+pub struct PythonCrap {
+    pub coverage_complete: bool,
+    pub worst: Vec<sc_core::CrapFunction>,
+    pub crap_max: f64,
+    pub over: u64,
+    pub untested: u64,
+}
+
 pub struct PythonOutcome {
     pub findings: Vec<Finding>,
     pub runs: Vec<RunRecord>,
     pub ran: Vec<String>,
     pub skipped: Vec<String>,
-    pub types_pass: bool,
-    pub types_reason: String,
-    pub tests_enforced: bool,
-    pub tests_pass: bool,
-    pub tests_reason: String,
-    pub lint_pass: bool,
-    pub lint_reason: String,
-    pub sca: ScaCounts,
-    pub secret_errors: u64,
-    pub crap_max: f64,
-    pub crap_over: u64,
-    pub crap_untested: u64,
-    pub crap_coverage_complete: bool,
-    pub crap_worst: Vec<sc_core::CrapFunction>,
+    pub checks: PythonChecks,
+    pub crap: PythonCrap,
 }
 
 pub fn run_with_generated(
@@ -185,11 +200,6 @@ pub fn run_with_generated(
     }
     findings.extend(crap.findings);
     ran.push("crap".into());
-    let crap_max = crap.crap_max;
-    let crap_over = crap.over;
-    let crap_untested = crap.untested;
-    let crap_coverage_complete = crap.coverage_complete;
-    let crap_worst = crap.worst;
     let secrets =
         crate::pack::text_secrets_with_generated(root, scope.exclude, scope.include_generated);
     let secret_errors = secrets
@@ -206,20 +216,30 @@ pub fn run_with_generated(
         runs,
         ran,
         skipped,
-        types_pass,
-        types_reason,
-        tests_enforced,
-        tests_pass,
-        tests_reason,
-        lint_pass,
-        lint_reason,
-        sca,
-        secret_errors,
-        crap_max,
-        crap_over,
-        crap_untested,
-        crap_coverage_complete,
-        crap_worst,
+        checks: PythonChecks {
+            types: CheckOutcome {
+                pass: types_pass,
+                reason: types_reason,
+            },
+            tests: TestCheck {
+                enforced: tests_enforced,
+                pass: tests_pass,
+                reason: tests_reason,
+            },
+            lint: CheckOutcome {
+                pass: lint_pass,
+                reason: lint_reason,
+            },
+            sca,
+            secret_errors,
+        },
+        crap: PythonCrap {
+            coverage_complete: crap.coverage_complete,
+            worst: crap.worst,
+            crap_max: crap.crap_max,
+            over: crap.over,
+            untested: crap.untested,
+        },
     }
 }
 
@@ -2013,8 +2033,8 @@ mod tests {
             &[],
             false,
         );
-        assert!(!outcome.crap_coverage_complete);
-        assert!(outcome.crap_worst.is_empty());
+        assert!(!outcome.crap.coverage_complete);
+        assert!(outcome.crap.worst.is_empty());
         assert!(outcome.skipped.iter().any(|engine| engine == "coverage"));
         let missing = outcome
             .findings

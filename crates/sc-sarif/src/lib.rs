@@ -8,6 +8,7 @@ pub fn to_sarif(card: &Scorecard) -> String {
     // `ignore` stays on the scorecard. Code scanning turns each SARIF result
     // into a pull-request annotation, so those findings are not uploaded.
     let findings: Vec<&Finding> = card
+        .sections
         .findings
         .iter()
         .filter(|finding| finding.disposition != "ignore")
@@ -25,6 +26,7 @@ pub fn to_sarif(card: &Scorecard) -> String {
     }
     let results: Vec<Value> = findings.iter().copied().map(result).collect();
     let gates: Vec<Value> = card
+        .measures
         .gates
         .iter()
         .map(|gate| {
@@ -42,7 +44,7 @@ pub fn to_sarif(card: &Scorecard) -> String {
             "tool": {
                 "driver": {
                     "name": "sc",
-                    "version": card.version,
+                    "version": card.identity.version,
                     "informationUri": "https://github.com/moonbase2090/Scorecard",
                     "rules": rules,
                 }
@@ -103,7 +105,7 @@ mod tests {
     #[test]
     fn sarif_names_the_rule() {
         let mut card = Scorecard::skeleton(".", 30);
-        card.findings.push(Finding {
+        card.sections.findings.push(Finding {
             id: "secrets:src/lib.rs:1".into(),
             rule: "secrets.github_token".into(),
             engine: "secrets".into(),
@@ -127,7 +129,7 @@ mod tests {
         // a quality signal, not a secret: code scanning must not treat it as
         // a security alert. The JSON finding keeps severity error.
         let mut card = Scorecard::skeleton(".", 30);
-        card.findings.push(Finding {
+        card.sections.findings.push(Finding {
             id: "test:src/lib.rs:it_adds".into(),
             rule: "test.failed".into(),
             engine: "tests".into(),
@@ -140,7 +142,7 @@ mod tests {
             suggested_action: None,
             disposition: "fix".into(),
         });
-        card.findings.push(Finding {
+        card.sections.findings.push(Finding {
             id: "coverage:missing".into(),
             rule: "coverage.missing".into(),
             engine: "coverage".into(),
@@ -162,7 +164,7 @@ mod tests {
         );
         // Secrets still upload at error so real leaks stay security alerts.
         let mut secrets = Scorecard::skeleton(".", 30);
-        secrets.findings.push(Finding {
+        secrets.sections.findings.push(Finding {
             id: "secrets:src/lib.rs:1".into(),
             rule: "secrets.github_token".into(),
             engine: "secrets".into(),
@@ -187,7 +189,7 @@ mod tests {
     fn sarif_includes_the_scorecard_verdict_and_gate_enforcement() {
         let mut card = Scorecard::skeleton(".", 30);
         card.verdict = "pass".into();
-        card.gates.push(sc_core::Gate {
+        card.measures.gates.push(sc_core::Gate {
             id: "lint".into(),
             pass: false,
             enforced: true,
@@ -205,7 +207,7 @@ mod tests {
     fn an_ignored_perf_finding_is_not_uploaded() {
         let perf_rule = format!("perf.{}", "clone_in_loop");
         let mut card = Scorecard::skeleton(".", 30);
-        card.findings.push(Finding {
+        card.sections.findings.push(Finding {
             id: format!("perf:tests/rows.rs:owned_rows:{perf_rule}"),
             rule: perf_rule.clone(),
             engine: "perf".into(),
@@ -218,7 +220,7 @@ mod tests {
             suggested_action: None,
             disposition: String::new(),
         });
-        card.findings.push(Finding {
+        card.sections.findings.push(Finding {
             id: "secrets:src/lib.rs:1".into(),
             rule: "secrets.github_token".into(),
             engine: "secrets".into(),
@@ -231,9 +233,9 @@ mod tests {
             suggested_action: None,
             disposition: String::new(),
         });
-        sc_core::apply_disposition(&mut card.findings);
-        assert_eq!(card.findings[0].disposition, "ignore");
-        assert_eq!(card.findings[1].disposition, "fix");
+        sc_core::apply_disposition(&mut card.sections.findings);
+        assert_eq!(card.sections.findings[0].disposition, "ignore");
+        assert_eq!(card.sections.findings[1].disposition, "fix");
         let text = to_sarif(&card);
         assert!(!text.contains("tests/rows.rs"), "{text}");
         assert!(!text.contains(&perf_rule), "{text}");

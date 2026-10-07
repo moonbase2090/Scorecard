@@ -79,7 +79,7 @@ pub fn to_pretty(card: &Scorecard, opts: &PrettyOpts) -> String {
 }
 
 fn push_generated_files(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize) {
-    let Some(warning) = card.generated_files_warning.as_ref() else {
+    let Some(warning) = card.sections.generated_files_warning.as_ref() else {
         return;
     };
     out.push_str("generated files analyzed\n");
@@ -96,19 +96,19 @@ fn push_generated_files(out: &mut String, card: &Scorecard, opts: &PrettyOpts, w
 }
 
 fn push_header(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize) {
-    let state = card.git.status_label();
+    let state = card.context.git.status_label();
     let line = format!(
         "sc {}  {}  {}  {} {}  scope {}",
         opts.version,
-        card.repo,
+        card.identity.repo,
         pack_name(card),
-        short_sha(&card.git.head),
+        short_sha(&card.context.git.head),
         state,
-        card.scope.mode
+        card.context.scope.mode
     );
     out.push_str(&fit(&line, width, opts.color));
     out.push('\n');
-    let changed_paths = card.git.changed_paths_label();
+    let changed_paths = card.context.git.changed_paths_label();
     if !changed_paths.is_empty() {
         out.push_str(&format!("changed paths: {changed_paths}\n"));
     }
@@ -133,11 +133,11 @@ fn push_banner(out: &mut String, card: &Scorecard, opts: &PrettyOpts) {
 
 fn push_gates(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize) {
     out.push_str("gates\n");
-    if card.gates.is_empty() {
+    if card.measures.gates.is_empty() {
         out.push_str("  (none)\n\n");
         return;
     }
-    for gate in &card.gates {
+    for gate in &card.measures.gates {
         out.push_str(&gate_row(gate, opts, width));
         out.push('\n');
     }
@@ -166,17 +166,29 @@ fn gate_row(gate: &Gate, opts: &PrettyOpts, width: usize) -> String {
 
 fn push_scores(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize) {
     out.push_str("scores\n");
-    score_line(out, "correctness", card.scores.correctness, opts, width);
-    score_line(out, "efficiency", card.scores.efficiency, opts, width);
     score_line(
         out,
-        "maintainability",
-        card.scores.maintainability,
+        "correctness",
+        card.measures.scores.correctness,
         opts,
         width,
     );
-    score_line(out, "security", card.scores.security, opts, width);
-    score_line(out, "a11y", card.scores.a11y, opts, width);
+    score_line(
+        out,
+        "efficiency",
+        card.measures.scores.efficiency,
+        opts,
+        width,
+    );
+    score_line(
+        out,
+        "maintainability",
+        card.measures.scores.maintainability,
+        opts,
+        width,
+    );
+    score_line(out, "security", card.measures.scores.security, opts, width);
+    score_line(out, "a11y", card.measures.scores.a11y, opts, width);
     out.push('\n');
 }
 
@@ -188,7 +200,10 @@ fn score_line(out: &mut String, name: &str, score: f64, opts: &PrettyOpts, width
 }
 
 fn push_crap(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize) {
-    out.push_str(&format!("worst crap  threshold {}\n", card.crap.threshold));
+    out.push_str(&format!(
+        "worst crap  threshold {}\n",
+        card.sections.crap.threshold
+    ));
     if let Some(line) = crate::report::rest_of_tree_short(card) {
         let line = format!("  {line}");
         out.push_str(&paint(opts.color, dim(), &fit(&line, width, opts.color)));
@@ -205,7 +220,7 @@ fn push_crap(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize
         out.push_str(&paint(opts.color, dim(), &fit(note, width, opts.color)));
         out.push('\n');
     }
-    let rows: Vec<&CrapFunction> = card.crap.worst.iter().take(5).collect();
+    let rows: Vec<&CrapFunction> = card.sections.crap.worst.iter().take(5).collect();
     if rows.is_empty() {
         out.push_str("  (none)\n\n");
         return;
@@ -234,12 +249,12 @@ fn push_crap(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize
 
 fn push_findings(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize) {
     out.push_str("findings\n");
-    if card.findings.is_empty() {
+    if card.sections.findings.is_empty() {
         out.push_str("  (none)\n\n");
         return;
     }
     let mut last = String::new();
-    for finding in card.findings.iter().take(FINDING_LIMIT) {
+    for finding in card.sections.findings.iter().take(FINDING_LIMIT) {
         if finding.severity != last {
             out.push_str(&paint(
                 opts.color,
@@ -251,8 +266,8 @@ fn push_findings(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: u
         }
         out.push_str(&finding_block(finding, opts, width));
     }
-    if card.findings.len() > FINDING_LIMIT {
-        let more = card.findings.len() - FINDING_LIMIT;
+    if card.sections.findings.len() > FINDING_LIMIT {
+        let more = card.sections.findings.len() - FINDING_LIMIT;
         out.push_str(&format!("  {more} more, see --out report\n"));
     }
     out.push('\n');
@@ -275,7 +290,7 @@ fn finding_block(finding: &Finding, opts: &PrettyOpts, width: usize) -> String {
 }
 
 fn push_llm(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize) {
-    let Some(section) = card.llm.as_ref() else {
+    let Some(section) = card.sections.llm.as_ref() else {
         return;
     };
     out.push_str("llm\n");
@@ -317,10 +332,10 @@ fn push_llm(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize)
 
 fn push_footer(out: &mut String, card: &Scorecard, opts: &PrettyOpts) {
     out.push_str("engines run: ");
-    out.push_str(&list_or_none(&card.engines_run));
+    out.push_str(&list_or_none(&card.engines.engines_run));
     out.push('\n');
     out.push_str("engines skipped: ");
-    out.push_str(&list_or_none(&card.engines_skipped));
+    out.push_str(&list_or_none(&card.engines.engines_skipped));
     out.push('\n');
     out.push_str(&format!("duration: {}\n", fmt_duration(total_ms(card))));
     if let Some(path) = opts.report.as_deref() {
@@ -347,10 +362,10 @@ fn exit_line(code: i32, report_only: bool, verdict_failed: bool) -> String {
 }
 
 fn pack_name(card: &Scorecard) -> &str {
-    if card.pack.is_empty() {
+    if card.identity.pack.is_empty() {
         "unknown"
     } else {
-        &card.pack
+        &card.identity.pack
     }
 }
 
@@ -408,6 +423,7 @@ fn list_or_none(items: &[String]) -> String {
 
 fn location_for(card: &Scorecard, file: &str, symbol: &str) -> String {
     let line = card
+        .sections
         .findings
         .iter()
         .find(|finding| finding.file == file && finding.symbol.as_deref() == Some(symbol));
@@ -510,7 +526,7 @@ mod tests {
         let mut card = Scorecard::skeleton("demo", 30);
         let off = to_pretty(&card, &opts);
         assert!(!off.contains("\nllm\n"));
-        card.llm = Some(LlmSection {
+        card.sections.llm = Some(LlmSection {
             status: "ran".into(),
             backend: Some("ollama".into()),
             model: Some("qwen2.5-coder".into()),
@@ -524,15 +540,17 @@ mod tests {
         assert!(!missing.contains("no gaps"));
         assert!(!missing.contains("rounds"));
         assert!(missing.contains('~'));
-        card.llm = Some(LlmSection::ran(
+        card.sections.llm = Some(LlmSection::ran(
             "ollama",
             "qwen2.5-coder",
             3,
             0,
             vec!["checked the intent against src/lib.rs".into()],
         ));
-        card.engines_skipped.retain(|engine| engine != "llm");
-        card.engines_run.push("llm".into());
+        card.engines
+            .engines_skipped
+            .retain(|engine| engine != "llm");
+        card.engines.engines_run.push("llm".into());
         let wide = PrettyOpts {
             color: false,
             width: 80,
@@ -570,7 +588,7 @@ mod tests {
         let card = Scorecard::skeleton("demo", 30);
         let mut card = card;
         card.verdict = "pass".into();
-        card.pack = "rust".into();
+        card.identity.pack = "rust".into();
         let text = to_pretty(
             &card,
             &PrettyOpts {
@@ -591,7 +609,7 @@ mod tests {
     fn report_only_banner_replaces_pass() {
         let mut card = Scorecard::skeleton("demo", 30);
         card.verdict = "pass".into();
-        card.gates.push(Gate {
+        card.measures.gates.push(Gate {
             id: "crap".into(),
             pass: false,
             enforced: false,
@@ -616,7 +634,7 @@ mod tests {
     fn enforced_failure_stays_visible_when_exit_code_is_zero() {
         let mut card = Scorecard::skeleton("demo", 30);
         card.verdict = "pass".into();
-        card.gates.push(Gate {
+        card.measures.gates.push(Gate {
             id: "lint".into(),
             pass: false,
             enforced: true,
@@ -641,7 +659,7 @@ mod tests {
     fn advisory_miss_keeps_the_pass_banner() {
         let mut card = Scorecard::skeleton("demo", 30);
         card.verdict = "pass".into();
-        card.gates = vec![
+        card.measures.gates = vec![
             Gate {
                 id: "types".into(),
                 pass: true,
@@ -684,8 +702,8 @@ mod tests {
         let text = to_pretty(&card, &opts);
         assert!(text.contains("coverage not measured: no CRAP scores, nothing treated as 0%"));
         assert!(text.contains("  (none)"));
-        card.engines_run.push("coverage".into());
-        card.crap.worst = vec![CrapFunction {
+        card.engines.engines_run.push("coverage".into());
+        card.sections.crap.worst = vec![CrapFunction {
             symbol: "classify".into(),
             file: "src/lib.rs".into(),
             cc: 11,
@@ -701,14 +719,14 @@ mod tests {
     fn crap_rows_keep_measured_coverage_when_some_functions_lack_a_record() {
         let mut card = Scorecard::skeleton("demo", 30);
         card.verdict = "pass".into();
-        card.engines_run.push("coverage".into());
-        card.gates.push(Gate {
+        card.engines.engines_run.push("coverage".into());
+        card.measures.gates.push(Gate {
             id: "crap".into(),
             pass: false,
             enforced: false,
             reason: Some("some functions have no coverage record and were not scored".into()),
         });
-        card.crap.worst = vec![CrapFunction {
+        card.sections.crap.worst = vec![CrapFunction {
             symbol: "classify".into(),
             file: "src/lib.rs".into(),
             cc: 11,
@@ -734,9 +752,9 @@ mod tests {
     fn diff_scope_line_fits_80_columns() {
         let mut card = Scorecard::skeleton("demo", 30);
         card.verdict = "pass".into();
-        card.scope.mode = "diff".into();
-        card.scope.base = Some("origin/develop".into());
-        card.metrics.crap_over_threshold = 12;
+        card.context.scope.mode = "diff".into();
+        card.context.scope.base = Some("origin/develop".into());
+        card.measures.metrics.crap_over_threshold = 12;
         let text = to_pretty(
             &card,
             &PrettyOpts {
@@ -756,10 +774,10 @@ mod tests {
     fn rest_of_tree_line_names_paths_outside_the_diff() {
         let mut card = Scorecard::skeleton("demo", 30);
         card.verdict = "pass".into();
-        card.scope.mode = "diff".into();
-        card.scope.paths = vec!["src/a.rs".into(), "src/b.rs".into()];
-        card.scope.other_paths = Some(38);
-        card.scope.base = Some("origin/develop".into());
+        card.context.scope.mode = "diff".into();
+        card.context.scope.paths = vec!["src/a.rs".into(), "src/b.rs".into()];
+        card.context.scope.other_paths = Some(38);
+        card.context.scope.base = Some("origin/develop".into());
         let text = to_pretty(
             &card,
             &PrettyOpts {
