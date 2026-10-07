@@ -1,0 +1,111 @@
+{
+  "version": "0.1",
+  "id": "abc",
+  "repo": ".",
+  "pack": "rust",
+  "test_selection": "full-suite",
+  "git": {
+    "head": "abc123",
+    "dirty": true
+  },
+  "intent": "keep parse_input under the CRAP threshold",
+  "scope": {
+    "mode": "tree",
+    "paths": [
+      "src/parse.rs"
+    ]
+  },
+  "verdict": "fail",
+  "engines_run": [
+    "compile",
+    "tests"
+  ],
+  "engines_skipped": [
+    "llm",
+    "mutation"
+  ],
+  "scores": {
+    "correctness": 0.62,
+    "efficiency": 0.81,
+    "maintainability": 0.54,
+    "security": 0.9,
+    "a11y": 1.0
+  },
+  "gates": [
+    {
+      "id": "types",
+      "pass": true,
+      "enforced": true
+    },
+    {
+      "id": "crap",
+      "pass": false,
+      "enforced": true,
+      "reason": "4 functions over threshold"
+    }
+  ],
+  "metrics": {
+    "loc_changed": 1840,
+    "files_changed": 12,
+    "coverage_changed": 0.64,
+    "crap_max": 156.0,
+    "crap_over_threshold": 4,
+    "hallucinated_imports": 1,
+    "undeclared_dependencies": 2
+  },
+  "crap": {
+    "threshold": 30,
+    "worst": [
+      {
+        "symbol": "parse_input",
+        "file": "src/parse.rs",
+        "cc": 12,
+        "coverage": 0.0,
+        "crap": 156.0
+      }
+    ]
+  },
+  "mutation": {
+    "status": "skipped",
+    "score": null,
+    "killed": 0,
+    "survived": 0,
+    "timeout": 0
+  },
+  "findings": [
+    {
+      "id": "crap:src/parse.rs:parse_input",
+      "rule": "crap.over_threshold",
+      "engine": "crap",
+      "severity": "error",
+      "file": "src/parse.rs",
+      "span": {
+        "start_line": 42,
+        "start_col": 1,
+        "end_line": 88,
+        "end_col": 2
+      },
+      "symbol": "parse_input",
+      "message": "CRAP 156 (CC=12, cov=0%) exceeds threshold 30",
+      "evidence": {
+        "cc": 12,
+        "coverage": 0.0,
+        "crap": 156.0
+      },
+      "suggested_action": "Add tests covering branches or split the function",
+      "disposition": ""
+    }
+  ],
+  "spec": {
+    "path": "TASK.md",
+    "gaps": []
+  },
+  "runs": [
+    {
+      "engine": "tests",
+      "command": "cargo test",
+      "exit_code": 0,
+      "duration_ms": 12
+    }
+  ]
+}

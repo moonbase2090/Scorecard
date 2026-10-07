@@ -753,39 +753,43 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         request.config.engines.coverage,
     );
     let gates = vec![
-        if outcome.types_pass {
+        if outcome.checks.types.pass {
             gate("types", true, "")
         } else {
-            gate("types", false, &outcome.types_reason)
+            gate("types", false, &outcome.checks.types.reason)
         },
         tests_gate(
-            outcome.tests_enforced,
-            outcome.tests_pass,
-            &outcome.tests_reason,
+            outcome.checks.tests.enforced,
+            outcome.checks.tests.pass,
+            &outcome.checks.tests.reason,
         ),
         crap_gate(
-            outcome.crap_coverage_complete,
-            outcome.crap_over,
-            outcome.crap_untested,
+            outcome.crap.coverage_complete,
+            outcome.crap.over,
+            outcome.crap.untested,
             request.config.gates.new_fn_untested_cc,
         ),
         advisory_detail(
             "sca",
-            outcome.sca.total(),
+            outcome.checks.sca.total(),
             &sca_detail(
-                outcome.sca.undeclared,
-                outcome.sca.hallucinated,
-                outcome.sca.unresolved,
+                outcome.checks.sca.undeclared,
+                outcome.checks.sca.hallucinated,
+                outcome.checks.sca.unresolved,
             ),
         ),
-        gate("lint", outcome.lint_pass, &outcome.lint_reason),
+        gate(
+            "lint",
+            outcome.checks.lint.pass,
+            &outcome.checks.lint.reason,
+        ),
         gate(
             "secrets",
-            outcome.secret_errors == 0,
-            &if outcome.secret_errors == 0 {
+            outcome.checks.secret_errors == 0,
+            &if outcome.checks.secret_errors == 0 {
                 String::new()
             } else {
-                format!("{} secrets", outcome.secret_errors)
+                format!("{} secrets", outcome.checks.secret_errors)
             },
         ),
     ];
@@ -809,13 +813,13 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
             loc_changed: 0,
             files_changed: 0,
             coverage_changed: 0.0,
-            crap_max: outcome.crap_max,
-            crap_over_threshold: outcome.crap_over,
-            hallucinated_imports: outcome.sca.hallucinated,
-            undeclared_dependencies: outcome.sca.undeclared,
+            crap_max: outcome.crap.crap_max,
+            crap_over_threshold: outcome.crap.over,
+            hallucinated_imports: outcome.checks.sca.hallucinated,
+            undeclared_dependencies: outcome.checks.sca.undeclared,
         },
         threshold: request.config.gates.crap_threshold,
-        worst: outcome.crap_worst,
+        worst: outcome.crap.worst,
         mutation: MutationSection::skipped(),
         spec: SpecSection::empty(),
         intent: request.intent.clone(),
@@ -1460,34 +1464,44 @@ fn finish(mut draft: Draft) -> AnalyzeOutput {
     let exit_failed = sc_core::exit_code_fails(&draft.gates, &draft.fail_on);
     let scores = compute_scores(&draft.findings);
     let scorecard = Scorecard {
-        version: SCORECARD_VERSION.to_string(),
-        id: sc_core::new_scorecard_id(),
-        repo: draft.repo,
-        pack: draft.pack,
-        test_selection: draft.test_selection,
-        git: draft.git,
-        scope: Scope {
-            mode: draft.mode,
-            paths: draft.paths,
-            base: draft.base,
-            other_paths: draft.other_paths,
+        identity: sc_core::ScorecardIdentity {
+            version: SCORECARD_VERSION.to_string(),
+            id: sc_core::new_scorecard_id(),
+            repo: draft.repo,
+            pack: draft.pack,
+            test_selection: draft.test_selection,
         },
-        intent: draft.intent,
+        context: sc_core::ScorecardContext {
+            git: draft.git,
+            intent: draft.intent,
+            scope: Scope {
+                mode: draft.mode,
+                paths: draft.paths,
+                base: draft.base,
+                other_paths: draft.other_paths,
+            },
+        },
         verdict: if verdict_failed { "fail" } else { "pass" }.to_string(),
-        engines_run: draft.ran,
-        engines_skipped: draft.skipped,
-        scores,
-        gates: draft.gates,
-        metrics: draft.metrics,
-        crap: CrapSection {
-            threshold: draft.threshold,
-            worst: draft.worst,
+        engines: sc_core::ScorecardEngines {
+            engines_run: draft.ran,
+            engines_skipped: draft.skipped,
         },
-        mutation: draft.mutation,
-        findings: draft.findings,
-        generated_files_warning: draft.generated_files_warning,
-        spec: draft.spec,
-        llm: draft.llm,
+        measures: sc_core::ScorecardMeasures {
+            scores,
+            gates: draft.gates,
+            metrics: draft.metrics,
+        },
+        sections: sc_core::ScorecardSections {
+            crap: CrapSection {
+                threshold: draft.threshold,
+                worst: draft.worst,
+            },
+            mutation: draft.mutation,
+            findings: draft.findings,
+            generated_files_warning: draft.generated_files_warning,
+            spec: draft.spec,
+            llm: draft.llm,
+        },
         runs: draft.runs,
     };
     write_last_scorecard(&draft.root, &scorecard);
@@ -3173,11 +3187,12 @@ mod tests {
         });
         let types = output
             .scorecard
+            .measures
             .gates
             .iter()
             .find(|gate| gate.id == "types")
             .unwrap();
-        assert!(!types.pass, "{:?}", output.scorecard.findings);
+        assert!(!types.pass, "{:?}", output.scorecard.sections.findings);
         assert!(types.enforced);
         assert!(output.scorecard.runs.iter().any(|run| {
             run.command.contains("cargo check") && run.command.contains("--workspace")
@@ -3219,6 +3234,7 @@ mod tests {
         assert!(
             !command_root
                 .scorecard
+                .measures
                 .gates
                 .iter()
                 .find(|gate| gate.id == "lint")
@@ -3238,6 +3254,7 @@ mod tests {
         assert!(
             command_member
                 .scorecard
+                .measures
                 .gates
                 .iter()
                 .find(|gate| gate.id == "lint")
@@ -3265,18 +3282,20 @@ mod tests {
         });
         let types = output
             .scorecard
+            .measures
             .gates
             .iter()
             .find(|gate| gate.id == "types")
             .unwrap();
-        assert!(types.pass, "{:?}", output.scorecard.findings);
+        assert!(types.pass, "{:?}", output.scorecard.sections.findings);
         let tests = output
             .scorecard
+            .measures
             .gates
             .iter()
             .find(|gate| gate.id == "tests")
             .unwrap();
-        assert!(tests.pass, "{:?}", output.scorecard.findings);
+        assert!(tests.pass, "{:?}", output.scorecard.sections.findings);
         assert!(output.scorecard.runs.iter().any(|run| {
             run.engine == "compile"
                 && run.command == "cargo check --message-format=json"
@@ -3285,7 +3304,7 @@ mod tests {
         assert!(output.scorecard.runs.iter().any(|run| {
             run.engine == "tests" && run.command == "cargo test" && run.exit_code == Some(0)
         }));
-        assert_eq!(output.scorecard.scope.paths, vec!["src/lib.rs"]);
+        assert_eq!(output.scorecard.context.scope.paths, vec!["src/lib.rs"]);
         assert!(!output
             .scorecard
             .runs
@@ -3326,18 +3345,20 @@ mod tests {
         });
         let types = output
             .scorecard
+            .measures
             .gates
             .iter()
             .find(|gate| gate.id == "types")
             .unwrap();
-        assert!(types.pass, "{:?}", output.scorecard.findings);
+        assert!(types.pass, "{:?}", output.scorecard.sections.findings);
         let tests = output
             .scorecard
+            .measures
             .gates
             .iter()
             .find(|gate| gate.id == "tests")
             .unwrap();
-        assert!(tests.pass, "{:?}", output.scorecard.findings);
+        assert!(tests.pass, "{:?}", output.scorecard.sections.findings);
         assert!(output.scorecard.runs.iter().any(|run| {
             run.command.contains("cargo check") && run.command.contains("--workspace")
         }));
@@ -3366,7 +3387,7 @@ mod tests {
         });
         assert_eq!(output.status, RunStatus::AnalyzerError);
         assert_eq!(output.scorecard.verdict, "fail");
-        assert!(output.scorecard.findings.iter().any(|finding| {
+        assert!(output.scorecard.sections.findings.iter().any(|finding| {
             finding.rule == "engine.unavailable"
                 && finding.message.contains("--pack")
                 && finding.message.contains("analyzer.toml")
@@ -3550,8 +3571,11 @@ mod tests {
             intent: None,
             progress: None,
         });
-        assert!(!output.scorecard.git.dirty);
-        assert_eq!(output.scorecard.git.head.as_ref().unwrap().len(), 40);
+        assert!(!output.scorecard.context.git.dirty);
+        assert_eq!(
+            output.scorecard.context.git.head.as_ref().unwrap().len(),
+            40
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

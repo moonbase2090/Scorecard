@@ -25,7 +25,12 @@ impl Outcome {
         if sc_core::report_verdict(card) != "pass" {
             return Outcome::Fail;
         }
-        let provided: Vec<_> = card.gates.iter().filter(|gate| provided(gate)).collect();
+        let provided: Vec<_> = card
+            .measures
+            .gates
+            .iter()
+            .filter(|gate| provided(gate))
+            .collect();
         let failing = provided.iter().filter(|gate| !gate.pass).count();
         if failing == 0 {
             Outcome::Pass
@@ -67,7 +72,10 @@ fn provided(gate: &sc_core::Gate) -> bool {
 /// coverage still leaves measured rows scored; only a missing coverage run
 /// means no CRAP numbers are reported at all.
 pub(crate) fn coverage_measured(card: &Scorecard) -> bool {
-    card.engines_run.iter().any(|engine| engine == "coverage")
+    card.engines
+        .engines_run
+        .iter()
+        .any(|engine| engine == "coverage")
 }
 
 /// One sentence for every renderer when coverage was not measured.
@@ -78,11 +86,11 @@ pub(crate) const COVERAGE_NOT_MEASURED: &str =
 /// other source paths remain in the tree. `None` when not a diff run or when
 /// the tree count is unknown.
 pub(crate) fn rest_of_tree(card: &Scorecard) -> Option<String> {
-    if card.scope.mode != "diff" {
+    if card.context.scope.mode != "diff" {
         return None;
     }
-    let other = card.scope.other_paths?;
-    let scored = card.scope.paths.len() as u64;
+    let other = card.context.scope.other_paths?;
+    let scored = card.context.scope.paths.len() as u64;
     Some(format!(
         "{} in this diff; {} other {} in the tree",
         plural(scored as usize, "path", "paths"),
@@ -93,11 +101,11 @@ pub(crate) fn rest_of_tree(card: &Scorecard) -> Option<String> {
 
 /// Short terminal form of `rest_of_tree`; fits 80 columns.
 pub(crate) fn rest_of_tree_short(card: &Scorecard) -> Option<String> {
-    if card.scope.mode != "diff" {
+    if card.context.scope.mode != "diff" {
         return None;
     }
-    let other = card.scope.other_paths?;
-    let scored = card.scope.paths.len() as u64;
+    let other = card.context.scope.other_paths?;
+    let scored = card.context.scope.paths.len() as u64;
     Some(format!(
         "{scored} path{} in this diff; {other} other in the tree",
         if scored == 1 { "" } else { "s" }
@@ -108,7 +116,7 @@ pub(crate) fn rest_of_tree_short(card: &Scorecard) -> Option<String> {
 /// count. Say what the number covers and where the tree total lives
 /// rather than inventing one. `None` outside diff scope.
 pub(crate) fn diff_baseline(card: &Scorecard) -> Option<String> {
-    if card.scope.mode != "diff" {
+    if card.context.scope.mode != "diff" {
         return None;
     }
     let tree = match base_branch(card) {
@@ -118,7 +126,7 @@ pub(crate) fn diff_baseline(card: &Scorecard) -> Option<String> {
     Some(format!(
         "diff scope: {} over threshold in this diff. The tree-wide count is on {tree}.",
         plural(
-            card.metrics.crap_over_threshold as usize,
+            card.measures.metrics.crap_over_threshold as usize,
             "function",
             "functions"
         )
@@ -127,7 +135,7 @@ pub(crate) fn diff_baseline(card: &Scorecard) -> Option<String> {
 
 /// Short terminal form of `diff_baseline`; fits 80 columns.
 pub(crate) fn diff_baseline_short(card: &Scorecard) -> Option<String> {
-    if card.scope.mode != "diff" {
+    if card.context.scope.mode != "diff" {
         return None;
     }
     let tree = match base_branch(card) {
@@ -136,7 +144,7 @@ pub(crate) fn diff_baseline_short(card: &Scorecard) -> Option<String> {
     };
     Some(format!(
         "diff scope: {} over threshold here; tree count: {tree}",
-        card.metrics.crap_over_threshold
+        card.measures.metrics.crap_over_threshold
     ))
 }
 
@@ -144,7 +152,7 @@ pub(crate) fn diff_baseline_short(card: &Scorecard) -> Option<String> {
 /// `None` for a commit-ish base such as HEAD~1 or a SHA, which has no push
 /// run of its own to point at.
 fn base_branch(card: &Scorecard) -> Option<&str> {
-    let base = card.scope.base.as_deref()?;
+    let base = card.context.scope.base.as_deref()?;
     let branch = base.strip_prefix("origin/").unwrap_or(base);
     let commitish = branch.is_empty()
         || branch.starts_with("HEAD")

@@ -30,7 +30,7 @@ pub fn to_json(card: &Scorecard) -> String {
 /// assert!(md.contains("**Repo:** ."));
 /// ```
 fn push_llm_markdown(out: &mut String, card: &Scorecard) {
-    let Some(section) = card.llm.as_ref() else {
+    let Some(section) = card.sections.llm.as_ref() else {
         return;
     };
     out.push_str("## LLM\n\n");
@@ -74,7 +74,7 @@ pub fn to_markdown(card: &Scorecard) -> String {
 }
 
 fn push_markdown_generated_files(out: &mut String, card: &Scorecard) {
-    let Some(warning) = card.generated_files_warning.as_ref() else {
+    let Some(warning) = card.sections.generated_files_warning.as_ref() else {
         return;
     };
     out.push_str("## Generated files analyzed\n\n");
@@ -85,8 +85,8 @@ fn push_markdown_generated_files(out: &mut String, card: &Scorecard) {
 }
 
 fn push_markdown_header(out: &mut String, card: &Scorecard) {
-    let head = card.git.head.as_deref().unwrap_or("none");
-    let dirty = escape_markdown(&card.git.status_label());
+    let head = card.context.git.head.as_deref().unwrap_or("none");
+    let dirty = escape_markdown(&card.context.git.status_label());
     out.push_str("# scorecard\n\n");
     let outcome = Outcome::of(card);
     let verdict = sc_core::report_verdict(card);
@@ -98,16 +98,16 @@ fn push_markdown_header(out: &mut String, card: &Scorecard) {
         (_, Some(note)) => out.push_str(&format!("**Verdict:** {} ({note})\n\n", verdict)),
         (_, None) => out.push_str(&format!("**Verdict:** {}\n\n", verdict)),
     }
-    out.push_str(&format!("**Repo:** {}\n\n", card.repo));
+    out.push_str(&format!("**Repo:** {}\n\n", card.identity.repo));
     out.push_str(&format!("**Git:** {head} ({dirty})\n\n"));
-    let changed_paths = card.git.changed_paths_label();
+    let changed_paths = card.context.git.changed_paths_label();
     if !changed_paths.is_empty() {
         out.push_str(&format!(
             "**Changed paths:** {}\n\n",
             escape_markdown(&changed_paths)
         ));
     }
-    let paths = match card.scope.paths.len() {
+    let paths = match card.context.scope.paths.len() {
         0 => String::new(),
         1 => ", 1 path".into(),
         n => format!(", {n} paths"),
@@ -118,21 +118,21 @@ fn push_markdown_header(out: &mut String, card: &Scorecard) {
     };
     out.push_str(&format!(
         "**Scope:** {}{paths}.{rest} `loc_changed`, `files_changed`, and `coverage_changed` describe that scope.\n\n",
-        card.scope.mode
+        card.context.scope.mode
     ));
-    if let Some(intent) = &card.intent {
+    if let Some(intent) = &card.context.intent {
         if !intent.trim().is_empty() {
             out.push_str(&format!("**Intent:** {}\n\n", intent.trim()));
         }
     }
     out.push_str(&format!(
         "**Engines run:** {}\n\n",
-        card.engines_run.join(", ")
+        card.engines.engines_run.join(", ")
     ));
-    if !card.engines_skipped.is_empty() {
+    if !card.engines.engines_skipped.is_empty() {
         out.push_str(&format!(
             "**Engines skipped:** {}\n\n",
-            card.engines_skipped.join(", ")
+            card.engines.engines_skipped.join(", ")
         ));
     }
 }
@@ -151,7 +151,7 @@ fn escape_markdown(text: &str) -> String {
 fn push_markdown_gates(out: &mut String, card: &Scorecard) {
     out.push_str("## Gates\n\n");
     out.push_str("| Gate | Result | Enforced | Reason |\n|---|---|---|---|\n");
-    for gate in &card.gates {
+    for gate in &card.measures.gates {
         let result = if gate.pass { "pass" } else { "fail" };
         let enforced = if gate.enforced { "yes" } else { "no" };
         let reason = gate.reason.as_deref().unwrap_or("");
@@ -168,17 +168,17 @@ fn push_markdown_scores(out: &mut String, card: &Scorecard) {
     out.push_str("## Scores\n\n");
     out.push_str(&format!(
         "- correctness: {:.2}\n- efficiency: {:.2}\n- maintainability: {:.2}\n- security: {:.2}\n- a11y: {:.2}\n\n",
-        card.scores.correctness,
-        card.scores.efficiency,
-        card.scores.maintainability,
-        card.scores.security,
-        card.scores.a11y
+        card.measures.scores.correctness,
+        card.measures.scores.efficiency,
+        card.measures.scores.maintainability,
+        card.measures.scores.security,
+        card.measures.scores.a11y
     ));
 }
 
 fn push_markdown_crap(out: &mut String, card: &Scorecard) {
     out.push_str("## Worst CRAP\n\n");
-    out.push_str(&format!("Threshold {}.\n\n", card.crap.threshold));
+    out.push_str(&format!("Threshold {}.\n\n", card.sections.crap.threshold));
     if let Some(line) = crate::report::rest_of_tree(card) {
         out.push_str(&line);
         out.push_str("\n\n");
@@ -193,7 +193,7 @@ fn push_markdown_crap(out: &mut String, card: &Scorecard) {
         out.push_str("\n\n");
     }
     out.push_str("| CRAP | CC | Coverage | Symbol | File |\n|---|---|---|---|---|\n");
-    for row in &card.crap.worst {
+    for row in &card.sections.crap.worst {
         let coverage = if measured {
             format!("{}%", pct(row.coverage))
         } else {
@@ -208,7 +208,7 @@ fn push_markdown_crap(out: &mut String, card: &Scorecard) {
             cell(&row.file)
         ));
     }
-    if card.crap.worst.is_empty() {
+    if card.sections.crap.worst.is_empty() {
         out.push_str("| | | | | |\n");
     }
     out.push('\n');
@@ -216,10 +216,10 @@ fn push_markdown_crap(out: &mut String, card: &Scorecard) {
 
 fn push_markdown_findings(out: &mut String, card: &Scorecard) {
     out.push_str("## Findings\n\n");
-    if card.findings.is_empty() {
+    if card.sections.findings.is_empty() {
         out.push_str("None.\n");
     }
-    for finding in &card.findings {
+    for finding in &card.sections.findings {
         out.push_str(&format!("### {}\n\n", finding.id));
         out.push_str(&format!("- rule: `{}`\n", finding.rule));
         out.push_str(&format!("- severity: {}\n", finding.severity));
@@ -292,7 +292,7 @@ mod tests {
     #[test]
     fn generated_files_warning_appears_in_every_report_format() {
         let mut card = Scorecard::skeleton("demo", 30);
-        card.generated_files_warning = Some(
+        card.sections.generated_files_warning = Some(
             GeneratedFilesWarning::from_paths(vec![
                 "build/parser.rs".into(),
                 "src/generated.rs".into(),
@@ -340,12 +340,12 @@ mod tests {
         let mut card = Scorecard::skeleton("demo", 30);
         let off = to_markdown(&card);
         assert!(!off.contains("## LLM"));
-        card.llm = Some(LlmSection::skipped(
+        card.sections.llm = Some(LlmSection::skipped(
             "llm is on, but neither --spec nor --intent was given. Re-run with --spec PATH or --intent TEXT.",
         ));
         let skipped = to_markdown(&card);
         assert!(skipped.contains("neither --spec nor --intent"));
-        card.llm = Some(LlmSection::ran(
+        card.sections.llm = Some(LlmSection::ran(
             "ollama",
             "qwen2.5-coder",
             2,
@@ -365,8 +365,8 @@ mod tests {
             "Coverage was not measured, so no CRAP scores are reported and nothing is treated as 0% coverage."
         ));
         assert!(md.contains("| | | | | |"));
-        card.engines_run.push("coverage".into());
-        card.crap = CrapSection {
+        card.engines.engines_run.push("coverage".into());
+        card.sections.crap = CrapSection {
             threshold: 30,
             worst: vec![CrapFunction {
                 symbol: "classify".into(),
@@ -384,14 +384,14 @@ mod tests {
     #[test]
     fn markdown_keeps_measured_coverage_when_some_functions_lack_a_record() {
         let mut card = Scorecard::skeleton(".", 30);
-        card.engines_run.push("coverage".into());
-        card.gates.push(Gate {
+        card.engines.engines_run.push("coverage".into());
+        card.measures.gates.push(Gate {
             id: "crap".into(),
             pass: false,
             enforced: false,
             reason: Some("some functions have no coverage record and were not scored".into()),
         });
-        card.crap = CrapSection {
+        card.sections.crap = CrapSection {
             threshold: 30,
             worst: vec![CrapFunction {
                 symbol: "classify".into(),
@@ -410,7 +410,7 @@ mod tests {
     #[test]
     fn markdown_folds_the_raw_log_with_a_safe_fence() {
         let mut card = Scorecard::skeleton(".", 30);
-        card.findings.push(Finding {
+        card.sections.findings.push(Finding {
             id: "tests:failed".into(),
             rule: "test.failed".into(),
             engine: "tests".into(),
@@ -431,10 +431,10 @@ mod tests {
     #[test]
     fn markdown_rest_of_tree_names_paths_outside_the_diff() {
         let mut card = Scorecard::skeleton(".", 30);
-        card.scope.mode = "diff".into();
-        card.scope.paths = vec!["src/a.rs".into()];
-        card.scope.other_paths = Some(11);
-        card.scope.base = Some("main".into());
+        card.context.scope.mode = "diff".into();
+        card.context.scope.paths = vec!["src/a.rs".into()];
+        card.context.scope.other_paths = Some(11);
+        card.context.scope.base = Some("main".into());
         let md = to_markdown(&card);
         assert!(md.contains("1 path in this diff; 11 other paths in the tree"));
         assert!(md
@@ -444,9 +444,9 @@ mod tests {
     #[test]
     fn markdown_diff_scope_names_the_diff_count() {
         let mut card = Scorecard::skeleton(".", 30);
-        card.scope.mode = "diff".into();
-        card.scope.base = Some("main".into());
-        card.metrics.crap_over_threshold = 2;
+        card.context.scope.mode = "diff".into();
+        card.context.scope.base = Some("main".into());
+        card.measures.metrics.crap_over_threshold = 2;
         let md = to_markdown(&card);
         assert!(md.contains("## Worst CRAP\n\nThreshold 30.\n\ndiff scope: 2 functions over threshold in this diff. The tree-wide count is on the latest push run of main.\n"));
     }
@@ -454,7 +454,7 @@ mod tests {
     #[test]
     fn markdown_lists_evidence_functions() {
         let mut card = Scorecard::skeleton(".", 30);
-        card.findings.push(Finding {
+        card.sections.findings.push(Finding {
             id: "coverage:unmatched".into(),
             rule: "coverage.unmatched".into(),
             engine: "coverage".into(),
@@ -483,13 +483,13 @@ mod tests {
     fn markdown_includes_verdict_and_crap() {
         let mut card = Scorecard::skeleton(".", 30);
         card.verdict = "pass".into();
-        card.gates.push(Gate {
+        card.measures.gates.push(Gate {
             id: "crap".into(),
             pass: false,
             enforced: true,
             reason: Some("1 function over threshold".into()),
         });
-        card.crap = CrapSection {
+        card.sections.crap = CrapSection {
             threshold: 30,
             worst: vec![CrapFunction {
                 symbol: "classify".into(),
@@ -499,7 +499,7 @@ mod tests {
                 crap: 132.0,
             }],
         };
-        card.findings.push(Finding {
+        card.sections.findings.push(Finding {
             id: "crap:src/lib.rs:classify".into(),
             rule: "crap.over_threshold".into(),
             engine: "crap".into(),
@@ -522,7 +522,7 @@ mod tests {
     fn json_does_not_pass_when_an_enforced_gate_fails() {
         let mut card = Scorecard::skeleton(".", 30);
         card.verdict = "pass".into();
-        card.gates.push(Gate {
+        card.measures.gates.push(Gate {
             id: "lint".into(),
             pass: false,
             enforced: true,
@@ -537,7 +537,7 @@ mod tests {
     fn markdown_marks_pass_with_failures_report_only() {
         let mut card = Scorecard::skeleton(".", 30);
         card.verdict = "pass".into();
-        card.gates.push(Gate {
+        card.measures.gates.push(Gate {
             id: "crap".into(),
             pass: false,
             enforced: false,
@@ -551,13 +551,13 @@ mod tests {
     #[test]
     fn markdown_renders_dirty_git_intent_and_a_located_finding() {
         let mut card = Scorecard::skeleton("demo", 30);
-        card.git.head = Some("abc123".into());
-        card.git.dirty = true;
-        card.intent = Some("  keep the header contrast  ".into());
-        card.scope.paths = vec!["src/lib.rs".into()];
-        card.engines_skipped.clear();
-        card.engines_run.push("coverage".into());
-        card.llm = Some(LlmSection {
+        card.context.git.head = Some("abc123".into());
+        card.context.git.dirty = true;
+        card.context.intent = Some("  keep the header contrast  ".into());
+        card.context.scope.paths = vec!["src/lib.rs".into()];
+        card.engines.engines_skipped.clear();
+        card.engines.engines_run.push("coverage".into());
+        card.sections.llm = Some(LlmSection {
             status: "skipped".into(),
             backend: None,
             model: None,
@@ -566,20 +566,20 @@ mod tests {
             notes: Vec::new(),
             reason: None,
         });
-        card.gates.push(Gate {
+        card.measures.gates.push(Gate {
             id: "crap|gate".into(),
             pass: false,
             enforced: true,
             reason: Some("line one\nstill failing".into()),
         });
-        card.crap.worst.push(CrapFunction {
+        card.sections.crap.worst.push(CrapFunction {
             symbol: "render".into(),
             file: "src/lib.rs".into(),
             cc: 4,
             coverage: 0.5,
             crap: 6.5,
         });
-        card.findings.push(Finding {
+        card.sections.findings.push(Finding {
             id: "crap:src/lib.rs:render".into(),
             rule: "crap.over_threshold".into(),
             engine: "crap".into(),
@@ -608,7 +608,7 @@ mod tests {
         assert!(md.contains("- location: src/lib.rs:12:3"));
         assert!(md.contains("- disposition: fix"));
 
-        card.llm = Some(LlmSection {
+        card.sections.llm = Some(LlmSection {
             status: "ran".into(),
             backend: None,
             model: None,
@@ -617,7 +617,7 @@ mod tests {
             notes: (0..12).map(|index| format!("note {index}")).collect(),
             reason: None,
         });
-        card.scope.paths = (0..3).map(|index| format!("f{index}.rs")).collect();
+        card.context.scope.paths = (0..3).map(|index| format!("f{index}.rs")).collect();
         let md = to_markdown(&card);
         assert!(md.contains(", 3 paths"));
         assert!(md.contains("- note 9"));
@@ -629,7 +629,7 @@ mod tests {
     fn markdown_notes_advisory_misses_on_a_pass() {
         let mut card = Scorecard::skeleton(".", 30);
         card.verdict = "pass".into();
-        card.gates = vec![
+        card.measures.gates = vec![
             Gate {
                 id: "types".into(),
                 pass: true,
@@ -652,7 +652,7 @@ mod tests {
     fn sca_enforced_flag_matches_across_formats() {
         let mut card = Scorecard::skeleton("demo", 30);
         card.verdict = "pass".into();
-        card.gates = vec![
+        card.measures.gates = vec![
             Gate {
                 id: "types".into(),
                 pass: true,

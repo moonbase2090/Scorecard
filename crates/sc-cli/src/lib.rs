@@ -500,7 +500,7 @@ fn display_repo(path: &Path) -> String {
 
 fn early_card(repo: &str, rule: &str, engine: &str, message: &str) -> Scorecard {
     let mut card = Scorecard::skeleton(repo, 30);
-    card.version = SCORECARD_VERSION.to_string();
+    card.identity.version = SCORECARD_VERSION.to_string();
     let severity = if rule == "engine.unavailable" {
         "warning"
     } else {
@@ -511,7 +511,7 @@ fn early_card(repo: &str, rule: &str, engine: &str, message: &str) -> Scorecard 
     } else {
         format!("{engine}:{rule}")
     };
-    card.findings.push(Finding {
+    card.sections.findings.push(Finding {
         id,
         rule: rule.to_string(),
         engine: engine.to_string(),
@@ -524,7 +524,7 @@ fn early_card(repo: &str, rule: &str, engine: &str, message: &str) -> Scorecard 
         suggested_action: Some("Fix the analyzer invocation and re-run".into()),
         disposition: String::new(),
     });
-    card.gates = vec![
+    card.measures.gates = vec![
         Gate {
             id: "types".into(),
             pass: false,
@@ -544,9 +544,9 @@ fn early_card(repo: &str, rule: &str, engine: &str, message: &str) -> Scorecard 
             reason: Some("not run".into()),
         },
     ];
-    card.scores = compute_scores(&card.findings);
+    card.measures.scores = compute_scores(&card.sections.findings);
     card.verdict = "fail".into();
-    apply_disposition(&mut card.findings);
+    apply_disposition(&mut card.sections.findings);
     card
 }
 

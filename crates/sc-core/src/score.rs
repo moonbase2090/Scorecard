@@ -78,7 +78,7 @@ pub fn verdict_fails(gates: &[Gate]) -> bool {
 /// Resolve the report verdict without allowing an enforced failure to appear
 /// as a pass, even if a caller supplied an inconsistent scorecard.
 pub fn report_verdict(card: &Scorecard) -> &str {
-    if verdict_fails(&card.gates) {
+    if verdict_fails(&card.measures.gates) {
         "fail"
     } else {
         &card.verdict
@@ -141,7 +141,7 @@ mod tests {
     fn report_verdict_corrects_a_pass_with_an_enforced_failure() {
         let mut card = Scorecard::skeleton("demo", 30);
         card.verdict = "pass".into();
-        card.gates = vec![failing_gate("lint")];
+        card.measures.gates = vec![failing_gate("lint")];
         assert_eq!(report_verdict(&card), "fail");
     }
 
