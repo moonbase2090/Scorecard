@@ -28,6 +28,10 @@ inputs:
     description: Release to install, such as 0.1.6. Empty uses the action ref when it is a v* tag, otherwise the latest release.
     required: false
     default: ""
+  budget-seconds:
+    description: Wall-clock budget for pack commands passed to sc analyze
+    required: false
+    default: "120"
   build-from-source:
     description: Build sc from this checkout instead of installing a release
     required: false
@@ -97,10 +101,19 @@ runs:
           fi
           if [ -n "$want" ] && [ "$want" = "$got" ]; then
             tar -xzf "$tmp/$asset" -C "$tmp"
+            root="$tmp"
+            if [ -f "$tmp/sc" ]; then
+              : # flat layout (releases before nested packaging, e.g. v0.1.6)
+            elif comp=$(find "$tmp" -maxdepth 1 -type d -name 'sc-v*' | head -1) && [ -n "$comp" ]; then
+              root="$comp"
+            else
+              echo "archive ${asset} has no sc binary" >&2
+              exit 1
+            fi
             mkdir -p "$HOME/.local/bin"
-            install -m 755 "$tmp/sc" "$HOME/.local/bin/sc"
-            if [ -f "$tmp/sc-mcp" ]; then
-              install -m 755 "$tmp/sc-mcp" "$HOME/.local/bin/sc-mcp"
+            install -m 755 "$root/sc" "$HOME/.local/bin/sc"
+            if [ -f "$root/sc-mcp" ]; then
+              install -m 755 "$root/sc-mcp" "$HOME/.local/bin/sc-mcp"
             fi
             echo "$HOME/.local/bin" >> "$GITHUB_PATH"
             echo "installed sc v${ver} (${triple})"
@@ -120,6 +133,7 @@ runs:
         SC_MUTATION: ${{ inputs.mutation }}
         SC_SPEC: ${{ inputs.spec }}
         SC_DIFF: ${{ inputs.diff }}
+        SC_BUDGET: ${{ inputs.budget-seconds }}
       run: |
         case "$SC_FORMAT" in
           md) out=sc-results.md ;;
@@ -127,7 +141,7 @@ runs:
           sarif) out=sc-results.sarif ;;
           *) out=sc-results.html ;;
         esac
-        args=(analyze . --format "$SC_FORMAT" --out "$out" --fail-on "$SC_FAIL_ON" --mutation "$SC_MUTATION")
+        args=(analyze . --format "$SC_FORMAT" --out "$out" --fail-on "$SC_FAIL_ON" --mutation "$SC_MUTATION" --budget-seconds "$SC_BUDGET")
         if [ -n "$SC_SPEC" ]; then
           args+=(--spec "$SC_SPEC")
         fi

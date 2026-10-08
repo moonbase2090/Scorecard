@@ -6,11 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Release `.tar.gz` archives use a nested `sc-vX.Y.Z-<target>/` directory. `scripts/check-archive-layout.py` enforces the layout in release builds and CI. The GitHub Action still installs flat v0.1.6 archives.
+- The Scorecard action accepts `budget-seconds` and passes it to `sc analyze`.
 - Add `sc skills install` and once-per-version automatic skill installation for detected agents (#183).
 - Add contributor and review guidance against tautological tests (#195).
 
 ### Changed
 
+- README quickstart and [CI](docs/how-to/ci.md) install examples keep `sc` on `PATH` after download (no longer run from a temp dir that `trap` deletes). Generic CI docs install from `$RUNNER_TEMP`, not the checkout.
 - Show analysis progress steps in interactive sessions (#187).
 - Print a short summary for `--out` on terminals while preserving full report output for pipes (#188).
 - Raise the Rust MSRV to 1.88 and update the `ignore` dependency (#182, #190).
@@ -18,6 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- CI install examples use a fresh `mktemp -d` staging directory per download so a leftover flat `sc` binary cannot shadow a nested release bundle.
+- The `scorecard` GitHub Actions workflow installs the same fixture tooling as `check-ubuntu` and runs strict default gates with a 600-second analyze budget on pull requests (REVIEW_POLICY §6.13).
 - `test.failed` findings no longer use absolute panic paths outside the project (`/rustc/...`, the cargo registry, or other off-tree locations). The report points at the failing test's source file when it can be found, keeps the external location in the message and evidence, and never emits an absolute `file` in JSON or SARIF (#207).
 - Skip CDK-generated `cdk.out` directories during source discovery (#189).
 - Empty or blank `--fail-on` and `gates.fail_on` selections now fail with a configuration error. Use `none` by itself to return exit 0 for every gate. JSON and SARIF record the selected gates, and stderr names enforced failures omitted from the selection.

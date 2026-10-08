@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches: [main, develop]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -16,19 +17,49 @@ concurrency:
 jobs:
   scorecard:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Set up Rust for pull request source builds
-        if: github.event_name == 'pull_request'
+      - name: Set up Rust for source builds
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+      # Same fixture tooling as check-ubuntu/dogfood so strict self-analysis can pass.
+      - name: Install Rust coverage tooling
+        run: |
+          rustup component add llvm-tools-preview
+          cargo install cargo-llvm-cov --locked
+      - name: Install lint and coverage tools
+        run: |
+          pipx install ruff
+          sudo npm install -g c8 bats
+          sudo apt-get update && sudo apt-get install -y lcov
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: kcov-cache
+        with:
+          path: /usr/local/bin/kcov
+          key: kcov-v43-noble
+      - name: Build kcov from source
+        if: steps.kcov-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update && sudo apt-get install -y cmake g++ pkg-config libcurl4-openssl-dev zlib1g-dev libdw-dev libiberty-dev binutils-dev
+          curl -sSL https://github.com/SimonKagstrom/kcov/archive/refs/tags/v43.tar.gz | tar xz -C /tmp
+          cmake -S /tmp/kcov-43 -B /tmp/kcov-43/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/kcov-43/build -j"$(nproc)"
+          sudo cmake --install /tmp/kcov-43/build --prefix /usr/local
+          kcov --version
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: "8.3"
+          extensions: pcov
+          coverage: pcov
+          tools: phpunit, phpstan
       - uses: ./action
         with:
           format: all
-          fail-on: none
           diff: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
-          build-from-source: ${{ github.event_name == 'pull_request' }}
+          build-from-source: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+          budget-seconds: "600"
