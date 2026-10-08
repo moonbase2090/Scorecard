@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - Empty or blank `--fail-on` and `gates.fail_on` selections now fail with a configuration error. Use `none` by itself to return exit 0 for every gate. JSON and SARIF record the selected gates, and stderr names enforced failures omitted from the selection.
+- The secrets scan skips files that begin with ELF, Mach-O, PE, WebAssembly, or `ar` archive magics instead of lossy-scanning release binaries (for example `sc` and `sc-mcp`), including when the file is over the 64 MiB text scan cap. Reports `secrets.skipped_object` (info). NUL-only prefixes still do not skip (#155).
 
 ## [0.1.6] - 2026-09-30
 

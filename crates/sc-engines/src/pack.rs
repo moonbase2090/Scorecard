@@ -235,7 +235,11 @@ pub fn text_secrets_with_generated(
     let mut oversized = Vec::new();
     for (path, rel, len) in big_text {
         if len > MAX_TEXT_BYTES {
-            oversized.push(rel);
+            if file_starts_with_object_magic(&path) {
+                findings.push(skipped_object_file(&rel));
+            } else {
+                oversized.push(rel);
+            }
             continue;
         }
         scan_file(&path, &rel, &mut findings);
@@ -256,8 +260,87 @@ fn scan_file(path: &Path, rel: &str, findings: &mut Vec<sc_core::Finding>) {
             return;
         }
     };
+    if file_has_object_magic(&bytes) {
+        findings.push(skipped_object_file(rel));
+        return;
+    }
     let text = String::from_utf8_lossy(&bytes);
     findings.extend(crate::secrets::secrets_in_text(&text, rel));
+}
+
+/// Read only a prefix large enough for PE `e_lfanew` and the PE signature.
+fn file_starts_with_object_magic(path: &Path) -> bool {
+    use std::io::Read;
+    let mut file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(_) => return false,
+    };
+    let mut prefix = [0u8; 512];
+    let read = match file.read(&mut prefix) {
+        Ok(n) => n,
+        Err(_) => return false,
+    };
+    file_has_object_magic(&prefix[..read])
+}
+
+/// Recognized executable / archive magics. A leading NUL pair alone is not enough (#155).
+fn file_has_object_magic(bytes: &[u8]) -> bool {
+    if bytes.starts_with(b"\x7fELF") {
+        return true;
+    }
+    if bytes.starts_with(b"\0asm") {
+        return true;
+    }
+    if bytes.starts_with(b"!<arch>\n") {
+        return true;
+    }
+    if bytes.len() >= 4 {
+        let be = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        let le = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        const MH_MAGIC: u32 = 0xfeed_face;
+        const MH_CIGAM: u32 = 0xcefa_edfe;
+        const MH_MAGIC_64: u32 = 0xfeed_facf;
+        const MH_CIGAM_64: u32 = 0xcffa_edfe;
+        const FAT_MAGIC: u32 = 0xcafe_babe;
+        const FAT_CIGAM: u32 = 0xbebafeca;
+        if matches!(
+            be,
+            MH_MAGIC | MH_CIGAM | MH_MAGIC_64 | MH_CIGAM_64 | FAT_MAGIC | FAT_CIGAM
+        ) || matches!(
+            le,
+            MH_MAGIC | MH_CIGAM | MH_MAGIC_64 | MH_CIGAM_64 | FAT_MAGIC | FAT_CIGAM
+        ) {
+            return true;
+        }
+    }
+    is_pe_image(bytes)
+}
+
+fn is_pe_image(bytes: &[u8]) -> bool {
+    if !bytes.starts_with(b"MZ") || bytes.len() < 0x40 {
+        return false;
+    }
+    let pe_offset = u32::from_le_bytes(bytes[0x3c..0x40].try_into().unwrap_or([0, 0, 0, 0]));
+    let pe_offset = pe_offset as usize;
+    bytes.len() >= pe_offset + 4 && bytes[pe_offset..pe_offset + 4] == *b"PE\0\0"
+}
+
+fn skipped_object_file(rel: &str) -> sc_core::Finding {
+    sc_core::Finding {
+        id: format!("secrets:skipped-object:{rel}"),
+        rule: "secrets.skipped_object".into(),
+        engine: "secrets".into(),
+        severity: "info".into(),
+        file: rel.to_string(),
+        span: None,
+        symbol: None,
+        message: format!(
+            "skipped {rel} because it looks like a binary or object file (ELF, Mach-O, PE, WebAssembly, or ar archive), so the secrets scan did not read its contents"
+        ),
+        evidence: serde_json::json!({ "reason": "object_magic" }),
+        suggested_action: None,
+        disposition: String::new(),
+    }
 }
 
 fn unreadable(rel: &str, err: &std::io::Error) -> sc_core::Finding {
@@ -781,6 +864,63 @@ mod tests {
         assert!(
             findings.iter().any(|finding| {
                 finding.file == "config.js" && finding.rule == "secrets.aws_access_key"
+            }),
+            "{findings:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn elf_magic_skips_lossy_scan_for_runtime_tokens() {
+        let tail = ["Ab", "3k", "Qm", "9Z", "nR", "4p", "Lx", "7w"]
+            .iter()
+            .cycle()
+            .take(18)
+            .copied()
+            .collect::<String>();
+        let token = format!("ghp_{tail}");
+        let root = temp("secrets-elf-magic");
+        let mut bytes = vec![0x7f, b'E', b'L', b'F'];
+        bytes.resize(4 + 64, 0);
+        bytes.extend(token.as_bytes());
+        fs::write(root.join("tool"), &bytes).unwrap();
+        let findings = text_secrets(&root, &[]);
+        assert!(
+            !findings.iter().any(|finding| {
+                finding.file == "tool"
+                    && finding.severity == "error"
+                    && finding.rule.starts_with("secrets.")
+            }),
+            "{findings:?}"
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.file == "tool" && finding.rule == "secrets.skipped_object"),
+            "{findings:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn oversized_elf_is_skipped_not_partial() {
+        let tail = "x".repeat(32);
+        let token = format!("ghp_{tail}");
+        let root = temp("secrets-oversized-elf");
+        let mut bytes = vec![0x7f, b'E', b'L', b'F'];
+        bytes.resize(MAX_TEXT_BYTES as usize + 1, 0);
+        bytes.extend(token.as_bytes());
+        fs::write(root.join("big"), &bytes).unwrap();
+        let findings = text_secrets(&root, &[]);
+        assert!(
+            !findings
+                .iter()
+                .any(|finding| finding.rule == "secrets.partial"),
+            "{findings:?}"
+        );
+        assert!(
+            findings.iter().any(|finding| {
+                finding.file == "big" && finding.rule == "secrets.skipped_object"
             }),
             "{findings:?}"
         );

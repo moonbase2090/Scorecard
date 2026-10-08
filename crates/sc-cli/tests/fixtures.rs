@@ -1152,6 +1152,57 @@ fn node_not_found_output_fails_the_tests_gate() {
     );
 }
 
+#[test]
+fn committed_sc_binary_does_not_flag_secrets_on_sc() {
+    let root = std::env::temp_dir().join(format!("sc-secrets-binary-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("src/lib.rs"), "pub fn ok() {}\n").unwrap();
+    std::fs::copy(env!("CARGO_BIN_EXE_sc"), root.join("sc")).expect("copy sc binary");
+    let git = |args: &[&str]| {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args(args)
+            .output()
+            .expect("git");
+        assert!(output.status.success(), "git {args:?}: {output:?}");
+    };
+    git(&["init", "-q"]);
+    git(&["add", "-A"]);
+    git(&[
+        "-c",
+        "user.name=Scorecard test",
+        "-c",
+        "user.email=sc-test@example.com",
+        "commit",
+        "-q",
+        "-m",
+        "init",
+    ]);
+    let root_str = root.to_str().expect("utf-8 temp path");
+    let (_code, card, _, stderr) = analyze(&[root_str, "--format", "json"]);
+    let bad_on_sc = card["findings"]
+        .as_array()
+        .unwrap_or_else(|| panic!("findings array: {card} stderr={stderr}"))
+        .iter()
+        .filter(|finding| {
+            finding["file"].as_str() == Some("sc")
+                && finding["severity"].as_str() == Some("error")
+                && finding["rule"]
+                    .as_str()
+                    .is_some_and(|rule| rule.starts_with("secrets."))
+        })
+        .collect::<Vec<_>>();
+    assert!(bad_on_sc.is_empty(), "{bad_on_sc:?} card={card}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 fn sc_with_home(home: &std::path::Path, args: &[&str]) -> (i32, String, String) {
     let output = Command::new(env!("CARGO_BIN_EXE_sc"))
         .env("HOME", home)
