@@ -59,7 +59,8 @@ struct AnalyzeArgs {
     #[arg(long, value_name = "PACK")]
     pack: Option<String>,
     /// Score only the git diff against BASE. Omit BASE for AUTO (HEAD~1, else
-    /// main, else master); AUTO exits 2 when none resolve.
+    /// main, else master). A candidate that is HEAD itself is skipped. AUTO
+    /// and a missing explicit BASE exit 2 with verdict fail.
     #[arg(long, num_args = 0..=1, default_missing_value = "AUTO")]
     diff: Option<String>,
     /// Compare `--diff` BASE to this commit instead of the worktree.
@@ -381,6 +382,7 @@ fn emit(
             );
         }
     }
+    note_unresolved_diff_base(card, status);
     let body = match stdout_body_format(view.stdout_format, out.is_some(), view.tty) {
         "md" => md,
         "sarif" => sarif,
@@ -393,6 +395,21 @@ fn emit(
     };
     let _ = writeln!(stdout, "{body}");
     code
+}
+
+fn note_unresolved_diff_base(card: &Scorecard, status: RunStatus) {
+    if status != RunStatus::AnalyzerError {
+        return;
+    }
+    let Some(finding) = card.sections.findings.iter().find(|finding| {
+        finding.rule == "engine.unavailable"
+            && (finding.message.contains("fetch-depth")
+                || finding.message.contains("ref not found"))
+    }) else {
+        return;
+    };
+    let line = finding.message.replace(['\n', '\r'], " ");
+    let _ = writeln!(io::stderr(), "{line}");
 }
 
 fn write_reports(
