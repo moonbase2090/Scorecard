@@ -55,6 +55,70 @@ Test value
 
 Findings use the existing `findings[]` array with `engine` set to `test_value` or the legacy `mutation` engine where noted below.
 
+## Two-stage findings (deterministic + optional model re-check)
+
+Some checks are cheap to run but noisy; others need judgment. Scorecard uses a **two-stage** pipeline:
+
+1. **Stage A — deterministic detectors** run on every analyze (regex, AST, git diff rules). They emit **candidate** findings with `verification: unverified` (or omit verification until stage B runs).
+2. **Stage B — optional model re-check** runs only on stage-A candidates when the user configures an LLM endpoint and key (same configuration family as `--llm`, with a dedicated **low-cost** profile for short yes/no classification). The model sees the candidate, a minimal code excerpt, and project context (see [`.scorecard/INFO.md`](#scorecardinfomd-project-context) below). It marks each candidate **confirmed** or **dismissed** with a one-line reason in `evidence.verification`.
+
+Rules:
+
+- With **no** model configured, candidates stay **unverified** in the report. They are never dropped silently and cannot enforce a gate until MB2090 approves gating and the user opts in.
+- With a model configured, only **confirmed** candidates count toward a future `test_value` gate; **dismissed** candidates remain visible as informational (so teams can audit false dismissals).
+- Stage B is **bounded**: at most *N* candidates per run (configurable default, e.g. 20), smallest excerpts first, hard token cap, shares the analyze time budget.
+
+**Where this applies in v1 design:**
+
+| Signal | Stage A | Stage B (optional) |
+|---|---|---|
+| Tautology / empty assertions | AST rules | Re-check “is this a real property test?” |
+| Test weakening in diff | Diff + AST | Re-check “intentional relaxation vs gaming CI?” |
+| Secrets (existing engine) | Pattern matchers | Re-check “credential vs test fixture / example token?” |
+
+Mutation survivors stay **deterministic** (stage A only): a surviving mutant is a fact from `cargo mutants`, not a heuristic.
+
+Example finding shape after stage B:
+
+```json
+{
+  "rule": "test_value.tautologous_test",
+  "severity": "warning",
+  "verification": "confirmed",
+  "evidence": {
+    "verification": { "status": "confirmed", "reason": "Expected value is produced only by calling the function under test." }
+  }
+}
+```
+
+## `.scorecard/INFO.md` (project context)
+
+Repositories may commit **`.scorecard/INFO.md`** (Markdown, versioned with the repo) describing how testing works *in this project*. Scorecard reads it when present; missing file means built-in defaults only.
+
+**Uses:**
+
+- **Model-assisted checks** (stage B): prepended as system context so re-checks know legitimate patterns (e.g. “integration tests use `TestServer` and may sleep 200ms”).
+- **Deterministic checks**: optional structured hints in a fenced `scorecard` YAML block at the top (see example) for paths, test layers, and allowlisted patterns.
+
+**Example file** (`.scorecard/INFO.md`):
+
+Prose paragraph describing layers and CI conventions, then an optional machine-readable block:
+
+```yaml
+test_layers:
+  unit: ["src/**"]
+  integration: ["tests/*.rs"]
+  e2e: ["tests/e2e/**"]
+allow_patterns:
+  - id: fixture_token
+    reason: Test API keys in tests/fixtures/ are non-secret placeholders.
+    paths: ["tests/fixtures/**"]
+```
+
+More prose (e.g. “Do not treat `insta` snapshot updates under `crates/*/snapshots/` as weakening when only the widget crate changed.”).
+
+Deterministic engines must not **require** this file; it only reduces false positives where teams document conventions.
+
 ## Sub-signals
 
 ### 1. Mutation (diff-scoped) — deliverable 2
@@ -176,6 +240,11 @@ Driven by the [ranked shortlist](../research/testing-antipatterns.md#ranked-buil
 4. Tautology: assertion-free and SUT-derived expected values (leaf or trunk) — **P1**.
 5. Per-test value and mix (trunk) — **P1/P2**.
 6. Sleep/timing lint, snapshot churn, mock tautologies, flake/order — future, mostly out of scope v1.
+
+## Future considerations (design only)
+
+- **Per-repo detector extensions:** optional rule files under `.scorecard/` (e.g. additional regex or AST hooks) loaded when present; core rules remain in `sc` so installs from release behave predictably without custom files.
+- **Staged analyze:** run fast engines (compile, tests, lint, deterministic test-value, secrets stage A) for the primary verdict; schedule slow report-only engines (mutation, mutation attribution) as a second stage or separate CI job so the default report is not blocked on mutation budget. The JSON may gain `test_value.mutation.status: pending` until the slow stage completes when users opt into split mode.
 
 ## References
 
