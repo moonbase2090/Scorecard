@@ -4,11 +4,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Add `sc skills install` and once-per-version automatic skill installation for detected agents (#183).
+- Add contributor and review guidance against tautological tests (#195).
+
+### Changed
+
+- Show analysis progress steps in interactive sessions (#187).
+- Print a short summary for `--out` on terminals while preserving full report output for pipes (#188).
+- Raise the Rust MSRV to 1.88 and update the `ignore` dependency (#182, #190).
+- Extract internal clippy, Makefile, HTML report, and scorecard data handling into focused modules without changing the JSON contract (#192, #197–#199).
+
 ### Fixed
 
 - `test.failed` findings no longer use absolute panic paths outside the project (`/rustc/...`, the cargo registry, or other off-tree locations). The report points at the failing test's source file when it can be found, keeps the external location in the message and evidence, and never emits an absolute `file` in JSON or SARIF (#207).
+- Skip CDK-generated `cdk.out` directories during source discovery (#189).
 - Empty or blank `--fail-on` and `gates.fail_on` selections now fail with a configuration error. Use `none` by itself to return exit 0 for every gate. JSON and SARIF record the selected gates, and stderr names enforced failures omitted from the selection.
 - A bare `--diff` (AUTO base) no longer falls back to `HEAD` in checkouts with no resolvable history. Shallow or single-commit checkouts now exit 2 with a message naming the fix (`fetch-depth: 0` or `--diff BASE`) instead of silently scoring zero paths. An explicit `--diff HEAD` keeps working.
+- `--diff` skips an AUTO candidate (`HEAD~1`, `main`, or `master`) that is the same commit as `HEAD`, so a depth-1 clone of `main` or `master` exits 2 instead of scoring zero paths. A missing explicit base exits 2 with verdict `fail` and one stderr line that names the ref and `fetch-depth: 0`, instead of a raw git error and verdict `pass` (#203, #205).
 - The secrets scan uses `git ls-files` in a work tree so tracked files under `vendor/`, `dist/`, `build/`, and other walker-skipped directories are still checked. Ignored paths and `[scope] exclude` behave as before (#202).
 - The secrets scan skips files that begin with ELF, Mach-O, PE, WebAssembly, or `ar` archive magics instead of lossy-scanning release binaries (for example `sc` and `sc-mcp`), including when the file is over the 64 MiB text scan cap. Reports `secrets.skipped_object` (info). NUL-only prefixes still do not skip (#155).
 
