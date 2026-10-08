@@ -18,15 +18,12 @@ use sc_core::{Finding, RunRecord};
 
 use crate::command::{brief, run_cmd, CommandError};
 
-#[path = "python_imports.rs"]
-mod python_imports;
-
-use python_imports::{
+use crate::python_imports::{
     declaration_place, declared_elsewhere, dependency_modules, installed_modules, is_local,
     local_packages, normalize_mod, project_name, python_files,
 };
 
-pub use python_imports::import_roots;
+pub use crate::python_imports::import_roots;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ScaCounts {

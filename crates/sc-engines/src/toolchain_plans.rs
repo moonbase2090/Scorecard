@@ -5,7 +5,9 @@ use std::path::Path;
 
 use crate::pack::PackId;
 
-use super::{docker_wrap, go_cover_path, image_present, shell_quote, which, MakefileFlags, Step};
+use crate::toolchain::{
+    docker_wrap, go_cover_path, image_present, shell_quote, which, MakefileFlags, Step,
+};
 
 fn via(bin: &str, command: String) -> Option<String> {
     if which(bin) {
@@ -17,7 +19,7 @@ fn via(bin: &str, command: String) -> Option<String> {
     }
 }
 
-pub(super) fn plan_with_generated(
+pub(crate) fn plan_with_generated(
     pack: PackId,
     root: &Path,
     coverage: bool,
@@ -36,7 +38,7 @@ pub(super) fn plan_with_generated(
     }
 }
 
-pub(super) fn node_plan(
+pub(crate) fn node_plan(
     root: &Path,
     coverage: bool,
     exclude: &[String],
@@ -107,7 +109,7 @@ pub(super) fn node_plan(
     ]
 }
 
-pub(super) fn bash_plan(
+pub(crate) fn bash_plan(
     root: &Path,
     exclude: &[String],
     include_generated: &[String],
@@ -149,7 +151,7 @@ pub(super) fn bash_plan(
     ]
 }
 
-pub(super) fn go_plan(root: &Path) -> Vec<Step> {
+pub(crate) fn go_plan(root: &Path) -> Vec<Step> {
     let _ = std::fs::remove_file(go_cover_path(root));
     vec![
         Step {
@@ -182,7 +184,7 @@ pub(super) fn go_plan(root: &Path) -> Vec<Step> {
     ]
 }
 
-pub(super) fn java_plan_with_generated(
+pub(crate) fn java_plan_with_generated(
     root: &Path,
     exclude: &[String],
     include_generated: &[String],
@@ -257,11 +259,11 @@ pub(super) fn java_plan_with_generated(
 }
 
 #[cfg(test)]
-pub(super) fn java_plan(root: &Path) -> Vec<Step> {
+pub(crate) fn java_plan(root: &Path) -> Vec<Step> {
     java_plan_with_generated(root, &[], &[])
 }
 
-pub(super) fn csharp_plan() -> Vec<Step> {
+pub(crate) fn csharp_plan() -> Vec<Step> {
     let prefix = "mkdir -p .sc/coverage .sc/nuget .sc/dotnet && DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 DOTNET_CLI_HOME=\"$PWD/.sc/dotnet\" NUGET_PACKAGES=\"$PWD/.sc/nuget\"";
     vec![
         Step {
@@ -291,7 +293,7 @@ pub(super) fn csharp_plan() -> Vec<Step> {
     ]
 }
 
-pub(super) fn php_plan(root: &Path, exclude: &[String], include_generated: &[String]) -> Vec<Step> {
+pub(crate) fn php_plan(root: &Path, exclude: &[String], include_generated: &[String]) -> Vec<Step> {
     let files = list_files(root, &["php"], exclude, include_generated);
     vec![
         Step {
@@ -345,7 +347,7 @@ pub(super) fn php_plan(root: &Path, exclude: &[String], include_generated: &[Str
     ]
 }
 
-pub(super) fn cpp_plan_with_generated(
+pub(crate) fn cpp_plan_with_generated(
     root: &Path,
     exclude: &[String],
     include_generated: &[String],
@@ -395,7 +397,7 @@ pub(super) fn cpp_plan_with_generated(
 }
 
 #[cfg(test)]
-pub(super) fn cpp_plan(root: &Path) -> Vec<Step> {
+pub(crate) fn cpp_plan(root: &Path) -> Vec<Step> {
     cpp_plan_with_generated(root, &[], &[])
 }
 
@@ -464,7 +466,7 @@ fn php_test(bin: &str) -> String {
     )
 }
 
-pub(super) fn cpp_types_absent(compiler_present: bool, sources_empty: bool) -> &'static str {
+pub(crate) fn cpp_types_absent(compiler_present: bool, sources_empty: bool) -> &'static str {
     if compiler_present && sources_empty {
         "no .c, .cc, .cpp, or .cxx file to compile"
     } else {
@@ -480,7 +482,7 @@ fn types_enforced(root: &Path) -> bool {
 
 /// True when every compiler error is a missing header or file.
 /// An undeclared identifier or a syntax error returns false.
-pub(super) fn include_only_failure(text: &str) -> bool {
+pub(crate) fn include_only_failure(text: &str) -> bool {
     let mut saw_error = false;
     for line in text.lines() {
         let lower = line.to_ascii_lowercase();
@@ -527,7 +529,7 @@ fn cpp_absent(c_files: &[String], cxx_files: &[String]) -> String {
     missing_compiler_message(cc_missing, gxx_missing).into()
 }
 
-pub(super) fn missing_compiler_message(cc_missing: bool, gxx_missing: bool) -> &'static str {
+pub(crate) fn missing_compiler_message(cc_missing: bool, gxx_missing: bool) -> &'static str {
     match (cc_missing, gxx_missing) {
         (true, true) => "cc or g++ is not installed",
         (true, false) => "cc is not installed",
@@ -606,7 +608,7 @@ fn has_php_tests(root: &Path, exclude: &[String], include_generated: &[String]) 
 /// Wrap an npm test command so unloaded files are still measured at 0%.
 /// c8 and nyc both need `--all`; without it a never-required module disappears
 /// from the report and CRAP cannot fail on it (#120 / #79).
-pub(super) fn node_coverage_command(tool: &str, command: &str) -> String {
+pub(crate) fn node_coverage_command(tool: &str, command: &str) -> String {
     match tool {
         "c8" => format!(
             "mkdir -p .sc/coverage && c8 --all --reporter=json --reports-dir=.sc/coverage {command}"
@@ -628,7 +630,7 @@ fn npm_test(root: &Path) -> Option<String> {
     Some("npm test --silent".into())
 }
 
-pub(super) fn eslint_config(root: &Path) -> bool {
+pub(crate) fn eslint_config(root: &Path) -> bool {
     [
         "eslint.config.js",
         "eslint.config.cjs",
@@ -678,7 +680,7 @@ fn filter_ext(files: &[String], exts: &[&str]) -> Vec<String> {
 /// Current `tsc` also refuses file arguments when `tsconfig.json` is present,
 /// so that case extends the project config and lists every TypeScript file.
 /// JavaScript is syntax-checked separately.
-pub(super) fn tsc_and_node(has_tsconfig: bool, ts: &[String], js: &[String]) -> String {
+pub(crate) fn tsc_and_node(has_tsconfig: bool, ts: &[String], js: &[String]) -> String {
     let tsc = if has_tsconfig {
         let include = ts
             .iter()

@@ -5,17 +5,16 @@
 //! that runs is enforced.
 
 mod makefile;
-#[path = "toolchain_plans.rs"]
-mod toolchain_plans;
 
 #[cfg(test)]
 use makefile::makefile_text_uncertain;
-use makefile::MakefileFlags;
+pub(crate) use makefile::MakefileFlags;
 
-use self::toolchain_plans::include_only_failure;
+use crate::toolchain_plans;
+use crate::toolchain_plans::include_only_failure;
 
 #[cfg(test)]
-use self::toolchain_plans::{
+use crate::toolchain_plans::{
     cpp_plan, cpp_types_absent, eslint_config, go_plan, java_plan, missing_compiler_message,
     node_coverage_command, tsc_and_node,
 };
@@ -230,13 +229,13 @@ fn apply(root: &Path, deadline: Instant, step: Step, report: &mut ToolReport) {
     }
 }
 
-fn shell_quote(text: &str) -> String {
+pub(crate) fn shell_quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
 }
 
 const IMAGE: &str = "scorecard-tools:latest";
 
-fn image_present() -> bool {
+pub(crate) fn image_present() -> bool {
     use std::sync::OnceLock;
     static PRESENT: OnceLock<bool> = OnceLock::new();
     *PRESENT.get_or_init(|| {
@@ -262,7 +261,7 @@ fn desktop_socket() -> Option<String> {
     path.exists().then(|| path.to_string_lossy().to_string())
 }
 
-fn docker_wrap(script: &str) -> String {
+pub(crate) fn docker_wrap(script: &str) -> String {
     format!(
         "docker run --rm --network host --user \"$(id -u):$(id -g)\" -e HOME=/tmp -e CARGO_HOME=\"$PWD/.sc/cargo\" -e UV_CACHE_DIR=\"$PWD/.sc/uv\" -e PIP_CACHE_DIR=\"$PWD/.sc/pip\" -e GOCACHE=\"$PWD/.sc/go/cache\" -e GOMODCACHE=\"$PWD/.sc/go/mod\" -e GOPATH=\"$PWD/.sc/go\" -e GOTOOLCHAIN=local -v \"$PWD\":\"$PWD\" -w \"$PWD\" {IMAGE} sh -c {}",
         shell_quote(script)
@@ -328,7 +327,7 @@ fn docker_host(cmd: &mut Command) {
     }
 }
 
-fn which(name: &str) -> bool {
+pub(crate) fn which(name: &str) -> bool {
     Command::new("sh")
         .args(["-c", &format!("command -v {name} >/dev/null")])
         .status()

@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-pub(super) fn is_local(root: &Path, file: &Path, name: &str) -> bool {
+pub(crate) fn is_local(root: &Path, file: &Path, name: &str) -> bool {
     if name == "conftest" && conftest_above(root, file) {
         return true;
     }
@@ -195,7 +195,7 @@ fn push_rel(paths: &mut Vec<PathBuf>, root: &Path, raw: &str) {
     }
 }
 
-pub(super) fn installed_modules(root: &Path) -> BTreeSet<String> {
+pub(crate) fn installed_modules(root: &Path) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     for site in site_packages(root) {
         names.append(&mut site_module_names(&site));
@@ -277,7 +277,7 @@ fn push_sites(venv: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-pub(super) fn local_packages(root: &Path) -> BTreeSet<String> {
+pub(crate) fn local_packages(root: &Path) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     for base in [root.join("src"), root.to_path_buf()] {
         let Ok(entries) = std::fs::read_dir(&base) else {
@@ -295,7 +295,7 @@ pub(super) fn local_packages(root: &Path) -> BTreeSet<String> {
     names
 }
 
-pub(super) fn python_files(root: &Path) -> Vec<PathBuf> {
+pub(crate) fn python_files(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for dir in [root.join("src"), root.join("tests")] {
         collect_py(&dir, 0, &mut out);
@@ -509,7 +509,7 @@ fn optional_import_lines(text: &str) -> BTreeSet<u32> {
     skip
 }
 
-pub(super) fn declaration_place(root: &Path) -> String {
+pub(crate) fn declaration_place(root: &Path) -> String {
     if root.join("pyproject.toml").is_file() {
         "pyproject.toml".into()
     } else if root.join("requirements.txt").is_file() {
@@ -523,7 +523,7 @@ pub(super) fn declaration_place(root: &Path) -> String {
     }
 }
 
-pub(super) fn declared_elsewhere(root: &Path) -> BTreeSet<String> {
+pub(crate) fn declared_elsewhere(root: &Path) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     if let Ok(text) = std::fs::read_to_string(root.join("requirements.txt")) {
         names.extend(requirements_modules(&text));
@@ -630,7 +630,7 @@ fn setup_py_requires(text: &str) -> BTreeSet<String> {
     names
 }
 
-pub(super) fn project_name(text: &str) -> Option<String> {
+pub(crate) fn project_name(text: &str) -> Option<String> {
     let mut in_project = false;
     for line in text.lines() {
         let trimmed = strip_comment(line).trim();
@@ -647,7 +647,7 @@ pub(super) fn project_name(text: &str) -> Option<String> {
     None
 }
 
-pub(super) fn dependency_modules(text: &str) -> BTreeSet<String> {
+pub(crate) fn dependency_modules(text: &str) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     let mut in_project = false;
     let mut in_array = false;
@@ -732,6 +732,6 @@ fn strip_comment(line: &str) -> &str {
     }
 }
 
-pub(super) fn normalize_mod(name: &str) -> String {
+pub(crate) fn normalize_mod(name: &str) -> String {
     name.trim().replace('-', "_").to_ascii_lowercase()
 }
