@@ -75,39 +75,42 @@ fn generated_reports_do_not_mark_a_checkout_dirty_and_real_changes_are_named() {
             .output()
             .expect("run sc")
     };
-    let read_card = |stdout: &[u8]| {
-        serde_json::Deserializer::from_slice(stdout)
-            .into_iter::<serde_json::Value>()
-            .next()
-            .expect("stdout begins with a scorecard JSON value")
-            .expect("scorecard JSON parses")
+    let read_card = || {
+        serde_json::from_str::<serde_json::Value>(
+            &std::fs::read_to_string(root.join("scorecard.json")).expect("scorecard.json written"),
+        )
+        .expect("scorecard JSON parses")
     };
 
     let first = run();
-    let first_card = read_card(&first.stdout);
+    assert_short_summary(&String::from_utf8_lossy(&first.stdout), "scorecard.html");
+    let first_card = read_card();
     assert_eq!(first_card["git"]["dirty"], false);
     assert!(first_card["git"]["dirty_paths"].is_null());
 
     let second = run();
-    let second_card = read_card(&second.stdout);
-    assert_eq!(
-        second_card["git"]["dirty"],
-        false,
-        "{}",
-        String::from_utf8_lossy(&second.stdout)
-    );
+    let second_stdout = String::from_utf8_lossy(&second.stdout).to_string();
+    assert_short_summary(&second_stdout, "scorecard.html");
+    let second_card = read_card();
+    assert_eq!(second_card["git"]["dirty"], false, "{second_stdout}");
     assert!(second_card["git"]["dirty_paths"].is_null());
 
     std::fs::write(root.join("README.md"), "a real source change\n").unwrap();
     let dirty = run();
-    let dirty_card = read_card(&dirty.stdout);
+    let stdout = String::from_utf8_lossy(&dirty.stdout).to_string();
+    assert_short_summary(&stdout, "scorecard.html");
+    let dirty_card = read_card();
     assert_eq!(dirty_card["git"]["dirty"], true);
     assert_eq!(
         dirty_card["git"]["dirty_paths"],
         serde_json::json!(["README.md"])
     );
-    let stdout = String::from_utf8_lossy(&dirty.stdout);
-    assert!(stdout.contains("**Changed paths:** README.md"), "{stdout}");
+    assert!(stdout.contains("changed paths: README.md"), "{stdout}");
+    let markdown = std::fs::read_to_string(root.join("scorecard.md")).unwrap();
+    assert!(
+        markdown.contains("**Changed paths:** README.md"),
+        "{markdown}"
+    );
     let html = std::fs::read_to_string(root.join("scorecard.html")).unwrap();
     assert!(html.contains("changed: README.md"), "{html}");
 
@@ -184,30 +187,28 @@ fn generated_reports_do_not_mark_a_subdirectory_checkout_dirty() {
             .output()
             .expect("run sc")
     };
-    let read_card = |stdout: &[u8]| {
-        serde_json::Deserializer::from_slice(stdout)
-            .into_iter::<serde_json::Value>()
-            .next()
-            .expect("stdout begins with a scorecard JSON value")
-            .expect("scorecard JSON parses")
+    let read_card = || {
+        serde_json::from_str::<serde_json::Value>(
+            &std::fs::read_to_string(project.join("rep.json")).expect("rep.json written"),
+        )
+        .expect("scorecard JSON parses")
     };
 
     let first = run();
-    assert_eq!(read_card(&first.stdout)["git"]["dirty"], false);
+    assert_short_summary(&String::from_utf8_lossy(&first.stdout), "rep.json");
+    assert_eq!(read_card()["git"]["dirty"], false);
 
     let second = run();
-    let second_card = read_card(&second.stdout);
-    assert_eq!(
-        second_card["git"]["dirty"],
-        false,
-        "{}",
-        String::from_utf8_lossy(&second.stdout)
-    );
+    let second_stdout = String::from_utf8_lossy(&second.stdout).to_string();
+    assert_short_summary(&second_stdout, "rep.json");
+    let second_card = read_card();
+    assert_eq!(second_card["git"]["dirty"], false, "{second_stdout}");
     assert!(second_card["git"]["dirty_paths"].is_null());
 
     std::fs::write(project.join("README.md"), "a real source change\n").unwrap();
     let dirty = run();
-    let dirty_card = read_card(&dirty.stdout);
+    assert_short_summary(&String::from_utf8_lossy(&dirty.stdout), "rep.json");
+    let dirty_card = read_card();
     assert_eq!(dirty_card["git"]["dirty"], true);
     assert_eq!(
         dirty_card["git"]["dirty_paths"],
@@ -417,13 +418,17 @@ fn workspace_src_is_scored_from_member_crates() {
 fn good_crate_passes_and_has_the_scorecard_shape() {
     let out = std::env::temp_dir().join(format!("sc-good-{}.json", std::process::id()));
     let out_s = out.to_string_lossy().to_string();
-    let (code, card, stdout, stderr) = analyze(&[
+    let (code, stdout, stderr) = analyze_raw(&[
         "testdata/good_crate",
         "--budget-seconds",
         "120",
         "--out",
         &out_s,
     ]);
+    let written = std::fs::read_to_string(&out).unwrap();
+    let card: serde_json::Value = serde_json::from_str(&written).unwrap_or_else(|err| {
+        panic!("written report was not JSON ({err})\n{written}\nstdout:\n{stdout}");
+    });
     assert_eq!(code, 0, "stderr={stderr}\ncard={card}");
     assert_eq!(card["verdict"], "pass");
     assert_eq!(card["version"], "0.1");
@@ -465,8 +470,9 @@ fn good_crate_passes_and_has_the_scorecard_shape() {
     assert!(rules(&card)
         .iter()
         .all(|rule| *rule != "compile.error" && *rule != "test.failed"));
-    let written = std::fs::read_to_string(&out).unwrap();
-    assert_eq!(written.trim(), stdout.trim());
+    assert!(written.trim_start().starts_with('{'));
+    assert_short_summary(&stdout, &out_s);
+    assert_ne!(written.trim(), stdout.trim());
     let _ = std::fs::remove_file(&out);
 }
 
@@ -1048,6 +1054,22 @@ fn scrub_pretty(text: &str) -> String {
     out
 }
 
+/// `--out` prints the short summary on stdout and writes the raw report to the file.
+fn assert_short_summary(stdout: &str, report: &str) {
+    assert!(
+        stdout.lines().any(|line| line.starts_with("sc ")),
+        "stdout should be the short summary:\n{stdout}"
+    );
+    assert!(
+        stdout.contains(&format!("report: {report}")),
+        "stdout should name the written report:\n{stdout}"
+    );
+    assert!(
+        !stdout.trim_start().starts_with('{') && !stdout.contains("<!DOCTYPE html>"),
+        "stdout should not be the raw report:\n{stdout}"
+    );
+}
+
 fn analyze_raw(args: &[&str]) -> (i32, String, String) {
     let _guard = FIXTURE_LOCK.lock().unwrap_or_else(|err| err.into_inner());
     let output = Command::new(env!("CARGO_BIN_EXE_sc"))
@@ -1071,14 +1093,16 @@ fn html_format_writes_a_self_contained_report() {
     let (code, stdout, stderr) =
         analyze_raw(&["testdata/good_crate", "--format", "html", "--out", &out_s]);
     assert_eq!(code, 0, "stderr={stderr}\n{stdout}");
-    assert!(
-        stdout.trim_start().starts_with("<!DOCTYPE html>"),
-        "stdout is not html"
-    );
-    assert!(stdout.contains("PASS"), "missing verdict");
-    assert!(stdout.contains("worst crap"), "missing crap section");
     let written = std::fs::read_to_string(&out).unwrap();
-    assert_eq!(written.trim(), stdout.trim());
+    assert!(
+        written.trim_start().starts_with("<!DOCTYPE html>"),
+        "file is not html"
+    );
+    assert!(written.contains("PASS"), "missing verdict");
+    assert!(written.contains("worst crap"), "missing crap section");
+    assert_short_summary(&stdout, &out_s);
+    assert!(stdout.contains("PASS"), "summary missing verdict");
+    assert_ne!(written.trim(), stdout.trim());
     for marker in ["unpkg", "cdn.", "http://", "https://"] {
         assert!(!written.contains(marker), "report fetches {marker}");
     }
@@ -1092,9 +1116,8 @@ fn all_format_writes_an_html_sibling() {
     let (code, stdout, stderr) =
         analyze_raw(&["testdata/good_crate", "--format", "all", "--out", &out_s]);
     assert_eq!(code, 0, "stderr={stderr}");
-    // stdout stays JSON+Markdown, never HTML.
-    assert!(stdout.trim_start().starts_with('{'));
-    assert!(!stdout.contains("<!DOCTYPE html>"));
+    // `--out` prints the short summary. The raw formats land in sibling files.
+    assert_short_summary(&stdout, &out_s);
     let html = std::fs::read_to_string(out.with_extension("html")).unwrap();
     assert!(html.contains("<!DOCTYPE html>"));
     for ext in ["json", "md", "sarif", "html"] {
@@ -1116,9 +1139,12 @@ fn fail_on_changes_exit_code_without_hiding_enforced_failures_in_any_report() {
         "none",
     ]);
     assert_eq!(code, 0, "stderr={stderr}\n{stdout}");
+    assert_short_summary(&stdout, &out_s);
 
-    let markdown_start = stdout.find("\n# scorecard\n").expect("markdown output");
-    let card: serde_json::Value = serde_json::from_str(&stdout[..markdown_start]).unwrap();
+    let card: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(out.with_extension("json")).expect("json sibling written"),
+    )
+    .expect("json sibling parses");
     assert_eq!(card["verdict"], "fail", "{card}");
     let secrets_gate = card["gates"]
         .as_array()

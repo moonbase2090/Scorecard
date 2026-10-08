@@ -48,7 +48,14 @@ pub(crate) fn analyze_tree_with_generated(
     let (rels, workspace_root) =
         tree_source_rels_with_generated(root, exclude, include_generated, toolchain_pin);
     (
-        analyze_rels(root, &rels, perf_enabled, exclude, toolchain_pin),
+        analyze_rels_with_tree_rels(
+            root,
+            &rels,
+            perf_enabled,
+            exclude,
+            toolchain_pin,
+            Some(&rels),
+        ),
         workspace_root,
     )
 }
@@ -100,6 +107,17 @@ pub fn analyze_rels(
     exclude: &[String],
     toolchain_pin: &str,
 ) -> Vec<AnalyzedFile> {
+    analyze_rels_with_tree_rels(root, rels, perf_enabled, exclude, toolchain_pin, None)
+}
+
+fn analyze_rels_with_tree_rels(
+    root: &Path,
+    rels: &[String],
+    perf_enabled: bool,
+    exclude: &[String],
+    toolchain_pin: &str,
+    known_tree_rels: Option<&[String]>,
+) -> Vec<AnalyzedFile> {
     let cache_path = cache_path(root);
     let mut cache = read_cache(&cache_path);
     if cache.perf_enabled != perf_enabled {
@@ -117,8 +135,12 @@ pub fn analyze_rels(
         }
     }
     let (cfg_test_files, cfg_test_prefixes) = if perf_enabled {
-        let (tree_rels, _) = tree_source_rels(root, exclude, toolchain_pin);
-        cfg_test_coverage_from_tree(root, &tree_rels)
+        if let Some(tree_rels) = known_tree_rels {
+            cfg_test_coverage_from_tree(root, tree_rels, &texts)
+        } else {
+            let (tree_rels, _) = tree_source_rels(root, exclude, toolchain_pin);
+            cfg_test_coverage_from_tree(root, &tree_rels, &texts)
+        }
     } else {
         (
             std::collections::BTreeSet::new(),
@@ -159,18 +181,32 @@ pub fn analyze_rels(
 fn cfg_test_coverage_from_tree(
     root: &Path,
     tree_rels: &[String],
+    known_texts: &BTreeMap<String, String>,
 ) -> (
     std::collections::BTreeSet<String>,
     std::collections::BTreeSet<String>,
 ) {
     let mut declared = Vec::new();
     for rel in tree_rels {
+        if let Some(text) = known_texts.get(rel) {
+            append_cfg_test_paths(text, rel, &mut declared);
+            continue;
+        }
         let Ok(text) = fs::read_to_string(root.join(rel)) else {
             continue;
         };
-        declared.extend(sc_graph::out_of_line_cfg_test_paths_from_source(&text, rel));
+        append_cfg_test_paths(&text, rel, &mut declared);
     }
     sc_graph::cfg_test_coverage(declared)
+}
+
+fn append_cfg_test_paths(text: &str, rel: &str, declared: &mut Vec<String>) {
+    // Most production files have no cfg(test) declaration. Avoid reparsing
+    // those files after inspect_source has already parsed the selected text.
+    if !text.contains("cfg") || !text.contains("test") {
+        return;
+    }
+    declared.extend(sc_graph::out_of_line_cfg_test_paths_from_source(text, rel));
 }
 
 fn member_src_dirs(meta: Option<&CargoMetadata>) -> Vec<PathBuf> {

@@ -45,9 +45,8 @@ struct AnalyzeArgs {
     /// Omitted: `pretty` when stdout is a terminal, otherwise `json`.
     #[arg(long, value_parser = ["json", "pretty", "md", "sarif", "html", "all"])]
     format: Option<String>,
-    /// Also write the report to this path. When stdout is a terminal,
-    /// only a short summary plus the path prints; piped stdout still
-    /// gets the full report.
+    /// Also write the report to this path. Stdout prints a short summary.
+    /// Without this flag, stdout is the full report.
     #[arg(long)]
     out: Option<PathBuf>,
     /// Gates that set exit 1 when they fail. Use `none` by itself to suppress every gate failure.
@@ -131,12 +130,12 @@ struct View<'a> {
     tty: bool,
 }
 
-/// Pick what lands on stdout. When `--out` is set and stdout is a
-/// terminal, print the short human summary (which names the file written)
-/// instead of dumping the raw report. Piped stdout still gets the full
-/// report so `sc analyze --format json | jq .` is unchanged.
-fn stdout_body_format(stdout_format: &str, has_out: bool, tty: bool) -> &str {
-    if has_out && tty {
+/// Pick what lands on stdout. With `--out`, print the short summary in
+/// every environment and write the chosen format to the file. Without
+/// `--out`, stdout is the chosen format, so `sc analyze --format json | jq .`
+/// is unchanged.
+fn stdout_body_format(stdout_format: &str, has_out: bool, _tty: bool) -> &str {
+    if has_out {
         "pretty"
     } else {
         stdout_format
@@ -619,11 +618,11 @@ mod stdout_body_format_tests {
             ("json", true, true, "pretty"),
             ("all", true, true, "pretty"),
             ("pretty", true, true, "pretty"),
-            ("html", true, false, "html"),
-            ("md", true, false, "md"),
-            ("sarif", true, false, "sarif"),
-            ("json", true, false, "json"),
-            ("all", true, false, "all"),
+            ("html", true, false, "pretty"),
+            ("md", true, false, "pretty"),
+            ("sarif", true, false, "pretty"),
+            ("json", true, false, "pretty"),
+            ("all", true, false, "pretty"),
             ("html", false, true, "html"),
             ("json", false, true, "json"),
             ("json", false, false, "json"),

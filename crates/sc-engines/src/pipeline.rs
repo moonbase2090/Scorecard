@@ -530,10 +530,14 @@ fn analyze_unsupported(
         &request.config.scope.include_generated,
     );
     let mut findings = tools.findings;
-    findings.push(unavailable(
-        "sca",
-        "dependency check is not implemented for this pack",
-    ));
+    // Command packs have no dependency manifest to check. Recording that as a
+    // warning made every `--pack command` run look broken.
+    if pack != crate::pack::PackId::Command {
+        findings.push(unavailable(
+            "sca",
+            "dependency check is not implemented for this pack",
+        ));
+    }
     report(&request, "Checking secrets");
     let secrets = crate::pack::text_secrets_with_generated(
         &request.root,
@@ -703,6 +707,9 @@ fn analyze_unsupported(
         skipped: {
             if coverage.is_none() {
                 skipped.push("coverage".into());
+            }
+            if pack == crate::pack::PackId::Command {
+                skipped.push("sca".into());
             }
             skipped.push("complexity".into());
             skipped.push("llm".into());
@@ -3400,6 +3407,57 @@ mod tests {
                 && finding.message.contains("--pack")
                 && finding.message.contains("analyzer.toml")
         }));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn command_pack_skips_the_unimplemented_dependency_check() {
+        let dir = std::env::temp_dir().join(format!("sc-command-skip-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("notes.txt"), "hello\n").unwrap();
+        let mut config = Config {
+            pack: "command".into(),
+            ..Config::default()
+        };
+        config.engines.coverage = false;
+        let output = analyze(AnalyzeRequest {
+            root: dir.clone(),
+            repo: "command".into(),
+            fail_on: vec!["secrets".into()],
+            budget: Duration::from_secs(30),
+            config,
+            diff_base: None,
+            diff_head: None,
+            path_list: Vec::new(),
+            spec_path: None,
+            mutation_override: Some("off".into()),
+            llm_override: Some(false),
+            intent: None,
+            progress: None,
+        });
+        assert!(
+            output
+                .scorecard
+                .sections
+                .findings
+                .iter()
+                .all(|finding| !finding
+                    .message
+                    .contains("dependency check is not implemented")),
+            "command pack must not warn that sca is unimplemented: {:?}",
+            output.scorecard.sections.findings
+        );
+        assert!(
+            output
+                .scorecard
+                .engines
+                .engines_skipped
+                .iter()
+                .any(|engine| engine == "sca"),
+            "sca belongs in engines_skipped: {:?}",
+            output.scorecard.engines.engines_skipped
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
