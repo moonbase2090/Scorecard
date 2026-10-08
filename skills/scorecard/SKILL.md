@@ -34,7 +34,7 @@ Analyze `PATH` (default `.`). The default output is pretty text on a terminal an
 | Flag | Values and default | Purpose |
 |---|---|---|
 | `--format FORMAT` | `json`, `pretty`, `md`, `sarif`, `html`, `all`; auto-selects pretty/JSON when omitted | Choose stdout and report format. |
-| `--out PATH` | none | Also write the report to a file. `all` writes `.json`, `.md`, `.sarif`, and `.html` siblings. |
+| `--out PATH` | none | Also write the report to a file. Stdout prints a short summary even when it is not a terminal. `all` writes `.json`, `.md`, `.sarif`, and `.html` siblings. |
 | `--fail-on LIST` | `types,tests,crap,secrets,lint` | Comma-separated gates whose failure sets exit 1: `types`, `tests`, `crap`, `secrets`, `sca`, `spec`, `mutation`, `lint`, `html`, `links`, or `a11y`. Use `none` by itself to suppress gate failures from the exit code. |
 | `--pack PACK` | detected | Select `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, `web`, or `command`. Useful when multiple project markers match. |
 | `--diff [BASE]` | off; omitted base tries `HEAD~1`, then `main`, then `master`, skipping a candidate that is `HEAD`, and exits 2 when none remain | Analyze changes against a Git base. Uncommitted changes count. A depth-1 `main` or `master` checkout, a missing base, or any other unresolvable base exits 2 with verdict `fail` and one stderr line naming `fetch-depth: 0`. An explicit `--diff HEAD` still works. |
