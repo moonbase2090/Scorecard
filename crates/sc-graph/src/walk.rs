@@ -149,6 +149,108 @@ pub fn walk_with_options(
     }
 }
 
+/// When `root` is a git work tree, paths to scan for secrets and which are tracked.
+pub struct GitSecretsPaths {
+    pub paths: Vec<String>,
+    pub tracked: std::collections::HashSet<String>,
+}
+
+/// Paths from `git ls-files` when `root` is a git work tree. Outside git, returns `None`.
+pub fn git_secrets_paths(root: &Path) -> Option<Result<GitSecretsPaths, String>> {
+    use std::process::Command;
+    let inside = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output();
+    let Ok(output) = inside else {
+        return None;
+    };
+    if !output.status.success() || String::from_utf8_lossy(&output.stdout).trim() != "true" {
+        return None;
+    }
+    let listing = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args([
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output();
+    let Ok(listing) = listing else {
+        return None;
+    };
+    if !listing.status.success() {
+        return Some(Err(String::from_utf8_lossy(&listing.stderr)
+            .trim()
+            .to_string()));
+    }
+    let paths = listing
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|chunk| !chunk.is_empty())
+        .filter_map(|chunk| std::str::from_utf8(chunk).ok().map(str::to_string))
+        .collect();
+    let tracked_listing = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["ls-files", "-z", "--cached"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output();
+    let Ok(tracked_listing) = tracked_listing else {
+        return None;
+    };
+    if !tracked_listing.status.success() {
+        return Some(Err(
+            String::from_utf8_lossy(&tracked_listing.stderr).trim().to_string(),
+        ));
+    }
+    let tracked = tracked_listing
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|chunk| !chunk.is_empty())
+        .filter_map(|chunk| std::str::from_utf8(chunk).ok().map(str::to_string))
+        .collect();
+    Some(Ok(GitSecretsPaths { paths, tracked }))
+}
+
+/// Whether a directory-oriented source walk would skip this relative path.
+pub fn source_walk_skips_path(
+    rel: &str,
+    include_generated: &[String],
+    include_hidden_directories: bool,
+) -> bool {
+    skip_directory(rel, include_generated, include_hidden_directories)
+}
+
+/// Whether a git-listed path should be scanned for secrets (excludes, generated markers).
+pub fn secrets_scan_includes_path(
+    root: &Path,
+    rel: &str,
+    exclude: &[String],
+    include_generated: &[String],
+) -> bool {
+    if rel.is_empty() {
+        return false;
+    }
+    if is_excluded(rel, exclude, true) {
+        return false;
+    }
+    let path = root.join(rel);
+    included_path(rel, include_generated) || !is_generated_file(&path)
+}
+
 /// Return regular files from a shared project walk.
 pub fn walk_files(
     root: &Path,

@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- The secrets scan uses `git ls-files` in a work tree so tracked files under `vendor/`, `dist/`, `build/`, and other walker-skipped directories are still checked. Ignored paths and `[scope] exclude` behave as before (#202).
 - The secrets scan skips files that begin with ELF, Mach-O, PE, WebAssembly, or `ar` archive magics instead of lossy-scanning release binaries (for example `sc` and `sc-mcp`), including when the file is over the 64 MiB text scan cap. Reports `secrets.skipped_object` (info). NUL-only prefixes still do not skip (#155).
 
 ## [0.1.6] - 2026-09-30

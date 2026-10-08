@@ -183,29 +183,51 @@ pub fn text_secrets_with_generated(
 ) -> Vec<sc_core::Finding> {
     let mut files = Vec::new();
     let mut findings = Vec::new();
-    for item in sc_graph::walk_with_options(
-        root,
-        root,
-        exclude,
-        include_generated,
-        None,
-        sc_graph::WalkOptions {
-            include_hidden_directories: true,
-            root_directory_excludes: true,
-        },
-    ) {
-        match item {
-            sc_graph::WalkItem::Entry(entry) if entry.kind == sc_graph::WalkKind::File => {
-                files.push(entry.path);
+    if let Some(listing) = sc_graph::git_secrets_paths(root) {
+        match listing {
+            Ok(listing) => {
+                for rel in listing.paths {
+                    if !listing.tracked.contains(&rel)
+                        && sc_graph::source_walk_skips_path(&rel, include_generated, true)
+                    {
+                        continue;
+                    }
+                    if sc_graph::secrets_scan_includes_path(root, &rel, exclude, include_generated)
+                    {
+                        files.push(root.join(&rel));
+                    }
+                }
             }
-            sc_graph::WalkItem::Error { path, message } => {
-                let rel = path
-                    .as_deref()
-                    .map(|path| rel_path(root, path))
-                    .unwrap_or_else(|| ".".into());
-                findings.push(unreadable_message(&rel, &message));
+            Err(message) => {
+                findings.push(unreadable_message(".", &message));
+                return findings;
             }
-            _ => {}
+        }
+    } else {
+        for item in sc_graph::walk_with_options(
+            root,
+            root,
+            exclude,
+            include_generated,
+            None,
+            sc_graph::WalkOptions {
+                include_hidden_directories: true,
+                root_directory_excludes: true,
+            },
+        ) {
+            match item {
+                sc_graph::WalkItem::Entry(entry) if entry.kind == sc_graph::WalkKind::File => {
+                    files.push(entry.path);
+                }
+                sc_graph::WalkItem::Error { path, message } => {
+                    let rel = path
+                        .as_deref()
+                        .map(|path| rel_path(root, path))
+                        .unwrap_or_else(|| ".".into());
+                    findings.push(unreadable_message(&rel, &message));
+                }
+                _ => {}
+            }
         }
     }
     let mut big_text = Vec::new();
@@ -865,6 +887,120 @@ mod tests {
             findings.iter().any(|finding| {
                 finding.file == "config.js" && finding.rule == "secrets.aws_access_key"
             }),
+            "{findings:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    fn runtime_github_token() -> String {
+        let parts = ["Ab", "3k", "Qm", "9Z", "nR", "4p", "Lx", "7w"];
+        let tail: String = parts.iter().cycle().take(18).copied().collect();
+        format!("ghp_{tail}")
+    }
+
+    fn git_commit(root: &std::path::Path) {
+        let git = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .arg("-C")
+                .arg(root)
+                .args(args)
+                .env("GIT_AUTHOR_NAME", "sc")
+                .env("GIT_AUTHOR_EMAIL", "sc@example.com")
+                .env("GIT_COMMITTER_NAME", "sc")
+                .env("GIT_COMMITTER_EMAIL", "sc@example.com")
+                .status()
+                .unwrap();
+            assert!(status.success(), "{args:?}");
+        };
+        git(&["init", "-q"]);
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "init"]);
+    }
+
+    #[test]
+    fn tracked_vendor_dist_and_build_are_scanned_in_git() {
+        let token = runtime_github_token();
+        let root = temp("secrets-git-tracked");
+        fs::create_dir_all(root.join("vendor/dep")).unwrap();
+        fs::create_dir_all(root.join("dist")).unwrap();
+        fs::create_dir_all(root.join("build")).unwrap();
+        fs::write(
+            root.join("vendor/dep/lib.js"),
+            format!("const V = \"{token}\";\n"),
+        )
+        .unwrap();
+        fs::write(root.join("dist/app.js"), format!("var k=\"{token}\";\n")).unwrap();
+        fs::write(root.join("build/c.txt"), format!("k={token}\n")).unwrap();
+        git_commit(&root);
+        let findings = text_secrets(&root, &[]);
+        for file in ["vendor/dep/lib.js", "dist/app.js", "build/c.txt"] {
+            assert!(
+                findings.iter().any(|finding| {
+                    finding.file == file && finding.rule.starts_with("secrets.")
+                }),
+                "missing {file}: {findings:?}"
+            );
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn gitignored_env_and_target_are_not_scanned() {
+        let token = runtime_github_token();
+        let root = temp("secrets-git-ignored");
+        fs::write(root.join(".gitignore"), ".env\ntarget/\nnode_modules/\n").unwrap();
+        fs::write(root.join(".env"), format!("TOKEN={token}\n")).unwrap();
+        fs::create_dir_all(root.join("target/debug")).unwrap();
+        fs::write(root.join("target/debug/leak.txt"), format!("{token}\n")).unwrap();
+        fs::create_dir_all(root.join("node_modules/pkg")).unwrap();
+        fs::write(
+            root.join("node_modules/pkg/index.js"),
+            format!("\"{token}\"\n"),
+        )
+        .unwrap();
+        git_commit(&root);
+        let findings = text_secrets(&root, &[]);
+        assert!(
+            !findings.iter().any(|finding| {
+                finding.file == ".env"
+                    || finding.file.starts_with("target/")
+                    || finding.file.starts_with("node_modules/")
+            }),
+            "{findings:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn scope_exclude_hides_dist_secret_in_git() {
+        let token = runtime_github_token();
+        let root = temp("secrets-git-exclude-dist");
+        fs::create_dir_all(root.join("vendor/dep")).unwrap();
+        fs::create_dir_all(root.join("dist")).unwrap();
+        fs::create_dir_all(root.join("build")).unwrap();
+        fs::write(
+            root.join("vendor/dep/lib.js"),
+            format!("const V = \"{token}\";\n"),
+        )
+        .unwrap();
+        fs::write(root.join("dist/app.js"), format!("var k=\"{token}\";\n")).unwrap();
+        fs::write(root.join("build/c.txt"), format!("k={token}\n")).unwrap();
+        git_commit(&root);
+        let findings = text_secrets(&root, &["dist/**".into()]);
+        assert!(
+            !findings
+                .iter()
+                .any(|finding| finding.file.starts_with("dist/")),
+            "{findings:?}"
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.file == "vendor/dep/lib.js"),
+            "{findings:?}"
+        );
+        assert!(
+            findings.iter().any(|finding| finding.file == "build/c.txt"),
             "{findings:?}"
         );
         let _ = fs::remove_dir_all(&root);
