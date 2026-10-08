@@ -3,6 +3,8 @@
 Status: **proposal** — report-only until MB2090 signs off on gating.  
 Audience: contributors implementing engines and agents reading scorecards.
 
+Research: [testing antipatterns](../research/testing-antipatterns.md) (catalog, citations, ranked build shortlist).
+
 ## Problem
 
 `sc` already answers whether tests **passed**, how much code is **covered**, and which functions are **complex but untested** (CRAP). Those signals treat every passing test equally. A tautological test that re-implements the function under test can yield full line coverage and a green `tests` gate while catching no real bugs. Agent-written suites often restate the author's reading of intent; when a test fails, either the test or the product can be edited until green.
@@ -166,11 +168,14 @@ Proof in PRs: failing-first test output, then green after fix; `sc analyze` JSON
 
 ## Implementation order
 
-1. **This document** (leaf PR) — MB2090 review before behavior changes.
-2. Diff-scoped mutation reporting under `test_value` (trunk, report-only).
-3. Weakening detector (trunk).
-4. Tautology (leaf or trunk).
-5. Per-test value and mix (trunk).
+Driven by the [ranked shortlist](../research/testing-antipatterns.md#ranked-build-shortlist-drives-deliverables-26).
+
+1. **Design + research** (leaf PR) — MB2090 review before behavior changes.
+2. Diff-scoped mutation reporting under `test_value` (trunk, report-only) — **P0**.
+3. Weakening detector: assertion loosening, test deletes, ignore/skip added in diff (trunk) — **P0/P1**.
+4. Tautology: assertion-free and SUT-derived expected values (leaf or trunk) — **P1**.
+5. Per-test value and mix (trunk) — **P1/P2**.
+6. Sleep/timing lint, snapshot churn, mock tautologies, flake/order — future, mostly out of scope v1.
 
 ## References
 
