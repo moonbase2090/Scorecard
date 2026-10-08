@@ -290,14 +290,16 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         .filter(|finding| finding.engine == "a11y")
         .count();
     let mut fail_on = request.fail_on.clone();
-    if html_enforced && !fail_on.iter().any(|gate| gate == "html") {
-        fail_on.push("html".into());
-    }
-    if links_enforced && !fail_on.iter().any(|gate| gate == "links") {
-        fail_on.push("links".into());
-    }
-    if a11y_enforced && !fail_on.iter().any(|gate| gate == "a11y") {
-        fail_on.push("a11y".into());
+    if !fail_on.is_empty() {
+        if html_enforced && !fail_on.iter().any(|gate| gate == "html") {
+            fail_on.push("html".into());
+        }
+        if links_enforced && !fail_on.iter().any(|gate| gate == "links") {
+            fail_on.push("links".into());
+        }
+        if a11y_enforced && !fail_on.iter().any(|gate| gate == "a11y") {
+            fail_on.push("a11y".into());
+        }
     }
     let gates = vec![
         mode_gate(
@@ -571,7 +573,7 @@ fn analyze_unsupported(
     let mut gates = tools.gates;
     if !jsx_files.is_empty() {
         let enforced = request.config.a11y.enforce || fail_on.iter().any(|gate| gate == "a11y");
-        if enforced && !fail_on.iter().any(|gate| gate == "a11y") {
+        if !fail_on.is_empty() && enforced && !fail_on.iter().any(|gate| gate == "a11y") {
             fail_on.push("a11y".into());
         }
         gates.push(mode_gate(
@@ -1482,6 +1484,7 @@ fn finish(mut draft: Draft) -> AnalyzeOutput {
             },
         },
         verdict: if verdict_failed { "fail" } else { "pass" }.to_string(),
+        fail_on: draft.fail_on,
         engines: sc_core::ScorecardEngines {
             engines_run: draft.ran,
             engines_skipped: draft.skipped,

@@ -382,6 +382,9 @@ pub struct Scorecard {
     pub measures: ScorecardMeasures,
     #[serde(flatten)]
     pub sections: ScorecardSections,
+    /// Gates whose failures set exit 1. An empty list means no gate is selected.
+    #[serde(default)]
+    pub fail_on: Vec<String>,
     #[serde(default)]
     pub runs: Vec<RunRecord>,
 }
@@ -439,6 +442,7 @@ impl Scorecard {
                 spec: SpecSection::empty(),
                 llm: None,
             },
+            fail_on: Vec::new(),
             runs: Vec::new(),
         }
     }
@@ -520,6 +524,7 @@ mod tests {
                 },
             },
             verdict: "fail".into(),
+            fail_on: vec!["types".into(), "tests".into()],
             engines: ScorecardEngines {
                 engines_run: vec!["compile".into(), "tests".into()],
                 engines_skipped: vec!["llm".into(), "mutation".into()],

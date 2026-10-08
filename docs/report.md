@@ -15,7 +15,7 @@ The header: `sc` version, analyzed path, [pack](packs.md), git commit, and Git s
 PASS  2 advisory gates failing
 ```
 
-The verdict. `PASS` means every enforced gate passed. Advisory gates can still fail under a `PASS`; the note counts them. `FAIL` means at least one enforced gate failed. `--fail-on` controls the process exit code, so it can be 0 while the report says `FAIL` if none of the selected gates failed. Naming an advisory gate can enforce it; omitting an already enforced gate from the exit list does not change the report verdict.
+The verdict. `PASS` means every enforced gate passed. Advisory gates can still fail under a `PASS`; the note counts them. `FAIL` means at least one enforced gate failed. `--fail-on` controls the process exit code, so it can be 0 while the report says `FAIL` if an enforced failure is not selected. In that case, `sc` writes one stderr warning with the failed gate names. Naming an advisory gate can enforce it; omitting an already enforced gate from the exit list does not change the report verdict. `--fail-on none` selects no gates and leaves enforced failures visible. An empty or blank selection is invalid. Omit `--fail-on` and `gates.fail_on` to use the defaults.
 
 ```text
 gates
@@ -86,6 +86,7 @@ Top-level fields of `.sc/last-scorecard.json` and `--format json`:
 | Field | Contents |
 |---|---|
 | `verdict` | `pass` or `fail` |
+| `fail_on` | Gate ids whose failures set exit 1; an empty list means `none` was selected |
 | `pack`, `repo`, `scope` | What was analyzed |
 | `git` | `head`, `dirty`, and `dirty_paths` (all changed paths relative to the repository root; omitted when clean) |
 | `gates` | `id`, `pass`, `enforced`, and `reason` per gate |
@@ -96,7 +97,7 @@ Top-level fields of `.sc/last-scorecard.json` and `--format json`:
 | `engines_run`, `engines_skipped` | As in the terminal footer |
 | `runs` | Every command `sc` ran, with exit code and duration |
 
-`verdict` is `fail` when any enforced gate fails. The `--fail-on` list selects the process exit code; it does not hide failures from gates that remain enforced.
+`verdict` is `fail` when any enforced gate fails. The `fail_on` list selects the process exit code; it does not hide failures from enforced gates. SARIF stores the selected list in `runs[0].properties.fail_on`.
 
 List the findings an agent should fix:
 

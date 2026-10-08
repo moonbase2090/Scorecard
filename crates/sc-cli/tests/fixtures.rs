@@ -830,7 +830,7 @@ fn a11y_stays_advisory_until_fail_on_names_it() {
         !rules(&card).iter().any(|rule| rule.starts_with("a11y.")),
         "{card}"
     );
-    let (code, card, _, stderr) = analyze(&["testdata/a11y_page_bad", "--fail-on", ""]);
+    let (code, card, _, stderr) = analyze(&["testdata/a11y_page_bad", "--fail-on", "none"]);
     assert_eq!(code, 0, "stderr={stderr}\ncard={card}");
     assert!(rules(&card).contains(&"a11y.img-alt"), "{card}");
     let (code, card, _, stderr) = analyze(&["testdata/a11y_page_bad", "--fail-on", "a11y"]);
@@ -840,6 +840,118 @@ fn a11y_stays_advisory_until_fail_on_names_it() {
         .unwrap()
         .iter()
         .any(|gate| { gate["id"] == "a11y" && gate["pass"] == false && gate["enforced"] == true }));
+}
+
+#[test]
+fn empty_fail_on_values_are_rejected() {
+    let mut failures = Vec::new();
+    for value in ["", ",", " "] {
+        let (code, _stdout, stderr) = analyze_raw(&[
+            "testdata/failing_test",
+            "--format",
+            "json",
+            "--fail-on",
+            value,
+        ]);
+        if code != 2 || !stderr.contains("--fail-on") {
+            failures.push(format!(
+                "--fail-on {value:?}: expected exit 2 and a --fail-on error, got exit {code}, stderr={stderr:?}"
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn narrowed_fail_on_reports_failed_enforced_gates() {
+    let (code, stdout, stderr) = analyze_raw(&[
+        "testdata/failing_test",
+        "--format",
+        "json",
+        "--fail-on",
+        "lint",
+    ]);
+    assert_eq!(code, 0, "stderr={stderr}");
+    assert!(stderr.contains("tests"), "stderr={stderr:?}");
+    let card: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(card["fail_on"], serde_json::json!(["lint"]), "{card}");
+
+    let (code, stdout, stderr) = analyze_raw(&[
+        "testdata/failing_test",
+        "--format",
+        "sarif",
+        "--fail-on",
+        "lint",
+    ]);
+    assert_eq!(code, 0, "stderr={stderr}");
+    assert!(stderr.contains("tests"), "stderr={stderr:?}");
+    let sarif: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(
+        sarif["runs"][0]["properties"]["fail_on"],
+        serde_json::json!(["lint"])
+    );
+}
+
+#[test]
+fn none_fail_on_reports_failed_enforced_gates() {
+    let (code, stdout, stderr) = analyze_raw(&[
+        "testdata/failing_test",
+        "--format",
+        "json",
+        "--fail-on",
+        "none",
+    ]);
+    assert_eq!(code, 0, "stderr={stderr}");
+    assert!(stderr.contains("tests"), "stderr={stderr:?}");
+    let card: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(card["fail_on"], serde_json::json!([]), "{card}");
+}
+
+#[test]
+fn none_does_not_reenable_configured_web_gates() {
+    let config = std::env::temp_dir().join(format!("sc-none-web-{}.toml", std::process::id()));
+    std::fs::write(
+        &config,
+        "pack = \"web\"\n\n[gates]\nfail_on = [\"none\"]\n\n[links]\nenforce = true\n",
+    )
+    .unwrap();
+    let config_s = config.to_string_lossy().to_string();
+    let (code, stdout, stderr) = analyze_raw(&[
+        "testdata/web_site_bad",
+        "--format",
+        "json",
+        "--config",
+        &config_s,
+    ]);
+    let _ = std::fs::remove_file(config);
+    assert_eq!(code, 0, "stderr={stderr}");
+    assert!(stderr.contains("links"), "stderr={stderr:?}");
+    let card: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(card["fail_on"], serde_json::json!([]), "{card}");
+    assert!(card["gates"].as_array().unwrap().iter().any(|gate| {
+        gate["id"] == "links" && gate["pass"] == false && gate["enforced"] == true
+    }));
+}
+
+#[test]
+fn excluded_enforced_failures_warn_in_every_output_format() {
+    let mut failures = Vec::new();
+    for format in ["json", "md", "sarif", "html", "all", "pretty"] {
+        let (code, _stdout, stderr) = analyze_raw(&[
+            "testdata/failing_test",
+            "--format",
+            format,
+            "--fail-on",
+            "lint",
+        ]);
+        let warning_lines = stderr.lines().filter(|line| line.contains("tests")).count();
+        if code != 0 || warning_lines != 1 {
+            failures.push(format!(
+                "--format {format}: expected exit 0 and one warning naming tests, got exit {code}, stderr={stderr:?}"
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 #[test]
@@ -1001,7 +1113,7 @@ fn fail_on_changes_exit_code_without_hiding_enforced_failures_in_any_report() {
         "--out",
         &out_s,
         "--fail-on",
-        "",
+        "none",
     ]);
     assert_eq!(code, 0, "stderr={stderr}\n{stdout}");
 

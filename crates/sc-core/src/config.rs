@@ -206,20 +206,36 @@ impl Default for EnginesConfig {
 }
 
 pub fn normalize_gates(list: &[String]) -> Result<Vec<String>, String> {
-    let mut out = Vec::new();
-    for item in list {
-        for part in item.split(',') {
-            let gate = part.trim().to_ascii_lowercase();
-            if gate.is_empty() {
-                continue;
-            }
-            if !KNOWN_GATES.contains(&gate.as_str()) {
-                return Err(format!("unknown gate `{gate}`"));
-            }
-            if !out.contains(&gate) {
-                out.push(gate);
-            }
+    let parts: Vec<_> = list.iter().flat_map(|item| item.split(',')).collect();
+    if parts
+        .iter()
+        .any(|part| part.trim().eq_ignore_ascii_case("none"))
+    {
+        if parts.len() == 1 && parts[0].trim().eq_ignore_ascii_case("none") {
+            return Ok(Vec::new());
         }
+        return Err(
+            "`none` must be the only fail-on value. Pass --fail-on none by itself or set gates.fail_on = [\"none\"].".into(),
+        );
+    }
+
+    let mut out = Vec::new();
+    for part in parts {
+        let gate = part.trim().to_ascii_lowercase();
+        if gate.is_empty() {
+            continue;
+        }
+        if !KNOWN_GATES.contains(&gate.as_str()) {
+            return Err(format!("unknown gate `{gate}`"));
+        }
+        if !out.contains(&gate) {
+            out.push(gate);
+        }
+    }
+    if out.is_empty() {
+        return Err(
+            "No gate can fail this run because the fail-on selection is empty. Omit the --fail-on option or the gates.fail_on setting to use the default gates, name one or more gates, or pass --fail-on none for report-only output.".into(),
+        );
     }
     Ok(out)
 }
@@ -326,5 +342,20 @@ mod tests {
     fn rejects_unknown_gates() {
         let err = normalize_gates(&["types,nope".into()]).unwrap_err();
         assert!(err.contains("nope"));
+    }
+
+    #[test]
+    fn rejects_empty_gate_lists() {
+        assert!(normalize_gates(&["".into()]).is_err());
+        assert!(normalize_gates(&[" , ".into()]).is_err());
+    }
+
+    #[test]
+    fn none_must_be_the_only_gate_value() {
+        for value in ["none,", ",none", "none,lint"] {
+            let err = normalize_gates(&[value.into()]).unwrap_err();
+            assert!(err.contains("`none` must be the only"), "{err}");
+        }
+        assert!(normalize_gates(&[" none ".into()]).unwrap().is_empty());
     }
 }
