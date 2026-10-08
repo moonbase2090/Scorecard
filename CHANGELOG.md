@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `test.failed` findings no longer use absolute panic paths outside the project (`/rustc/...`, the cargo registry, or other off-tree locations). The report points at the failing test's source file when it can be found, keeps the external location in the message and evidence, and never emits an absolute `file` in JSON or SARIF (#207).
 - Skip CDK-generated `cdk.out` directories during source discovery (#189).
 - Empty or blank `--fail-on` and `gates.fail_on` selections now fail with a configuration error. Use `none` by itself to return exit 0 for every gate. JSON and SARIF record the selected gates, and stderr names enforced failures omitted from the selection.
 - A bare `--diff` (AUTO base) no longer falls back to `HEAD` in checkouts with no resolvable history. Shallow or single-commit checkouts now exit 2 with a message naming the fix (`fetch-depth: 0` or `--diff BASE`) instead of silently scoring zero paths. An explicit `--diff HEAD` keeps working.
