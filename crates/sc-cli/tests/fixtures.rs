@@ -1249,6 +1249,89 @@ fn node_not_found_output_fails_the_tests_gate() {
     );
 }
 
+fn runtime_github_token() -> String {
+    let parts = ["Ab", "3k", "Qm", "9Z", "nR", "4p", "Lx", "7w"];
+    let tail: String = parts.iter().cycle().take(18).copied().collect();
+    format!("ghp_{tail}")
+}
+
+#[test]
+fn tracked_vendor_dist_and_build_fail_the_secrets_gate() {
+    let token = runtime_github_token();
+    let root = std::env::temp_dir().join(format!("sc-secrets-tracked-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("vendor/dep")).unwrap();
+    std::fs::create_dir_all(root.join("dist")).unwrap();
+    std::fs::create_dir_all(root.join("build")).unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("src/lib.rs"), "pub fn ok() {}\n").unwrap();
+    std::fs::write(
+        root.join("vendor/dep/lib.js"),
+        format!("const V = \"{token}\";\n"),
+    )
+    .unwrap();
+    std::fs::write(root.join("dist/app.js"), format!("var k=\"{token}\";\n")).unwrap();
+    std::fs::write(root.join("build/c.txt"), format!("k={token}\n")).unwrap();
+    let git = |args: &[&str]| {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args(args)
+            .output()
+            .expect("git");
+        assert!(output.status.success(), "git {args:?}: {output:?}");
+    };
+    git(&["init", "-q"]);
+    git(&["add", "-A"]);
+    git(&[
+        "-c",
+        "user.name=Scorecard test",
+        "-c",
+        "user.email=sc-test@example.com",
+        "commit",
+        "-q",
+        "-m",
+        "v",
+    ]);
+    let root_str = root.to_str().expect("utf-8 temp path");
+    let (code, card, _, stderr) = analyze(&[root_str, "--format", "json"]);
+    assert_eq!(code, 1, "stderr={stderr}\ncard={card}");
+    let secrets_gate = card["gates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|gate| gate["id"] == "secrets")
+        .expect("secrets gate");
+    assert!(
+        !secrets_gate["pass"].as_bool().unwrap(),
+        "secrets gate should fail: {card}"
+    );
+    let secret_files: Vec<&str> = card["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|finding| {
+            finding["severity"].as_str() == Some("error")
+                && finding["rule"]
+                    .as_str()
+                    .is_some_and(|rule| rule.starts_with("secrets."))
+        })
+        .filter_map(|finding| finding["file"].as_str())
+        .collect();
+    for file in ["vendor/dep/lib.js", "dist/app.js", "build/c.txt"] {
+        assert!(
+            secret_files.contains(&file),
+            "missing {file} in {secret_files:?} card={card}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 #[test]
 fn committed_sc_binary_does_not_flag_secrets_on_sc() {
     let root = std::env::temp_dir().join(format!("sc-secrets-binary-{}", std::process::id()));
