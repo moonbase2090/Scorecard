@@ -57,7 +57,8 @@ struct AnalyzeArgs {
     /// Pack override when several manifests match: rust, node, python, bash, go, java, csharp, php, cpp, web, or command.
     #[arg(long, value_name = "PACK")]
     pack: Option<String>,
-    /// Score only the git diff against BASE. Omit BASE to use HEAD~1, else main.
+    /// Score only the git diff against BASE. Omit BASE for AUTO (HEAD~1, else
+    /// main, else master); AUTO exits 2 when none resolve.
     #[arg(long, num_args = 0..=1, default_missing_value = "AUTO")]
     diff: Option<String>,
     /// Compare `--diff` BASE to this commit instead of the worktree.

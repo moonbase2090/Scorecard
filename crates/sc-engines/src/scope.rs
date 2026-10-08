@@ -254,12 +254,26 @@ pub fn resolve_base(root: &Path, requested: &str) -> Result<String, String> {
     if requested != "AUTO" {
         return Ok(requested.to_string());
     }
-    for candidate in ["HEAD~1", "main", "master", "HEAD"] {
+    for candidate in ["HEAD~1", "main", "master"] {
         if git_ok(root, &["rev-parse", "--verify", "--quiet", candidate]) {
             return Ok(candidate.to_string());
         }
     }
-    Err("cannot resolve a diff base; pass --diff BASE".into())
+    // No history to diff against: HEAD would score zero paths and let the
+    // gates pass silently, so fail loudly instead. Explicit --diff HEAD
+    // still works for pre-commit flows.
+    let shallow = git(root, &["rev-parse", "--is-shallow-repository"])
+        .map(|output| output.trim() == "true")
+        .unwrap_or(false);
+    let mut message = String::from(
+        "cannot resolve a diff base automatically (tried HEAD~1, main, master). \
+         Fetch full history (clone with fetch-depth: 0, or git fetch --unshallow) \
+         or pass an explicit base with --diff BASE.",
+    );
+    if shallow {
+        message.push_str(" This looks like a shallow clone.");
+    }
+    Err(message)
 }
 
 pub fn diff_files(root: &Path, base: &str, head: Option<&str>) -> Result<Vec<FileDelta>, String> {
@@ -412,6 +426,83 @@ mod tests {
     fn parses_added_hunk_lines() {
         let patch = "@@ -2,0 +3,2 @@\n+a\n+b\n@@ -10 +12,0 @@\n";
         assert_eq!(parse_new_lines(patch), vec![3, 4]);
+    }
+
+    fn git_here(dir: &std::path::Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .env("GIT_AUTHOR_NAME", "sc")
+            .env("GIT_AUTHOR_EMAIL", "sc@example.com")
+            .env("GIT_COMMITTER_NAME", "sc")
+            .env("GIT_COMMITTER_EMAIL", "sc@example.com")
+            .status()
+            .unwrap();
+        assert!(status.success(), "{args:?}");
+    }
+
+    fn single_commit_repo(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("sc-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("src/lib.rs"), "pub fn old() -> i32 { 1 }\n").unwrap();
+        git_here(&dir, &["init"]);
+        git_here(&dir, &["add", "src/lib.rs"]);
+        git_here(&dir, &["commit", "-m", "old"]);
+        // A feature branch like CI's depth-1 checkout: main/master must not
+        // resolve, so AUTO has genuinely nothing to fall back to.
+        git_here(&dir, &["branch", "-m", "feat"]);
+        dir
+    }
+
+    #[test]
+    fn auto_base_errors_in_a_single_commit_checkout() {
+        let dir = single_commit_repo("diff-base");
+        let err = resolve_base(&dir, "AUTO")
+            .expect_err("AUTO must not silently fall back to HEAD with no history");
+        assert!(
+            err.contains("--diff BASE"),
+            "message must name the fix: {err}"
+        );
+        assert!(
+            err.contains("fetch-depth: 0"),
+            "message must name the CI fix: {err}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn auto_base_names_shallow_clones() {
+        let src = single_commit_repo("diff-base-src");
+        let dst = std::env::temp_dir().join(format!("sc-diff-base-shallow-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dst);
+        let status = std::process::Command::new("git")
+            .args(["clone", "--depth", "1"])
+            .arg(&src)
+            .arg(&dst)
+            .env("GIT_AUTHOR_NAME", "sc")
+            .env("GIT_AUTHOR_EMAIL", "sc@example.com")
+            .env("GIT_COMMITTER_NAME", "sc")
+            .env("GIT_COMMITTER_EMAIL", "sc@example.com")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let err = resolve_base(&dst, "AUTO")
+            .expect_err("AUTO must not silently fall back to HEAD in a shallow clone");
+        assert!(
+            err.contains("shallow"),
+            "message must name the shallow clone: {err}"
+        );
+        let _ = std::fs::remove_dir_all(&dst);
+        let _ = std::fs::remove_dir_all(&src);
+    }
+
+    #[test]
+    fn explicit_head_base_keeps_working() {
+        let dir = single_commit_repo("diff-base-head");
+        assert_eq!(resolve_base(&dir, "HEAD"), Ok("HEAD".to_string()));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

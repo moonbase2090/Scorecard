@@ -249,6 +249,103 @@ fn failing_test_fixture_exits_1_with_a_test_finding() {
         .any(|gate| gate["id"] == "types" && gate["pass"] == true));
 }
 
+fn analyze_in(dir: &std::path::Path, args: &[&str]) -> (i32, String, String) {
+    let _guard = FIXTURE_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+    let output = Command::new(env!("CARGO_BIN_EXE_sc"))
+        .current_dir(dir)
+        .arg("analyze")
+        .args(args)
+        .output()
+        .expect("spawn sc");
+    let code = output.status.code().unwrap_or(101);
+    (
+        code,
+        String::from_utf8_lossy(&output.stdout).to_string(),
+        String::from_utf8_lossy(&output.stderr).to_string(),
+    )
+}
+
+fn git_here(dir: &std::path::Path, args: &[&str]) {
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .env("GIT_AUTHOR_NAME", "sc")
+        .env("GIT_AUTHOR_EMAIL", "sc@example.com")
+        .env("GIT_COMMITTER_NAME", "sc")
+        .env("GIT_COMMITTER_EMAIL", "sc@example.com")
+        .status()
+        .expect("spawn git");
+    assert!(status.success(), "{args:?}");
+}
+
+const SINGLE_COMMIT_LIB: &str = "// SPDX-License-Identifier: MPL-2.0\npub fn classify(n: i32, flag: bool, mode: u8) -> &'static str {\n    if n < 0 {\n        return \"neg\";\n    }\n    if n == 0 {\n        return \"zero\";\n    }\n    if flag && n > 100 {\n        return \"bigflag\";\n    }\n    if flag || n > 50 {\n        return \"mid\";\n    }\n    match mode {\n        0 => \"a\",\n        1 => \"b\",\n        2 => \"c\",\n        _ => \"d\",\n    }\n}\n";
+
+fn single_commit_crate(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("sc-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(
+        dir.join("Cargo.toml"),
+        "[workspace]\n\n[package]\nname = \"single_commit\"\nversion = \"0.1.0\"\nedition = \"2021\"\npublish = false\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("src/lib.rs"), SINGLE_COMMIT_LIB).unwrap();
+    git_here(&dir, &["init"]);
+    git_here(&dir, &["add", "Cargo.toml", "src/lib.rs"]);
+    git_here(&dir, &["commit", "-m", "single"]);
+    // A feature branch like CI's depth-1 checkout, so main/master do not
+    // resolve and AUTO has genuinely nothing to fall back to.
+    git_here(&dir, &["branch", "-m", "feat"]);
+    dir
+}
+
+#[test]
+fn diff_without_base_exits_2_in_a_single_commit_checkout() {
+    let dir = single_commit_crate("diff-base-e2e");
+    let (code, stdout, stderr) = analyze_in(&dir, &[".", "--diff", "--budget-seconds", "300"]);
+    let combined = format!("{stdout}\n{stderr}");
+    assert_eq!(code, 2, "single-commit --diff must fail loudly\n{combined}");
+    assert!(
+        combined.contains("--diff BASE"),
+        "the error must name the fix\n{combined}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn explicit_diff_head_still_scores_uncommitted_changes() {
+    let dir = std::env::temp_dir().join(format!("sc-diff-head-guard-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(
+        dir.join("Cargo.toml"),
+        "[workspace]\n\n[package]\nname = \"diff_head_guard\"\nversion = \"0.1.0\"\nedition = \"2021\"\npublish = false\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("src/lib.rs"), "pub fn old() -> i32 { 1 }\n").unwrap();
+    git_here(&dir, &["init"]);
+    git_here(&dir, &["add", "Cargo.toml", "src/lib.rs"]);
+    git_here(&dir, &["commit", "-m", "old"]);
+    std::fs::write(
+        dir.join("src/lib.rs"),
+        "pub fn old() -> i32 { 1 }\npub fn added() -> i32 { 2 }\n",
+    )
+    .unwrap();
+    let (code, stdout, stderr) =
+        analyze_in(&dir, &[".", "--diff", "HEAD", "--budget-seconds", "300"]);
+    let combined = format!("{stdout}\n{stderr}");
+    assert_eq!(
+        code, 0,
+        "explicit --diff HEAD must keep scoring\n{combined}"
+    );
+    assert!(
+        !combined.contains("cannot resolve a diff base"),
+        "explicit HEAD must not hit the AUTO error\n{combined}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn crap_untested_exits_1() {
     let (code, card, _, stderr) = analyze(&["testdata/crap_untested"]);
