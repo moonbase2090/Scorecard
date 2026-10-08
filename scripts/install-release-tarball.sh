@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install sc and sc-mcp from a release .tar.gz into $HOME/.local/bin.
-# Always extracts into a new temporary directory so a reused parent path
-# cannot leave a stale flat-layout sc binary ahead of a nested bundle.
+# Uses a new directory under RUNNER_TEMP (or /tmp) per install so a reused
+# staging path cannot leave a stale flat-layout sc ahead of a nested bundle.
 set -euo pipefail
 export COPYFILE_DISABLE=1
 
@@ -10,7 +10,8 @@ if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then
   exit 2
 fi
 archive="$1"
-stage="$(mktemp -d "${TMPDIR:-/tmp}/sc-release.XXXXXX")"
+base="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
+stage="$(mktemp -d "${base%/}/sc-install.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
 
 cp "$archive" "$stage/scorecard.tar.gz"
