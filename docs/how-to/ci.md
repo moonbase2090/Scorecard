@@ -34,7 +34,7 @@ The action installs `sc`, runs `sc analyze .`, and fails the job when a gate sel
 
 The runner needs the tools your pack uses (a Rust toolchain, Python with pytest, and so on); see [packs](../packs.md). A missing coverage tool does not fail the job, and the report says coverage was not measured.
 
-Do not extract a release tarball inside your repository checkout. The archive contains `sc` and `sc-mcp` binaries; unpacking them next to your source makes `sc analyze` scan those files and can raise false `secrets.*` findings. Use `$RUNNER_TEMP` (or another directory outside the tree) for download and extract, then `install` the binaries onto `PATH`.
+Do not extract a release tarball inside your repository checkout. The archive contains `sc` and `sc-mcp` binaries; unpacking them next to your source makes `sc analyze` scan those files and can raise false `secrets.*` findings. Use `$RUNNER_TEMP` (or another directory outside the tree) for download and extract, then `install` the binaries onto `PATH`. Allocate a new `mktemp -d` subdirectory for each install so a leftover flat `sc` binary cannot shadow a newer nested bundle (`scripts/install-release-tarball.sh` wraps the same steps).
 
 ## Any other CI
 
@@ -49,14 +49,21 @@ case "$(uname -s)-$(uname -m)" in
   Linux-x86_64) TRIPLE=x86_64-unknown-linux-gnu ;;
   *) TRIPLE=x86_64-unknown-linux-gnu ;;
 esac
-STAGE="${RUNNER_TEMP:-/tmp/sc-install}"
-mkdir -p "$STAGE"
-curl -fsSL -o "$STAGE/sc.tgz" \
+STAGE="$(mktemp -d "${RUNNER_TEMP:-/tmp}/sc-install.XXXXXX")"
+curl -fsSL -o "$STAGE/scorecard.tar.gz" \
   "https://github.com/moonbase2090/Scorecard/releases/download/v$VER/sc-v${VER}-${TRIPLE}.tar.gz"
-tar -xzf "$STAGE/sc.tgz" -C "$STAGE"
-if [ -f "$STAGE/sc" ]; then ROOT="$STAGE"; else ROOT="$(find "$STAGE" -maxdepth 1 -type d -name 'sc-v*' | head -1)"; fi
+tar -xzf "$STAGE/scorecard.tar.gz" -C "$STAGE"
+root="$STAGE"
+if [ -f "$STAGE/sc" ]; then
+  : # flat layout (e.g. v0.1.6)
+elif comp="$(find "$STAGE" -maxdepth 1 -type d -name 'sc-v*' | head -1)" && [ -n "$comp" ]; then
+  root="$comp"
+else
+  echo "release archive has no sc binary" >&2
+  exit 1
+fi
 mkdir -p "$HOME/.local/bin"
-install -m 755 "$ROOT/sc" "$ROOT/sc-mcp" "$HOME/.local/bin/"
+install -m 755 "$root/sc" "$root/sc-mcp" "$HOME/.local/bin/"
 export PATH="$HOME/.local/bin:$PATH"
 sc analyze . --format all --out sc-report --budget-seconds 600 >/dev/null
 ```

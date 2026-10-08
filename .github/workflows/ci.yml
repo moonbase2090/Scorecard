@@ -75,6 +75,8 @@ jobs:
         run: cargo test --workspace --locked
       - name: archive layout
         run: bash scripts/test-archive-layout.sh
+      - name: release install staging
+        run: bash scripts/test-release-install-staging.sh
 
   # macOS coverage runs on pushes to develop and manual dispatch, not PRs.
   # No fixture tooling here (setup-php hung 10+ min): build plus fmt,
