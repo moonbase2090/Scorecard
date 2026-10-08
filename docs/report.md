@@ -15,7 +15,7 @@ The header: `sc` version, analyzed path, [pack](packs.md), git commit, and Git s
 PASS  2 advisory gates failing
 ```
 
-The verdict. `PASS` means every enforced gate passed. Advisory gates can still fail under a `PASS`; the note counts them. `FAIL` means at least one enforced gate failed. `--fail-on` controls the process exit code, so it can be 0 while the report says `FAIL` if an enforced failure is not selected. In that case, `sc` writes one stderr warning with the failed gate names. Naming an advisory gate can enforce it; omitting an already enforced gate from the exit list does not change the report verdict. `--fail-on none` selects no gates and leaves enforced failures visible. An empty or blank selection is invalid. Omit `--fail-on` and `gates.fail_on` to use the defaults.
+The verdict. `PASS` means every enforced gate passed. Advisory gates can still fail under a `PASS`; the note counts them. `FAIL` means at least one enforced gate failed. `--fail-on` controls the process exit code, so it can be 0 while the report says `FAIL` if an enforced failure is not selected. In that case, `sc` writes one stderr warning with the failed gate names. Naming an advisory gate can enforce it; omitting an already enforced gate from the exit list does not change the report verdict. `--fail-on none` selects no exit gates and leaves enforced failures visible: terminal, Markdown, and HTML still show `FAIL`, and stderr names the failed gates, even though the process exits 0. `REPORT ONLY` is reserved for reports where no provided gate is enforced and at least one advisory gate fails. An empty or blank selection is invalid. Omit `--fail-on` and `gates.fail_on` to use the defaults.
 
 ```text
 gates
