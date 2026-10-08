@@ -323,7 +323,8 @@ pub struct ScorecardIdentity {
     /// `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, `command`, `unknown`, or `ambiguous`.
     #[serde(default)]
     pub pack: String,
-    /// `rust-tests` selects Rust `#[test]` names. Every other pack uses `full-suite`.
+    /// `rust-tests` selects Rust `#[test]` names. `diff-tests` is the Python
+    /// pack on `--diff`. Tree mode and the other packs use `full-suite`.
     #[serde(default)]
     pub test_selection: String,
 }

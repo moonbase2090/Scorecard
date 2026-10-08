@@ -292,8 +292,10 @@ pub fn resolve_base(root: &Path, requested: &str) -> Result<String, String> {
     Err(message)
 }
 
-pub fn diff_files(root: &Path, base: &str, head: Option<&str>) -> Result<Vec<FileDelta>, String> {
-    let prefix = repo_prefix(root)?;
+/// Every changed path relative to `root`, including untracked files when
+/// `head` is the worktree. Extensions are not filtered; Rust keeps `.rs`
+/// in `diff_files`.
+pub fn changed_rels(root: &Path, base: &str, head: Option<&str>) -> Result<Vec<String>, String> {
     let names = git_diff_names(root, base, head)?;
     let untracked = if head.is_none() {
         git(root, &["ls-files", "--others", "--exclude-standard"]).unwrap_or_default()
@@ -303,12 +305,62 @@ pub fn diff_files(root: &Path, base: &str, head: Option<&str>) -> Result<Vec<Fil
     let mut rels = BTreeSet::new();
     for line in names.lines().chain(untracked.lines()) {
         let rel = line.trim().replace('\\', "/");
-        if rel.ends_with(".rs") {
+        if !rel.is_empty() {
             rels.insert(rel);
         }
     }
+    Ok(rels.into_iter().collect())
+}
+
+/// Added lines in `rels` between `base` and `head` (or the worktree).
+/// Untracked paths count every line in the file.
+pub fn added_lines(root: &Path, base: &str, head: Option<&str>, rels: &BTreeSet<String>) -> u64 {
+    let mut args = vec!["diff", "--numstat", "--relative", base];
+    if let Some(head) = head {
+        args.push(head);
+    }
+    let text = git(root, &args).unwrap_or_default();
+    let mut total = 0u64;
+    let mut seen = BTreeSet::new();
+    for line in text.lines() {
+        let mut parts = line.split('\t');
+        let Some(added) = parts.next() else {
+            continue;
+        };
+        let _deleted = parts.next();
+        let Some(path) = parts.next() else {
+            continue;
+        };
+        let path = path.trim().replace('\\', "/");
+        if !rels.contains(&path) {
+            continue;
+        }
+        seen.insert(path);
+        if added == "-" {
+            continue;
+        }
+        total += added.parse::<u64>().unwrap_or(0);
+    }
+    for rel in rels {
+        if seen.contains(rel) {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(root.join(rel)) else {
+            continue;
+        };
+        total += text.lines().count() as u64;
+    }
+    total
+}
+
+pub fn diff_files(root: &Path, base: &str, head: Option<&str>) -> Result<Vec<FileDelta>, String> {
+    let prefix = repo_prefix(root)?;
+    let rels = changed_rels(root, base, head)?;
     let mut out = Vec::new();
     for rel in rels {
+        if !rel.ends_with(".rs") {
+            continue;
+        }
         let patch = git_diff_patch(root, base, head, &rel).unwrap_or_default();
         let git_rel = format!("{prefix}{rel}");
         let tracked = git_ok(root, &["cat-file", "-e", &format!("{base}:{git_rel}")]);
@@ -551,6 +603,30 @@ mod tests {
             !err.contains("fatal:"),
             "message must not be a raw git error: {err}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn changed_rels_keeps_python_files() {
+        let dir = std::env::temp_dir().join(format!("sc-diff-py-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("src/old.py"), "def old():\n    return 1\n").unwrap();
+        std::fs::write(dir.join("src/lib.rs"), "pub fn old() -> i32 { 1 }\n").unwrap();
+        git_here(&dir, &["init"]);
+        git_here(&dir, &["add", "."]);
+        git_here(&dir, &["commit", "-m", "base"]);
+        std::fs::write(dir.join("src/new.py"), "def new():\n    return 2\n").unwrap();
+        std::fs::write(dir.join("src/lib.rs"), "pub fn old() -> i32 { 2 }\n").unwrap();
+        let rels = changed_rels(&dir, "HEAD", None).unwrap();
+        assert!(rels.iter().any(|rel| rel == "src/new.py"), "{rels:?}");
+        assert!(rels.iter().any(|rel| rel == "src/lib.rs"), "{rels:?}");
+        assert!(!rels.iter().any(|rel| rel == "src/old.py"), "{rels:?}");
+        let py: BTreeSet<String> = rels
+            .into_iter()
+            .filter(|rel| rel.ends_with(".py"))
+            .collect();
+        assert_eq!(added_lines(&dir, "HEAD", None, &py), 2, "{py:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

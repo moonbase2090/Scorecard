@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- The Python pack honors `--diff`. Compile, Ruff, import, and CRAP findings are limited to changed `.py` files. Pytest runs only changed `test_*.py` and `*_test.py` files, so a pre-existing failure outside the diff does not fail the gate. Secret findings on unchanged paths are dropped. Tree mode is unchanged.
 - CI install examples use a fresh `mktemp -d` staging directory per download so a leftover flat `sc` binary cannot shadow a nested release bundle.
 - The `scorecard` GitHub Actions workflow installs the same fixture tooling as `check-ubuntu` and runs strict default gates with a 600-second analyze budget on pull requests (REVIEW_POLICY §6.13).
 - `test.failed` findings no longer use absolute panic paths outside the project (`/rustc/...`, the cargo registry, or other off-tree locations). The report points at the failing test's source file when it can be found, keeps the external location in the message and evidence, and never emits an absolute `file` in JSON or SARIF (#207).
