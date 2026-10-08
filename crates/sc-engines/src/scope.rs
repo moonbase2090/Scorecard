@@ -252,12 +252,28 @@ pub struct FileDelta {
 
 pub fn resolve_base(root: &Path, requested: &str) -> Result<String, String> {
     if requested != "AUTO" {
-        return Ok(requested.to_string());
-    }
-    for candidate in ["HEAD~1", "main", "master"] {
-        if git_ok(root, &["rev-parse", "--verify", "--quiet", candidate]) {
-            return Ok(candidate.to_string());
+        if git_ok(root, &["rev-parse", "--verify", "--quiet", requested]) {
+            return Ok(requested.to_string());
         }
+        return Err(format!(
+            "--diff {requested}: ref not found in this checkout. \
+             In GitHub Actions set fetch-depth: 0 on actions/checkout, \
+             or run git fetch origin main."
+        ));
+    }
+    let head = git(root, &["rev-parse", "HEAD"])
+        .map(|sha| sha.trim().to_string())
+        .unwrap_or_default();
+    for candidate in ["HEAD~1", "main", "master"] {
+        let Ok(sha) = git(root, &["rev-parse", "--verify", "--quiet", candidate]) else {
+            continue;
+        };
+        // A branch name that is HEAD (depth-1 clone of main or master, or the
+        // only commit on that branch) diffs the commit against itself.
+        if sha.trim() == head {
+            continue;
+        }
+        return Ok(candidate.to_string());
     }
     // No history to diff against: HEAD would score zero paths and let the
     // gates pass silently, so fail loudly instead. Explicit --diff HEAD
@@ -502,6 +518,39 @@ mod tests {
     fn explicit_head_base_keeps_working() {
         let dir = single_commit_repo("diff-base-head");
         assert_eq!(resolve_base(&dir, "HEAD"), Ok("HEAD".to_string()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn auto_base_rejects_a_default_branch_that_is_head() {
+        for branch in ["main", "master"] {
+            let dir = single_commit_repo(&format!("diff-base-{branch}"));
+            git_here(&dir, &["branch", "-M", branch]);
+            let err = resolve_base(&dir, "AUTO").expect_err(branch);
+            assert!(
+                err.contains("fetch-depth: 0"),
+                "{branch} must name the fetch-depth fix: {err}"
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    #[test]
+    fn explicit_missing_base_names_the_ref_and_the_fix() {
+        let dir = single_commit_repo("diff-base-missing");
+        let err = resolve_base(&dir, "does-not-exist").expect_err("missing ref");
+        assert!(
+            err.contains("--diff does-not-exist:"),
+            "message must name the ref: {err}"
+        );
+        assert!(
+            err.contains("fetch-depth: 0"),
+            "message must name the fix: {err}"
+        );
+        assert!(
+            !err.contains("fatal:"),
+            "message must not be a raw git error: {err}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
