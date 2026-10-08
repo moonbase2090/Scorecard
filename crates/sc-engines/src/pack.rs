@@ -235,7 +235,11 @@ pub fn text_secrets_with_generated(
     let mut oversized = Vec::new();
     for (path, rel, len) in big_text {
         if len > MAX_TEXT_BYTES {
-            oversized.push(rel);
+            if file_starts_with_object_magic(&path) {
+                findings.push(skipped_object_file(&rel));
+            } else {
+                oversized.push(rel);
+            }
             continue;
         }
         scan_file(&path, &rel, &mut findings);
@@ -262,6 +266,21 @@ fn scan_file(path: &Path, rel: &str, findings: &mut Vec<sc_core::Finding>) {
     }
     let text = String::from_utf8_lossy(&bytes);
     findings.extend(crate::secrets::secrets_in_text(&text, rel));
+}
+
+/// Read only a prefix large enough for PE `e_lfanew` and the PE signature.
+fn file_starts_with_object_magic(path: &Path) -> bool {
+    use std::io::Read;
+    let mut file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(_) => return false,
+    };
+    let mut prefix = [0u8; 512];
+    let read = match file.read(&mut prefix) {
+        Ok(n) => n,
+        Err(_) => return false,
+    };
+    file_has_object_magic(&prefix[..read])
 }
 
 /// Recognized executable / archive magics. A leading NUL pair alone is not enough (#155).
@@ -878,6 +897,31 @@ mod tests {
             findings
                 .iter()
                 .any(|finding| finding.file == "tool" && finding.rule == "secrets.skipped_object"),
+            "{findings:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn oversized_elf_is_skipped_not_partial() {
+        let tail = "x".repeat(32);
+        let token = format!("ghp_{tail}");
+        let root = temp("secrets-oversized-elf");
+        let mut bytes = vec![0x7f, b'E', b'L', b'F'];
+        bytes.resize(MAX_TEXT_BYTES as usize + 1, 0);
+        bytes.extend(token.as_bytes());
+        fs::write(root.join("big"), &bytes).unwrap();
+        let findings = text_secrets(&root, &[]);
+        assert!(
+            !findings
+                .iter()
+                .any(|finding| finding.rule == "secrets.partial"),
+            "{findings:?}"
+        );
+        assert!(
+            findings.iter().any(|finding| {
+                finding.file == "big" && finding.rule == "secrets.skipped_object"
+            }),
             "{findings:?}"
         );
         let _ = fs::remove_dir_all(&root);

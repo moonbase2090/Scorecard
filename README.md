@@ -6,7 +6,7 @@
 
 `sc` is a local code-quality gate. In one run it checks that a project builds, its tests pass, complex code is covered by tests ([CRAP](docs/crap.md)), no secrets are committed, the linter is clean, and every import is a declared dependency. It prints a verdict for people and a JSON scorecard for agents and CI. Ten language packs are built in. Project site: [scorecardcli.com](https://scorecardcli.com).
 
-The secrets scan checks files up to 64 MiB even when they contain NUL bytes. It skips gitignored large files. A non-ignored file over 64 MiB produces `secrets.partial`. Files that start with a known object format (ELF, Mach-O, PE, WebAssembly, or `ar` archive) are not scanned; the report lists `secrets.skipped_object` (info) instead of matching token patterns inside the binary.
+The secrets scan checks files up to 64 MiB even when they contain NUL bytes. It skips gitignored large files. A non-ignored file over 64 MiB produces `secrets.partial`, except when the file begins with a known object format (ELF, Mach-O, PE, WebAssembly, or `ar` archive); those binaries are not scanned at any size and the report lists `secrets.skipped_object` (info) instead of matching token patterns inside the binary.
 
 The secrets gate recognizes Slack incoming webhooks, Stripe restricted live keys (`rk_live_`), and AWS provider secret keys in Terraform, alongside the existing token and key formats.
 
