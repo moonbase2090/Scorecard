@@ -1483,7 +1483,12 @@ fn finish(mut draft: Draft) -> AnalyzeOutput {
                 other_paths: draft.other_paths,
             },
         },
-        verdict: if verdict_failed { "fail" } else { "pass" }.to_string(),
+        verdict: if draft.analyzer_error || verdict_failed {
+            "fail"
+        } else {
+            "pass"
+        }
+        .to_string(),
         fail_on: draft.fail_on,
         engines: sc_core::ScorecardEngines {
             engines_run: draft.ran,
