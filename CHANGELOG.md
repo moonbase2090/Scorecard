@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Tree-scope Rust analysis reuses its already-discovered source paths and text while checking out-of-line test modules, avoiding a second workspace walk and redundant reads without changing findings.
 - Empty or blank `--fail-on` and `gates.fail_on` selections now fail with a configuration error. Use `none` by itself to return exit 0 for every gate. JSON and SARIF record the selected gates, and stderr names enforced failures omitted from the selection.
 - A bare `--diff` (AUTO base) no longer falls back to `HEAD` in checkouts with no resolvable history. Shallow or single-commit checkouts now exit 2 with a message naming the fix (`fetch-depth: 0` or `--diff BASE`) instead of silently scoring zero paths. An explicit `--diff HEAD` keeps working.
 - The secrets scan uses `git ls-files` in a work tree so tracked files under `vendor/`, `dist/`, `build/`, and other walker-skipped directories are still checked. Ignored paths and `[scope] exclude` behave as before (#202).
