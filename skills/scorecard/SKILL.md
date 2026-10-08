@@ -37,7 +37,7 @@ Analyze `PATH` (default `.`). The default output is pretty text on a terminal an
 | `--out PATH` | none | Also write the report to a file. `all` writes `.json`, `.md`, `.sarif`, and `.html` siblings. |
 | `--fail-on LIST` | `types,tests,crap,secrets,lint` | Comma-separated gates whose failure sets exit 1: `types`, `tests`, `crap`, `secrets`, `sca`, `spec`, `mutation`, `lint`, `html`, `links`, or `a11y`. |
 | `--pack PACK` | detected | Select `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, `web`, or `command`. Useful when multiple project markers match. |
-| `--diff [BASE]` | off; omitted base uses `HEAD~1`, then `main` | Analyze changes against a Git base. Uncommitted changes count. |
+| `--diff [BASE]` | off; omitted base tries `HEAD~1`, then `main`, then `master`, and exits 2 when none resolve | Analyze changes against a Git base. Uncommitted changes count. In a shallow or single-commit checkout, fetch full history (`fetch-depth: 0`) or pass `--diff BASE`. |
 | `--diff-head REV` | worktree | Compare a diff base to a commit instead of the worktree; use with `--diff`. |
 | `--paths FILE` | off | Analyze newline-separated paths. Cannot be combined with `--diff`. |
 | `--spec FILE` | off | Check that paths and public items named in a spec exist. |
