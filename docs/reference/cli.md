@@ -16,7 +16,7 @@ sc help [COMMAND]
 | Flag | Default | Meaning |
 |---|---|---|
 | `--format FORMAT` | `pretty` on a terminal, `json` otherwise | `json`, `pretty`, `md`, `sarif`, `html`, or `all`. See [Output](#output). |
-| `--out PATH` | none | Also write the report to `PATH`. |
+| `--out PATH` | none | Also write the report to `PATH`. Stdout prints the short summary, including when it is not a terminal. Without this flag, stdout is the chosen `--format`. |
 | `--fail-on LIST` | `types,tests,crap,secrets,lint` | Comma-separated [gates](gates.md) whose failures set exit 1. Use `none` by itself to suppress gate failures from the exit code. Empty or blank lists are invalid. Overrides `gates.fail_on`; already enforced failures remain in the report verdict. |
 | `--pack PACK` | detected | `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, `web`, or `command`. Needed when the tree has two markers. See [packs](../packs.md). |
 | `--diff [BASE]` | off | Score only what changed against git `BASE`. Paths are relative to the project directory, including when that directory sits inside a larger git repository. Without `BASE` (AUTO): `HEAD~1`, else `main`, else `master`, skipping a candidate that is the same commit as `HEAD`. When none remain — a shallow clone, a single commit, or a depth-1 clone of `main` or `master` — the run exits 2 with verdict `fail` and one stderr line; fetch full history (`fetch-depth: 0`) or pass `--diff BASE`. A missing explicit base exits 2 the same way and names the ref. An explicit `--diff HEAD` still works. Uncommitted changes count. |
@@ -74,6 +74,8 @@ Print general help with `sc help`, or command help with `sc help analyze`.
 | `sarif` | SARIF 2.1.0. Only `secrets.*` findings are level `error`; every other rule is `warning` or `note`. | Same SARIF to `PATH` |
 | `html` | Self-contained HTML page | Same HTML to `PATH` |
 | `all` | JSON, then Markdown | `.json`, `.md`, `.sarif`, and `.html` files next to `PATH` |
+
+With `--out`, stdout is the short summary and the third column is what is written to the file. Without `--out`, stdout is the second column.
 
 Every run also writes `.sc/last-scorecard.json`.
 
