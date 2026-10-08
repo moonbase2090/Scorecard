@@ -192,10 +192,15 @@ pub fn text_secrets_with_generated(
                     {
                         continue;
                     }
-                    if sc_graph::secrets_scan_includes_path(root, &rel, exclude, include_generated)
+                    if !sc_graph::secrets_scan_includes_path(root, &rel, exclude, include_generated)
                     {
-                        files.push(root.join(&rel));
+                        continue;
                     }
+                    let path = root.join(&rel);
+                    if !path.is_file() {
+                        continue;
+                    }
+                    files.push(path);
                 }
             }
             Err(message) => {
@@ -1001,6 +1006,72 @@ mod tests {
         );
         assert!(
             findings.iter().any(|finding| finding.file == "build/c.txt"),
+            "{findings:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn git_submodule_gitlink_does_not_fail_the_secrets_gate() {
+        let root = temp("secrets-git-submodule");
+        let sub = root.join("sub-repo");
+        fs::create_dir_all(&sub).unwrap();
+        fs::write(sub.join("README.md"), "nested\n").unwrap();
+        let git = |cwd: &std::path::Path, args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .arg("-C")
+                .arg(cwd)
+                .args(args)
+                .env("GIT_AUTHOR_NAME", "sc")
+                .env("GIT_AUTHOR_EMAIL", "sc@example.com")
+                .env("GIT_COMMITTER_NAME", "sc")
+                .env("GIT_COMMITTER_EMAIL", "sc@example.com")
+                .status()
+                .unwrap();
+            assert!(status.success(), "{args:?} in {cwd:?}");
+        };
+        git(&sub, &["init", "-q"]);
+        git(&sub, &["add", "-A"]);
+        git(&sub, &["commit", "-q", "-m", "sub"]);
+        fs::write(root.join("src.txt"), "ok\n").unwrap();
+        git(&root, &["init", "-q"]);
+        let hash = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&sub)
+            .arg("rev-parse")
+            .arg("HEAD")
+            .output()
+            .expect("rev-parse");
+        assert!(hash.status.success());
+        let hash = String::from_utf8_lossy(&hash.stdout).trim().to_string();
+        let index = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args([
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                "160000",
+                &hash,
+                "vendor/sub",
+            ])
+            .status()
+            .expect("update-index");
+        assert!(index.success());
+        fs::create_dir_all(root.join("vendor/sub")).unwrap();
+        git(&root, &["add", "src.txt"]);
+        git(&root, &["commit", "-q", "-m", "parent"]);
+        let findings = text_secrets(&root, &[]);
+        assert!(
+            !findings
+                .iter()
+                .any(|finding| finding.rule == "secrets.unreadable"),
+            "{findings:?}"
+        );
+        assert!(
+            !findings.iter().any(|finding| {
+                finding.severity == "error" && finding.rule.starts_with("secrets.")
+            }),
             "{findings:?}"
         );
         let _ = fs::remove_dir_all(&root);

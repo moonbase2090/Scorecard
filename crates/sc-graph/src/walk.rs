@@ -198,7 +198,7 @@ pub fn git_secrets_paths(root: &Path) -> Option<Result<GitSecretsPaths, String>>
         .stdout
         .split(|byte| *byte == 0)
         .filter(|chunk| !chunk.is_empty())
-        .filter_map(|chunk| std::str::from_utf8(chunk).ok().map(str::to_string))
+        .map(git_ls_path_chunk)
         .collect();
     let tracked_listing = Command::new("git")
         .arg("-C")
@@ -212,17 +212,21 @@ pub fn git_secrets_paths(root: &Path) -> Option<Result<GitSecretsPaths, String>>
         return None;
     };
     if !tracked_listing.status.success() {
-        return Some(Err(
-            String::from_utf8_lossy(&tracked_listing.stderr).trim().to_string(),
-        ));
+        return Some(Err(String::from_utf8_lossy(&tracked_listing.stderr)
+            .trim()
+            .to_string()));
     }
     let tracked = tracked_listing
         .stdout
         .split(|byte| *byte == 0)
         .filter(|chunk| !chunk.is_empty())
-        .filter_map(|chunk| std::str::from_utf8(chunk).ok().map(str::to_string))
+        .map(git_ls_path_chunk)
         .collect();
     Some(Ok(GitSecretsPaths { paths, tracked }))
+}
+
+fn git_ls_path_chunk(chunk: &[u8]) -> String {
+    String::from_utf8_lossy(chunk).into_owned()
 }
 
 /// Whether a directory-oriented source walk would skip this relative path.
