@@ -98,9 +98,12 @@ jobs:
             file "$src/sc-mcp" | grep -q 'ARM aarch64'
           fi
           tmp=$(mktemp -d)
-          cp "$src/sc" "$src/sc-mcp" LICENSE README.md "$tmp/"
+          bundle="sc-v${ver}-${triple}"
+          mkdir -p "$tmp/$bundle"
+          cp "$src/sc" "$src/sc-mcp" LICENSE README.md "$tmp/$bundle/"
           mkdir -p dist
-          tar -C "$tmp" -czf "dist/sc-v${ver}-${triple}.tar.gz" sc sc-mcp LICENSE README.md
+          tar -C "$tmp" -czf "dist/${bundle}.tar.gz" "$bundle"
+          python3 scripts/check-archive-layout.py "dist/${bundle}.tar.gz"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: linux-${{ matrix.target }}

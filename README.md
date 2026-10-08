@@ -22,19 +22,29 @@ case "$(uname -s)-$(uname -m)" in
   Linux-aarch64) TARGET=aarch64-unknown-linux-gnu ;;
   Linux-x86_64) TARGET=x86_64-unknown-linux-gnu ;;
 esac
-URL="https://github.com/moonbase2090/Scorecard/releases/download/$VERSION/sc-$VERSION-$TARGET.tar.gz"
+URL="https://github.com/moonbase2090/Scorecard/releases/download/$VERSION/sc-v${VERSION#v}-$TARGET.tar.gz"
 SC_DIR="$(mktemp -d)"
-trap 'rm -rf "$SC_DIR"' EXIT
 HTTP_STATUS="$(curl -sSL -w '%{http_code}' -o "$SC_DIR/scorecard.tar.gz" "$URL")" || HTTP_STATUS=000
 if [ "$HTTP_STATUS" = 200 ]; then
-  tar -xzf "$SC_DIR/scorecard.tar.gz" -C "$SC_DIR" sc
+  tar -xzf "$SC_DIR/scorecard.tar.gz" -C "$SC_DIR"
+  if [ -f "$SC_DIR/sc" ]; then
+    SC_BIN="$SC_DIR/sc"
+  else
+    SC_BIN="$(find "$SC_DIR" -maxdepth 2 -type f -name sc | head -1)"
+  fi
+  mkdir -p "$HOME/.local/bin"
+  install -m 755 "$SC_BIN" "$HOME/.local/bin/sc"
+  export PATH="$HOME/.local/bin:$PATH"
 elif [ "$HTTP_STATUS" = 404 ] && [ -n "${SCORECARD_DOCS_BINARY:-}" ]; then
-  cp "$SCORECARD_DOCS_BINARY" "$SC_DIR/sc"
+  mkdir -p "$HOME/.local/bin"
+  install -m 755 "$SCORECARD_DOCS_BINARY" "$HOME/.local/bin/sc"
+  export PATH="$HOME/.local/bin:$PATH"
 else
   printf 'Could not download Scorecard %s (HTTP %s). Try again or install from source: https://github.com/moonbase2090/Scorecard#install\n' "$VERSION" "$HTTP_STATUS" >&2
   exit 1
 fi
-"$SC_DIR/sc" analyze .
+trap 'rm -rf "$SC_DIR"' EXIT
+sc analyze .
 ```
 
 In a terminal the report looks like this (from `testdata/good_crate`):
@@ -95,7 +105,7 @@ grep -Eq 'src/lib.rs:[0-9]+  clippy::let_and_return' <<<"$output"
 
 Next:
 
-- Put `sc` on your `PATH`: `sudo mv sc /usr/local/bin/`, or see [Install](#install).
+- Put `sc` on your `PATH` (the quickstart installs to `~/.local/bin`), or see [Install](#install).
 - Add `.sc/` to `.gitignore`. `sc` keeps its last report and caches there.
 - Run `sc setup` so coding agents on this machine can use `sc` ([agents](docs/how-to/agents.md)).
 - Install just the agent instructions with `sc skills install --agent detected`; see [skill installation](docs/how-to/agents.md#install-the-skill).
@@ -120,7 +130,7 @@ The secrets scan also finds PEM private keys split across source string literals
 
 ## Install
 
-Release [v0.1.6](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.6). Each `.tar.gz` holds `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md`.
+Release [v0.1.6](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.6). Each `.tar.gz` holds a top-level directory `sc-v<version>-<target>/` with `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md` (v0.1.6 archives use a flat layout; the GitHub Action accepts both).
 
 | Platform | Asset |
 |---|---|

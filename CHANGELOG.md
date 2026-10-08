@@ -4,6 +4,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Release `.tar.gz` archives use a nested `sc-vX.Y.Z-<target>/` directory. `scripts/check-archive-layout.py` enforces the layout in release builds and CI. The GitHub Action still installs flat v0.1.6 archives.
+- The Scorecard action accepts `budget-seconds` and passes it to `sc analyze`.
+
+### Changed
+
+- README quickstart and [CI](docs/how-to/ci.md) install examples keep `sc` on `PATH` after download (no longer run from a temp dir that `trap` deletes). Generic CI docs install from `$RUNNER_TEMP`, not the checkout.
+
 ### Fixed
 
 - Empty or blank `--fail-on` and `gates.fail_on` selections now fail with a configuration error. Use `none` by itself to return exit 0 for every gate. JSON and SARIF record the selected gates, and stderr names enforced failures omitted from the selection.
