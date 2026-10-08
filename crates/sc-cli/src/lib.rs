@@ -50,7 +50,8 @@ struct AnalyzeArgs {
     /// gets the full report.
     #[arg(long)]
     out: Option<PathBuf>,
-    /// Gates that set exit 1 when they fail. The report verdict still reflects every enforced gate.
+    /// Gates that set exit 1 when they fail. Use `none` by itself to suppress every gate failure.
+    /// An empty list is invalid. The report verdict still reflects every enforced gate.
     /// Default: types,tests,crap,secrets,lint.
     #[arg(long, value_name = "LIST")]
     fail_on: Option<String>,
@@ -231,6 +232,7 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
     let mut loaded = match load_config_file(config_path.as_deref()) {
         Ok(config) => config,
         Err(err) => {
+            let _ = writeln!(io::stderr(), "sc: {err}");
             let card = early_card(&repo, "config.invalid", "config", &err);
             return emit(
                 &mut stdout,
@@ -246,6 +248,7 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
         match normalize_gates(&[list]) {
             Ok(gates) => loaded.gates.fail_on = gates,
             Err(err) => {
+                let _ = writeln!(io::stderr(), "sc: {err}");
                 let card = early_card(&repo, "config.invalid", "config", &err);
                 return emit(
                     &mut stdout,
@@ -359,6 +362,22 @@ fn emit(
         {
             let _ = writeln!(io::stderr(), "sc: failed to write report: {err}");
             code = 2;
+        }
+    }
+    if code == 0 {
+        let failed_enforced: Vec<_> = card
+            .measures
+            .gates
+            .iter()
+            .filter(|gate| gate.enforced && !gate.pass)
+            .map(|gate| gate.id.as_str())
+            .collect();
+        if !failed_enforced.is_empty() {
+            let _ = writeln!(
+                io::stderr(),
+                "sc: exit 0 although enforced gates failed: {} (not in --fail-on)",
+                failed_enforced.join(", ")
+            );
         }
     }
     let body = match stdout_body_format(view.stdout_format, out.is_some(), view.tty) {

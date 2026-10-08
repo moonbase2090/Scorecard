@@ -53,6 +53,7 @@ pub fn to_sarif(card: &Scorecard) -> String {
             "properties": {
                 "scorecardVerdict": sc_core::report_verdict(card),
                 "scorecardGates": gates,
+                "fail_on": card.fail_on,
             },
         }]
     });

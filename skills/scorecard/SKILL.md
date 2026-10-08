@@ -35,7 +35,7 @@ Analyze `PATH` (default `.`). The default output is pretty text on a terminal an
 |---|---|---|
 | `--format FORMAT` | `json`, `pretty`, `md`, `sarif`, `html`, `all`; auto-selects pretty/JSON when omitted | Choose stdout and report format. |
 | `--out PATH` | none | Also write the report to a file. `all` writes `.json`, `.md`, `.sarif`, and `.html` siblings. |
-| `--fail-on LIST` | `types,tests,crap,secrets,lint` | Comma-separated gates whose failure sets exit 1: `types`, `tests`, `crap`, `secrets`, `sca`, `spec`, `mutation`, `lint`, `html`, `links`, or `a11y`. |
+| `--fail-on LIST` | `types,tests,crap,secrets,lint` | Comma-separated gates whose failure sets exit 1: `types`, `tests`, `crap`, `secrets`, `sca`, `spec`, `mutation`, `lint`, `html`, `links`, or `a11y`. Use `none` by itself to suppress gate failures from the exit code. |
 | `--pack PACK` | detected | Select `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, `web`, or `command`. Useful when multiple project markers match. |
 | `--diff [BASE]` | off; omitted base uses `HEAD~1`, then `main` | Analyze changes against a Git base. Uncommitted changes count. |
 | `--diff-head REV` | worktree | Compare a diff base to a commit instead of the worktree; use with `--diff`. |
@@ -101,7 +101,7 @@ Unknown config keys are ignored. Check spelling against the config reference bef
 
 ## Read the result
 
-Exit `0` means no selected gate failed. Exit `1` means a selected gate failed. Exit `2` means Scorecard could not run, commonly because a path, config, or required toolchain is unavailable. The report verdict can still be `fail` when a failing gate is not selected by `--fail-on`; inspect every gate's `enforced` and `pass` values.
+Exit `0` means no selected gate failed. `--fail-on none` deliberately selects no gates. Exit `1` means a selected gate failed. Exit `2` means Scorecard could not run, commonly because a path, config, required toolchain, or gate selection is invalid. Empty or blank `--fail-on` and `gates.fail_on` values are invalid; omit the setting to use the default gates. If an enforced gate fails but is not selected, Scorecard writes one stderr warning with the failed gate names. The report verdict remains `fail`; inspect every gate's `enforced` and `pass` values.
 
 Use `--format json` for automation, `--format pretty` for a terminal, `--format md` for a concise shareable report, `--format sarif` for GitHub code scanning, and `--format html --out report.html` for a self-contained browser report. Findings marked with disposition `fix` need attention; advisory findings may not affect the process exit.
 

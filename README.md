@@ -71,7 +71,7 @@ duration: 0.7s
 exit 0: enforced gates passed
 ```
 
-Exit status: `1` a gate selected by `--fail-on` failed; `0` none did; `2` `sc` could not run. The report still shows `FAIL` when any enforced gate fails, even if `--fail-on` keeps the process exit code at 0. [Reading the report](docs/report.md) explains every section.
+Exit status: `1` a gate selected by `--fail-on` failed; `0` none did; `2` `sc` could not run. Use `--fail-on none` to return 0 for every gate while keeping failures in the report. If an enforced gate fails while the exit code is 0, `sc` writes one stderr warning with the failed gate names. An empty or blank `--fail-on` selection is invalid. Omit the option to use the default gates. [Reading the report](docs/report.md) explains every section.
 
 A dirty report lists up to three changed paths. JSON includes every path in `git.dirty_paths`. Scorecard's saved report, cache and coverage files under `.sc/`, and files selected by `--out` do not make a clean checkout dirty.
 

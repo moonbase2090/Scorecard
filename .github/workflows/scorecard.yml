@@ -29,6 +29,6 @@ jobs:
       - uses: ./action
         with:
           format: all
-          fail-on: ""
+          fail-on: none
           diff: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
           build-from-source: ${{ github.event_name == 'pull_request' }}

@@ -22,7 +22,7 @@ Only the first file found is read. Command-line flags override the matching keys
 
 | Key | Default | Meaning |
 |---|---|---|
-| `gates.fail_on` | `["types", "tests", "crap", "secrets", "lint"]` | [Gates](gates.md) whose failures set exit 1. `--fail-on` overrides; already enforced failures remain in the report verdict. An unknown gate name is an error (exit 2). |
+| `gates.fail_on` | `["types", "tests", "crap", "secrets", "lint"]` | [Gates](gates.md) whose failures set exit 1. Set it to `["none"]` to suppress gate failures from the exit code. An empty list, blank value, mixed `none` list, or unknown gate is an error (exit 2). Enforced failures remain in the report verdict. |
 | `gates.crap_threshold` | `30` | A function with a [CRAP](../crap.md) score above this fails the `crap` gate. |
 | `gates.new_fn_untested_cc` | `15` | A function at or above this complexity with 0% measured coverage fails the `crap` gate (`complexity.untested`). With `--diff`, only new functions count. |
 

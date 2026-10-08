@@ -20,11 +20,11 @@ jobs:
           diff: origin/${{ github.base_ref }}
 ```
 
-The action installs `sc`, runs `sc analyze .`, and fails the job when a gate selected by `fail-on` fails. The report verdict remains `FAIL` for any enforced gate failure, even if `fail-on` lets the job exit 0. On public repositories the SARIF report appears in the pull request's code scanning alerts. Only `secrets.*` findings upload at error level; every other rule (test failures, missing coverage, lint, CRAP) uploads at warning, so quality signals never count as security vulnerabilities. With `format: html` or `all`, the report is uploaded as the `scorecard-report` artifact.
+The action installs `sc`, runs `sc analyze .`, and fails the job when a gate selected by `fail-on` fails. The report verdict remains `FAIL` for any enforced gate failure, even if `fail-on` lets the job exit 0. In that case, `sc` writes one warning to stderr with the failed gate names. Set `fail-on: none` to keep the report and return success for every gate. An empty value is invalid. Omit the input to use the default gates. On public repositories the SARIF report appears in the pull request's code scanning alerts. Only `secrets.*` findings upload at error level; every other rule (test failures, missing coverage, lint, CRAP) uploads at warning, so quality signals never count as security vulnerabilities. With `format: html` or `all`, the report is uploaded as the `scorecard-report` artifact.
 
 | Input | Default | Meaning |
 |---|---|---|
-| `fail-on` | `types,tests,crap,secrets,lint` | Gates whose failures fail the job. Empty exits 0 but does not hide failures from gates that remain enforced in the report. |
+| `fail-on` | `types,tests,crap,secrets,lint` | Comma-separated gates whose failures fail the job. Use `none` by itself to suppress gate failures from the exit code. Empty is invalid. |
 | `diff` | `""` | Base ref for `--diff`. Empty scores the whole tree. On a pull request, pass the base ref so the report covers changed code and a one-line count of the rest of the tree. |
 | `format` | `sarif` | `json`, `md`, `sarif`, `html`, or `all` |
 | `spec` | `""` | Path for `--spec` |
