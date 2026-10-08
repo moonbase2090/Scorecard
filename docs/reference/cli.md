@@ -19,7 +19,7 @@ sc help [COMMAND]
 | `--out PATH` | none | Also write the report to `PATH`. |
 | `--fail-on LIST` | `types,tests,crap,secrets,lint` | Comma-separated [gates](gates.md) whose failures set exit 1. Use `none` by itself to suppress gate failures from the exit code. Empty or blank lists are invalid. Overrides `gates.fail_on`; already enforced failures remain in the report verdict. |
 | `--pack PACK` | detected | `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, `web`, or `command`. Needed when the tree has two markers. See [packs](../packs.md). |
-| `--diff [BASE]` | off | Score only what changed against git `BASE`. Paths are relative to the project directory, including when that directory sits inside a larger git repository. Without `BASE`: `HEAD~1`, else `main`. Uncommitted changes count. |
+| `--diff [BASE]` | off | Score only what changed against git `BASE`. Paths are relative to the project directory, including when that directory sits inside a larger git repository. Without `BASE` (AUTO): `HEAD~1`, else `main`, else `master`. When none resolve — for example in a shallow or single-commit checkout — the run exits 2; fetch full history (`fetch-depth: 0`) or pass `--diff BASE`. An explicit `--diff HEAD` still works. Uncommitted changes count. |
 | `--diff-head REV` | worktree | With `--diff`, compare `BASE` to commit `REV` instead of the worktree. |
 | `--paths FILE` | off | Score only the source files listed in `FILE`, one per line. Cannot be combined with `--diff`. |
 | `--spec FILE` | off | Check that files and public items named in `FILE` exist (`spec` gate). |
