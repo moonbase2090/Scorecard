@@ -32,6 +32,6 @@ error
   Fix the failing test or the behavior it checks
 
 engines run: compile, tests, complexity, crap, sca, secrets, perf, lint
-engines skipped: coverage, spec, mutation, llm
+engines skipped: coverage, spec, mutation, llm, test_value.weakening
 duration: DURs
 exit 1: a gate failed
