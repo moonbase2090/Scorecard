@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- The Python pack honors `--diff`. Compile, Ruff, import, and CRAP findings are limited to changed `.py` files. Pytest runs only changed `test_*.py` and `*_test.py` files, so a pre-existing failure outside the diff does not fail the gate. Secret findings on unchanged paths are dropped. Tree mode is unchanged.
 - Tree-scope Rust analysis reuses its already-discovered source paths and text while checking out-of-line test modules, avoiding a second workspace walk and redundant reads without changing findings.
 - CI install examples use a fresh `mktemp -d` staging directory per download so a leftover flat `sc` binary cannot shadow a nested release bundle.
 - The `scorecard` GitHub Actions workflow installs the same fixture tooling as `check-ubuntu` and runs strict default gates with a 600-second analyze budget on pull requests (REVIEW_POLICY §6.13).
