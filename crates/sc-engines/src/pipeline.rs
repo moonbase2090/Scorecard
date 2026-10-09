@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use sc_core::{
     apply_disposition, compute_scores, CrapSection, Finding, Gate, GitInfo, LlmSection, Metrics,
-    MutationSection, RunRecord, Scope, Scorecard, SpecSection, SCORECARD_VERSION,
+    MutationSection, RunRecord, Scope, Scorecard, SpecSection, TestValueSection, SCORECARD_VERSION,
 };
 use sc_graph::FunctionInfo;
 
@@ -25,6 +25,7 @@ use crate::crap::{evaluate, unmatched_functions};
 use crate::mutation::run_mutation;
 use crate::scope::{empty_selection, Selection};
 use crate::spec_check::{check_spec, gap_value};
+use crate::weakening::run_weakening;
 
 /// Progress updates for a long analysis run (e.g. a CLI spinner).
 ///
@@ -1471,6 +1472,14 @@ fn assemble_rust_report(
         &mut state.skipped,
         &mut state.findings,
     );
+    report(request, "Checking test weakening");
+    let weakening = weakening_engine(
+        request,
+        &mut state.ran,
+        &mut state.skipped,
+        &mut state.findings,
+    );
+    let test_value = TestValueSection::assemble(&mutation.section, &weakening.section);
     let llm = llm_engine(
         request,
         &mut spec,
@@ -1534,7 +1543,7 @@ fn assemble_rust_report(
         threshold,
         worst: crap.worst,
         mutation: mutation.section,
-        test_value: mutation.test_value,
+        test_value,
         spec: spec.section,
         intent: request.intent.clone(),
         llm,
@@ -2482,10 +2491,13 @@ fn spec_engine(
 
 struct MutationRun {
     section: MutationSection,
-    test_value: Option<sc_core::TestValueSection>,
     add_gate: bool,
     pass: bool,
     reason: String,
+}
+
+struct WeakeningRun {
+    section: sc_core::TestValueWeakening,
 }
 
 fn mutation_engine(
@@ -2503,7 +2515,6 @@ fn mutation_engine(
         skipped.push("mutation".into());
         return MutationRun {
             section: MutationSection::skipped(),
-            test_value: None,
             add_gate: false,
             pass: true,
             reason: String::new(),
@@ -2534,13 +2545,37 @@ fn mutation_engine(
         String::new()
     };
     let section = outcome.section;
-    let test_value = Some(sc_core::TestValueSection::from_mutation(&section));
     MutationRun {
         section,
-        test_value,
         add_gate: true,
         pass,
         reason,
+    }
+}
+
+fn weakening_engine(
+    request: &AnalyzeRequest,
+    ran: &mut Vec<String>,
+    skipped: &mut Vec<String>,
+    findings: &mut Vec<Finding>,
+) -> WeakeningRun {
+    if request.diff_base.is_none() {
+        skipped.push("test_value.weakening".into());
+        return WeakeningRun {
+            section: sc_core::TestValueWeakening::skipped(),
+        };
+    }
+    let base = request.diff_base.clone().unwrap_or_else(|| "AUTO".into());
+    let resolved = crate::scope::resolve_base(&request.root, &base).ok();
+    let outcome = run_weakening(&request.root, resolved.as_deref());
+    if outcome.ran {
+        ran.push("test_value.weakening".into());
+    } else {
+        skipped.push("test_value.weakening".into());
+    }
+    findings.extend(outcome.findings);
+    WeakeningRun {
+        section: outcome.section,
     }
 }
 

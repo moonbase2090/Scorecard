@@ -1,0 +1,15 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,3 +1,3 @@
+-pub fn add(a: i32, b: i32) -> i32 { a + b }
++pub fn add(a: i32, b: i32) -> i32 { a + b + 1 }
+diff --git a/tests/smoke.rs b/tests/smoke.rs
+--- a/tests/smoke.rs
++++ b/tests/smoke.rs
+@@ -4,7 +4,7 @@ use demo::add;
+ #[test]
+ fn adds() {
+-    assert_eq!(add(1, 2), 3);
++    assert_eq!(add(1, 2), 4);
+ }

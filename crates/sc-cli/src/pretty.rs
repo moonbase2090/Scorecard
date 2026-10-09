@@ -94,6 +94,23 @@ fn push_test_value(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width:
         pct, m.killed, m.survived, m.timeout, m.unviable, m.status
     );
     out.push_str(&fit(&line, width, opts.color));
+    out.push('\n');
+    let w = &tv.weakening;
+    let weakening_line = if w.status == "ran" {
+        if w.findings == 0 {
+            format!("  weakening: none in diff [{}]", w.status)
+        } else {
+            format!(
+                "  weakening: {} finding(s) in diff [{}]",
+                w.findings, w.status
+            )
+        }
+    } else if let Some(reason) = &w.reason {
+        format!("  weakening: skipped ({}) [{}]", reason, w.status)
+    } else {
+        format!("  weakening: [{}]", w.status)
+    };
+    out.push_str(&fit(&weakening_line, width, opts.color));
     out.push_str("\n\n");
 }
 
