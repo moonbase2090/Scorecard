@@ -1829,6 +1829,29 @@ fn run_tests(
     run_cargo(root, &args, deadline, toolchain_pin)
 }
 
+/// Remove coverage profiles without deleting the instrumented build.
+///
+/// `cargo llvm-cov --no-clean` skips its usual `cargo clean`, which is what
+/// makes a second analyze rebuild the workspace. It also skips deleting
+/// profiles. Those profiles have to go: the report merges every top-level
+/// `.profraw` still in `target/llvm-cov-target`. Doctest and trybuild leftovers
+/// are removed for the same reason the stock clean removes them.
+fn clear_stale_llvm_cov_profiles(root: &Path) {
+    let cov_target = root.join("target").join("llvm-cov-target");
+    if let Ok(entries) = std::fs::read_dir(&cov_target) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.ends_with(".profraw") || name.ends_with(".profdata") {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(cov_target.join("doctestbins"));
+    let _ = std::fs::remove_dir_all(root.join("target").join("tests").join("trybuild"));
+    let _ = std::fs::remove_dir_all(root.join("target").join("ui"));
+}
+
 fn run_coverage(
     root: &Path,
     manifest: &Path,
@@ -1843,6 +1866,10 @@ fn run_coverage(
     }
     let manifest_s = manifest.to_string_lossy().to_string();
     let out_s = out_path.to_string_lossy().to_string();
+    // Keep the instrumented objects in target/llvm-cov-target, but drop the
+    // previous run's profiles first. cargo-llvm-cov merges every top-level
+    // .profraw, so leaving them in place unions old counters into this report.
+    clear_stale_llvm_cov_profiles(root);
     let started = Instant::now();
     let budget = deadline.saturating_duration_since(started);
     let mut args = vec!["llvm-cov"];
@@ -1853,6 +1880,7 @@ fn run_coverage(
         &out_s,
         "--manifest-path",
         &manifest_s,
+        "--no-clean",
     ]);
     let captured = run_cargo(root, &args, deadline, toolchain_pin);
     match &captured {
@@ -2875,6 +2903,89 @@ mod tests {
             "{} analyzed function(s)",
             MAX_UNMATCHED_FUNCTION_EVIDENCE + 5
         )));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn warm_coverage_matches_this_run_and_keeps_the_library_build() {
+        use std::os::unix::fs::MetadataExt;
+
+        let root = std::env::temp_dir().join(format!("sc-cov-warm-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("tests")).unwrap();
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"covdemo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/lib.rs"),
+            "pub fn covered() -> i32 {\n    1\n}\npub fn missed() -> i32 {\n    2\n}\n",
+        )
+        .unwrap();
+        let call_covered = "#[test]\nfn calls() {\n    assert_eq!(covdemo::covered(), 1);\n}\n";
+        let call_missed = "#[test]\nfn calls() {\n    assert_eq!(covdemo::missed(), 2);\n}\n";
+        std::fs::write(root.join("tests/call.rs"), call_covered).unwrap();
+
+        let manifest = root.join("Cargo.toml");
+        let deadline = Instant::now() + Duration::from_secs(180);
+        let mut runs = Vec::new();
+        let first = run_coverage(&root, &manifest, deadline, true, "", &mut runs)
+            .expect("first coverage run");
+        assert_eq!(coverage_rate(&first, "covered"), 1.0, "{first:?}");
+        assert_eq!(coverage_rate(&first, "missed"), 0.0, "{first:?}");
+        let rlib = library_rlib(&root);
+        let inode = std::fs::metadata(&rlib).unwrap().ino();
+
+        std::fs::write(root.join("tests/call.rs"), call_missed).unwrap();
+        let second = run_coverage(&root, &manifest, deadline, true, "", &mut runs)
+            .expect("warm coverage run");
+        let warm_rlib = library_rlib(&root);
+        assert_eq!(
+            warm_rlib, rlib,
+            "instrumented library artifact was replaced"
+        );
+        assert_eq!(
+            std::fs::metadata(&warm_rlib).unwrap().ino(),
+            inode,
+            "instrumented library was rebuilt; coverage clean ran"
+        );
+        assert_eq!(
+            coverage_rate(&second, "covered"),
+            0.0,
+            "stale profile still counts covered(): {second:?}"
+        );
+        assert_eq!(coverage_rate(&second, "missed"), 1.0, "{second:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    fn coverage_rate(data: &crate::coverage::CoverageData, function: &str) -> f64 {
+        let suffix = format!("::{function}");
+        data.functions
+            .iter()
+            .filter(|item| item.demangled == function || item.demangled.ends_with(&suffix))
+            .map(|item| item.coverage)
+            .max_by(|left, right| left.partial_cmp(right).unwrap())
+            .unwrap_or_else(|| panic!("no coverage row for {function}"))
+    }
+
+    #[cfg(unix)]
+    fn library_rlib(root: &Path) -> PathBuf {
+        let deps = root.join("target/llvm-cov-target/debug/deps");
+        let mut found = Vec::new();
+        for entry in std::fs::read_dir(&deps).unwrap() {
+            let path = entry.unwrap().path();
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if name.starts_with("libcovdemo-") && name.ends_with(".rlib") {
+                found.push(path);
+            }
+        }
+        assert_eq!(found.len(), 1, "expected one covdemo rlib, found {found:?}");
+        found.remove(0)
     }
 
     #[test]
