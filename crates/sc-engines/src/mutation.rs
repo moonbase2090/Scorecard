@@ -101,7 +101,7 @@ fn execute_with(
     let list = run(root, &list_args(&args), left.min(Duration::from_secs(30)));
     let listed = match interpret_list(list) {
         Ok(count) => count,
-        Err(outcome) => return outcome,
+        Err(outcome) => return *outcome,
     };
     if listed > max_mutants as usize {
         return unavailable_outcome(&format!(
@@ -118,16 +118,20 @@ fn execute_with(
 #[inline(never)]
 fn interpret_list(
     list: Result<crate::command::Captured, CommandError>,
-) -> Result<usize, MutationOutcome> {
+) -> Result<usize, Box<MutationOutcome>> {
     match list {
         Ok(captured) if captured.status.success() => Ok(parse_list_count(&captured.stdout)),
         Ok(captured) if tool_missing(&captured.stderr) || tool_missing(&captured.stdout) => {
-            Err(unavailable_outcome("cargo-mutants is not installed"))
+            Err(Box::new(unavailable_outcome("cargo-mutants is not installed")))
         }
         Ok(_) => Ok(0),
-        Err(CommandError::NotFound) => Err(unavailable_outcome("cargo is not installed")),
-        Err(CommandError::Timeout) => Err(unavailable_outcome("cargo mutants --list timed out")),
-        Err(CommandError::Spawn(err)) => Err(unavailable_outcome(&err)),
+        Err(CommandError::NotFound) => {
+            Err(Box::new(unavailable_outcome("cargo is not installed")))
+        }
+        Err(CommandError::Timeout) => {
+            Err(Box::new(unavailable_outcome("cargo mutants --list timed out")))
+        }
+        Err(CommandError::Spawn(err)) => Err(Box::new(unavailable_outcome(&err))),
     }
 }
 
