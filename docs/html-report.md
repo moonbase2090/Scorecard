@@ -6,9 +6,9 @@
 sc analyze testdata/good_crate --format html --out scorecard.html
 ```
 
-That command writes `scorecard.html` and prints the same HTML on stdout.
+That command writes `scorecard.html`. Stdout prints the short summary, not the HTML page.
 
-`--format all` still prints JSON, then Markdown, on stdout. With `--out`, it writes four siblings next to the path you give:
+Without `--out`, `--format all` prints JSON, then Markdown, on stdout. With `--out`, stdout is the short summary and these siblings are written next to the path you give:
 
 ```bash
 sc analyze testdata/good_crate --format all --out scorecard.html
