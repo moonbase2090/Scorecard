@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Rust coverage reuses the instrumented build. Before `cargo llvm-cov`, stale `target/llvm-cov-target` profiles (`.profraw`, `.profdata`) are removed and the command passes `--no-clean`, so a warm run does not rebuild the workspace. The report still counts only the current test run. The recorded command string is unchanged.
 - README quickstart and [CI](docs/how-to/ci.md) install examples keep `sc` on `PATH` after download (no longer run from a temp dir that `trap` deletes). Generic CI docs install from `$RUNNER_TEMP`, not the checkout.
 - Show analysis progress steps in interactive sessions (#187).
 - Print a short summary for `--out` on terminals while preserving full report output for pipes (#188).
