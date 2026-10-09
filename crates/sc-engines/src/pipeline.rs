@@ -947,6 +947,7 @@ fn python_scope_error(request: AnalyzeRequest, git: GitInfo, err: String) -> Ana
         threshold: request.config.gates.crap_threshold,
         worst: Vec::new(),
         mutation: MutationSection::skipped(),
+        test_value: None,
         spec: SpecSection::empty(),
         intent: request.intent.clone(),
         llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),

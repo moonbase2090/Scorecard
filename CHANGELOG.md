@@ -28,6 +28,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The `scorecard` GitHub Actions workflow installs the same fixture tooling as `check-ubuntu` and runs strict default gates with a 600-second analyze budget on pull requests (REVIEW_POLICY §6.13).
 - `test.failed` findings no longer use absolute panic paths outside the project (`/rustc/...`, the cargo registry, or other off-tree locations). The report points at the failing test's source file when it can be found, keeps the external location in the message and evidence, and never emits an absolute `file` in JSON or SARIF (#207).
 - Skip CDK-generated `cdk.out` directories during source discovery (#189).
+- Split the Python import/static-analysis helpers and non-Rust toolchain plan builders into focused engine modules. Runtime behavior and report output are unchanged.
 - `--out` prints the short summary on stdout even when stdout is not a terminal. The raw report is written to the file, and to stdout only when `--out` is omitted (#208).
 - `--pack command` no longer reports `engine.unavailable` because the dependency check is not implemented. That pack lists `sca` in `engines_skipped` (#208).
 - Empty or blank `--fail-on` and `gates.fail_on` selections now fail with a configuration error. Use `none` by itself to return exit 0 for every gate. JSON and SARIF record the selected gates, and stderr names enforced failures omitted from the selection.

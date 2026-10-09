@@ -18,11 +18,13 @@ mod pack_cov;
 mod pipeline;
 mod poly_cc;
 mod python;
+mod python_imports;
 mod rust_toolchain;
 mod scope;
 mod secrets;
 mod spec_check;
 mod toolchain;
+mod toolchain_plans;
 
 pub use pipeline::{
     analyze, analyze_with_generated_paths, AnalyzeOutput, AnalyzeRequest, ProgressCallback,

@@ -11,14 +11,14 @@ use super::which;
 /// recipe uses only the known compiler variables and the Makefile does not
 /// include a file, run a shell, call `$(eval)` or `$(file)`, or build a
 /// subdirectory. `make` is not run in those rewrite cases.
-pub(super) struct MakefileFlags {
-    pub(super) c: Vec<String>,
-    pub(super) cxx: Vec<String>,
-    pub(super) uncertain: bool,
+pub(crate) struct MakefileFlags {
+    pub(crate) c: Vec<String>,
+    pub(crate) cxx: Vec<String>,
+    pub(crate) uncertain: bool,
 }
 
 impl MakefileFlags {
-    pub(super) fn none() -> Self {
+    pub(crate) fn none() -> Self {
         Self {
             c: Vec::new(),
             cxx: Vec::new(),
@@ -26,7 +26,7 @@ impl MakefileFlags {
         }
     }
 
-    pub(super) fn read_with_generated(
+    pub(crate) fn read_with_generated(
         root: &Path,
         exclude: &[String],
         include_generated: &[String],
@@ -57,7 +57,7 @@ impl MakefileFlags {
     }
 
     #[cfg(test)]
-    pub(super) fn read(root: &Path) -> Self {
+    pub(crate) fn read(root: &Path) -> Self {
         Self::read_with_generated(root, &[], &[])
     }
 }
@@ -323,7 +323,7 @@ fn combine_flag_text(cpp: &str, c: &str, cxx: &str) -> (Vec<String>, Vec<String>
     (c_flags, cxx_flags)
 }
 
-pub(super) fn makefile_text_uncertain(text: &str) -> bool {
+pub(crate) fn makefile_text_uncertain(text: &str) -> bool {
     text.contains("$(")
         || text.contains("${")
         || text.lines().any(|line| {
