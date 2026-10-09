@@ -4,6 +4,7 @@
 //! Engines return structured findings. Nothing in this crate writes user-facing
 //! diagnostics; the CLI formats the scorecard.
 
+use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -197,6 +198,7 @@ fn analyze_blocked(
         threshold: request.config.gates.crap_threshold,
         worst: Vec::new(),
         mutation: MutationSection::skipped(),
+        test_value: None,
         spec: SpecSection::empty(),
         intent: request.intent.clone(),
         llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),
@@ -402,6 +404,7 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         threshold: request.config.gates.crap_threshold,
         worst: crap.worst,
         mutation: MutationSection::skipped(),
+        test_value: None,
         spec: SpecSection::empty(),
         intent: request.intent.clone(),
         llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),
@@ -729,6 +732,7 @@ fn analyze_unsupported(
         threshold: request.config.gates.crap_threshold,
         worst: crap.worst,
         mutation: MutationSection::skipped(),
+        test_value: None,
         spec: SpecSection::empty(),
         intent: request.intent.clone(),
         llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),
@@ -744,7 +748,55 @@ fn analyze_unsupported(
     })
 }
 
+struct PythonScope {
+    py: Option<BTreeSet<String>>,
+    files: Option<BTreeSet<String>>,
+    base: Option<String>,
+    other_paths: Option<u64>,
+    loc: u64,
+    files_changed: u64,
+}
+
+fn python_scope(request: &AnalyzeRequest) -> Result<PythonScope, String> {
+    let Some(requested) = request.diff_base.as_deref() else {
+        return Ok(PythonScope {
+            py: None,
+            files: None,
+            base: None,
+            other_paths: None,
+            loc: 0,
+            files_changed: 0,
+        });
+    };
+    if !request.path_list.is_empty() {
+        return Err("pass either --diff or --paths, not both".into());
+    }
+    let base = crate::scope::resolve_base(&request.root, requested)?;
+    let rels = crate::scope::changed_rels(&request.root, &base, request.diff_head.as_deref())?;
+    let files: BTreeSet<String> = rels.iter().cloned().collect();
+    let py: BTreeSet<String> = rels
+        .into_iter()
+        .filter(|rel| rel.ends_with(".py"))
+        .collect();
+    let tree = crate::python::python_rels(&request.root);
+    let other = tree.iter().filter(|rel| !py.contains(*rel)).count() as u64;
+    let loc = crate::scope::added_lines(&request.root, &base, request.diff_head.as_deref(), &py);
+    let files_changed = py.len() as u64;
+    Ok(PythonScope {
+        py: Some(py),
+        files: Some(files),
+        base: Some(base),
+        other_paths: Some(other),
+        loc,
+        files_changed,
+    })
+}
+
 fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
+    let scoped = match python_scope(&request) {
+        Ok(scoped) => scoped,
+        Err(err) => return python_scope_error(request, git, err),
+    };
     let deadline = Instant::now() + request.budget;
     let started = crate::pack_cov::run_start();
     crate::pack_cov::clear(&request.root);
@@ -760,6 +812,8 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
             include_generated: &request.config.scope.include_generated,
         },
         request.config.engines.coverage,
+        scoped.py.as_ref(),
+        scoped.files.as_ref(),
     );
     let gates = vec![
         if outcome.checks.types.pass {
@@ -803,24 +857,30 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         ),
     ];
     report(&request, "Writing report");
+    let diff = scoped.py.is_some();
+    let paths: Vec<String> = scoped.py.unwrap_or_default().into_iter().collect();
     finish(Draft {
         root: request.root.clone(),
         repo: request.repo,
         pack: "python".into(),
-        test_selection: "full-suite".into(),
+        test_selection: if diff {
+            "diff-tests".into()
+        } else {
+            "full-suite".into()
+        },
         git,
-        mode: "tree".into(),
-        paths: Vec::new(),
-        base: None,
-        other_paths: None,
+        mode: if diff { "diff".into() } else { "tree".into() },
+        paths,
+        base: scoped.base,
+        other_paths: scoped.other_paths,
         fail_on: request.fail_on,
         findings: outcome.findings,
         ran: outcome.ran,
         skipped: outcome.skipped,
         gates,
         metrics: sc_core::Metrics {
-            loc_changed: 0,
-            files_changed: 0,
+            loc_changed: scoped.loc,
+            files_changed: scoped.files_changed,
             coverage_changed: 0.0,
             crap_max: outcome.crap.crap_max,
             crap_over_threshold: outcome.crap.over,
@@ -830,6 +890,7 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         threshold: request.config.gates.crap_threshold,
         worst: outcome.crap.worst,
         mutation: MutationSection::skipped(),
+        test_value: None,
         spec: SpecSection::empty(),
         intent: request.intent.clone(),
         llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),
@@ -842,6 +903,57 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         ),
         runs: outcome.runs,
         analyzer_error: false,
+    })
+}
+
+fn python_scope_error(request: AnalyzeRequest, git: GitInfo, err: String) -> AnalyzeOutput {
+    let findings = vec![unavailable("scope", &err)];
+    let gates = vec![
+        gate("types", false, &err),
+        tests_gate(true, false, &err),
+        gate("crap", false, &err),
+        advisory_detail("sca", 0, ""),
+        gate("lint", false, &err),
+        gate("secrets", false, &err),
+    ];
+    report(&request, "Writing report");
+    finish(Draft {
+        root: request.root.clone(),
+        repo: request.repo,
+        pack: "python".into(),
+        test_selection: "diff-tests".into(),
+        git,
+        mode: "diff".into(),
+        paths: Vec::new(),
+        base: None,
+        other_paths: None,
+        fail_on: request.fail_on,
+        findings,
+        ran: Vec::new(),
+        skipped: vec![
+            "compile".into(),
+            "tests".into(),
+            "coverage".into(),
+            "complexity".into(),
+            "crap".into(),
+            "sca".into(),
+            "lint".into(),
+            "secrets".into(),
+            "llm".into(),
+            "mutation".into(),
+        ],
+        gates,
+        metrics: sc_core::Metrics::zeros(),
+        threshold: request.config.gates.crap_threshold,
+        worst: Vec::new(),
+        mutation: MutationSection::skipped(),
+        test_value: None,
+        spec: SpecSection::empty(),
+        intent: request.intent.clone(),
+        llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),
+        generated_files_warning: None,
+        runs: Vec::new(),
+        analyzer_error: true,
     })
 }
 
@@ -1422,6 +1534,7 @@ fn assemble_rust_report(
         threshold,
         worst: crap.worst,
         mutation: mutation.section,
+        test_value: mutation.test_value,
         spec: spec.section,
         intent: request.intent.clone(),
         llm,
@@ -1456,6 +1569,7 @@ struct Draft {
     threshold: u32,
     worst: Vec<sc_core::CrapFunction>,
     mutation: MutationSection,
+    test_value: Option<sc_core::TestValueSection>,
     spec: SpecSection,
     intent: Option<String>,
     llm: Option<LlmSection>,
@@ -1512,6 +1626,7 @@ fn finish(mut draft: Draft) -> AnalyzeOutput {
                 worst: draft.worst,
             },
             mutation: draft.mutation,
+            test_value: draft.test_value,
             findings: draft.findings,
             generated_files_warning: draft.generated_files_warning,
             spec: draft.spec,
@@ -1829,6 +1944,29 @@ fn run_tests(
     run_cargo(root, &args, deadline, toolchain_pin)
 }
 
+/// Remove coverage profiles without deleting the instrumented build.
+///
+/// `cargo llvm-cov --no-clean` skips its usual `cargo clean`, which is what
+/// makes a second analyze rebuild the workspace. It also skips deleting
+/// profiles. Those profiles have to go: the report merges every top-level
+/// `.profraw` still in `target/llvm-cov-target`. Doctest and trybuild leftovers
+/// are removed for the same reason the stock clean removes them.
+fn clear_stale_llvm_cov_profiles(root: &Path) {
+    let cov_target = root.join("target").join("llvm-cov-target");
+    if let Ok(entries) = std::fs::read_dir(&cov_target) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.ends_with(".profraw") || name.ends_with(".profdata") {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(cov_target.join("doctestbins"));
+    let _ = std::fs::remove_dir_all(root.join("target").join("tests").join("trybuild"));
+    let _ = std::fs::remove_dir_all(root.join("target").join("ui"));
+}
+
 fn run_coverage(
     root: &Path,
     manifest: &Path,
@@ -1843,6 +1981,10 @@ fn run_coverage(
     }
     let manifest_s = manifest.to_string_lossy().to_string();
     let out_s = out_path.to_string_lossy().to_string();
+    // Keep the instrumented objects in target/llvm-cov-target, but drop the
+    // previous run's profiles first. cargo-llvm-cov merges every top-level
+    // .profraw, so leaving them in place unions old counters into this report.
+    clear_stale_llvm_cov_profiles(root);
     let started = Instant::now();
     let budget = deadline.saturating_duration_since(started);
     let mut args = vec!["llvm-cov"];
@@ -1853,6 +1995,7 @@ fn run_coverage(
         &out_s,
         "--manifest-path",
         &manifest_s,
+        "--no-clean",
     ]);
     let captured = run_cargo(root, &args, deadline, toolchain_pin);
     match &captured {
@@ -2339,6 +2482,7 @@ fn spec_engine(
 
 struct MutationRun {
     section: MutationSection,
+    test_value: Option<sc_core::TestValueSection>,
     add_gate: bool,
     pass: bool,
     reason: String,
@@ -2359,6 +2503,7 @@ fn mutation_engine(
         skipped.push("mutation".into());
         return MutationRun {
             section: MutationSection::skipped(),
+            test_value: None,
             add_gate: false,
             pass: true,
             reason: String::new(),
@@ -2388,8 +2533,11 @@ fn mutation_engine(
     } else {
         String::new()
     };
+    let section = outcome.section;
+    let test_value = Some(sc_core::TestValueSection::from_mutation(&section));
     MutationRun {
-        section: outcome.section,
+        section,
+        test_value,
         add_gate: true,
         pass,
         reason,
@@ -2875,6 +3023,89 @@ mod tests {
             "{} analyzed function(s)",
             MAX_UNMATCHED_FUNCTION_EVIDENCE + 5
         )));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn warm_coverage_matches_this_run_and_keeps_the_library_build() {
+        use std::os::unix::fs::MetadataExt;
+
+        let root = std::env::temp_dir().join(format!("sc-cov-warm-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("tests")).unwrap();
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"covdemo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/lib.rs"),
+            "pub fn covered() -> i32 {\n    1\n}\npub fn missed() -> i32 {\n    2\n}\n",
+        )
+        .unwrap();
+        let call_covered = "#[test]\nfn calls() {\n    assert_eq!(covdemo::covered(), 1);\n}\n";
+        let call_missed = "#[test]\nfn calls() {\n    assert_eq!(covdemo::missed(), 2);\n}\n";
+        std::fs::write(root.join("tests/call.rs"), call_covered).unwrap();
+
+        let manifest = root.join("Cargo.toml");
+        let deadline = Instant::now() + Duration::from_secs(180);
+        let mut runs = Vec::new();
+        let first = run_coverage(&root, &manifest, deadline, true, "", &mut runs)
+            .expect("first coverage run");
+        assert_eq!(coverage_rate(&first, "covered"), 1.0, "{first:?}");
+        assert_eq!(coverage_rate(&first, "missed"), 0.0, "{first:?}");
+        let rlib = library_rlib(&root);
+        let inode = std::fs::metadata(&rlib).unwrap().ino();
+
+        std::fs::write(root.join("tests/call.rs"), call_missed).unwrap();
+        let second = run_coverage(&root, &manifest, deadline, true, "", &mut runs)
+            .expect("warm coverage run");
+        let warm_rlib = library_rlib(&root);
+        assert_eq!(
+            warm_rlib, rlib,
+            "instrumented library artifact was replaced"
+        );
+        assert_eq!(
+            std::fs::metadata(&warm_rlib).unwrap().ino(),
+            inode,
+            "instrumented library was rebuilt; coverage clean ran"
+        );
+        assert_eq!(
+            coverage_rate(&second, "covered"),
+            0.0,
+            "stale profile still counts covered(): {second:?}"
+        );
+        assert_eq!(coverage_rate(&second, "missed"), 1.0, "{second:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    fn coverage_rate(data: &crate::coverage::CoverageData, function: &str) -> f64 {
+        let suffix = format!("::{function}");
+        data.functions
+            .iter()
+            .filter(|item| item.demangled == function || item.demangled.ends_with(&suffix))
+            .map(|item| item.coverage)
+            .max_by(|left, right| left.partial_cmp(right).unwrap())
+            .unwrap_or_else(|| panic!("no coverage row for {function}"))
+    }
+
+    #[cfg(unix)]
+    fn library_rlib(root: &Path) -> PathBuf {
+        let deps = root.join("target/llvm-cov-target/debug/deps");
+        let mut found = Vec::new();
+        for entry in std::fs::read_dir(&deps).unwrap() {
+            let path = entry.unwrap().path();
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if name.starts_with("libcovdemo-") && name.ends_with(".rlib") {
+                found.push(path);
+            }
+        }
+        assert_eq!(found.len(), 1, "expected one covdemo rlib, found {found:?}");
+        found.remove(0)
     }
 
     #[test]
@@ -3477,6 +3708,140 @@ mod tests {
         assert_eq!(
             crate::pack::detect(&dir, "").unwrap(),
             crate::pack::Detected::Pack(crate::pack::PackId::Python)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn python_diff_scopes_findings_to_changed_py_files() {
+        let dir = std::env::temp_dir().join(format!("sc-py-diff-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::create_dir_all(dir.join("tests")).unwrap();
+        let key = format!("AKIA{}{}", "0Z3VS5J4", "AB3KQM9Z");
+        std::fs::write(dir.join("pyproject.toml"), "[project]\nname = \"demo\"\n").unwrap();
+        std::fs::write(
+            dir.join("src/old.py"),
+            format!("KEY = \"{key}\"\ndef broken(\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join("src/new.py"), "def ok():\n    return 1\n").unwrap();
+        std::fs::write(
+            dir.join("tests/test_old.py"),
+            "def test_old():\n    assert False\n",
+        )
+        .unwrap();
+        let git = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(args)
+                .env("GIT_AUTHOR_NAME", "sc")
+                .env("GIT_AUTHOR_EMAIL", "sc@example.com")
+                .env("GIT_COMMITTER_NAME", "sc")
+                .env("GIT_COMMITTER_EMAIL", "sc@example.com")
+                .status()
+                .unwrap();
+            assert!(status.success(), "{args:?}");
+        };
+        git(&["init"]);
+        git(&["add", "."]);
+        git(&["commit", "-m", "base"]);
+        std::fs::write(dir.join("src/new.py"), "def ok():\n    return 2\n").unwrap();
+        let mut config = Config::default();
+        config.engines.coverage = false;
+        let request = |diff: Option<&str>| AnalyzeRequest {
+            root: dir.clone(),
+            repo: "demo".into(),
+            fail_on: config.gates.fail_on.clone(),
+            budget: Duration::from_secs(25),
+            config: config.clone(),
+            diff_base: diff.map(str::to_string),
+            diff_head: None,
+            path_list: Vec::new(),
+            spec_path: None,
+            mutation_override: None,
+            llm_override: None,
+            intent: None,
+            progress: None,
+        };
+        let scoped = analyze(request(Some("HEAD")));
+        assert_eq!(scoped.scorecard.context.scope.mode, "diff");
+        assert_eq!(scoped.scorecard.context.scope.paths, vec!["src/new.py"]);
+        assert_eq!(scoped.scorecard.context.scope.base.as_deref(), Some("HEAD"));
+        assert_eq!(scoped.scorecard.context.scope.other_paths, Some(2));
+        assert_eq!(scoped.scorecard.identity.test_selection, "diff-tests");
+        assert_eq!(scoped.scorecard.measures.metrics.files_changed, 1);
+        assert_eq!(scoped.scorecard.measures.metrics.loc_changed, 1);
+        let types = scoped
+            .scorecard
+            .measures
+            .gates
+            .iter()
+            .find(|gate| gate.id == "types")
+            .unwrap();
+        assert!(types.pass, "{:?}", scoped.scorecard.sections.findings);
+        let tests = scoped
+            .scorecard
+            .measures
+            .gates
+            .iter()
+            .find(|gate| gate.id == "tests")
+            .unwrap();
+        assert!(!tests.enforced, "{tests:?}");
+        assert!(
+            tests
+                .reason
+                .as_deref()
+                .unwrap_or("")
+                .contains("no Python tests"),
+            "{tests:?}"
+        );
+        let secrets = scoped
+            .scorecard
+            .measures
+            .gates
+            .iter()
+            .find(|gate| gate.id == "secrets")
+            .unwrap();
+        assert!(secrets.pass, "{:?}", scoped.scorecard.sections.findings);
+        assert!(
+            !scoped
+                .scorecard
+                .sections
+                .findings
+                .iter()
+                .any(|finding| finding.file.contains("old.py")),
+            "{:?}",
+            scoped.scorecard.sections.findings
+        );
+        let lint = scoped
+            .scorecard
+            .runs
+            .iter()
+            .find(|run| run.engine == "lint")
+            .expect("lint command");
+        assert!(lint.command.contains("src/new.py"), "{}", lint.command);
+        assert!(!lint.command.contains("check ."), "{}", lint.command);
+        assert!(!lint.command.contains("old.py"), "{}", lint.command);
+
+        let tree = analyze(request(None));
+        assert_eq!(tree.scorecard.context.scope.mode, "tree");
+        assert_eq!(tree.scorecard.identity.test_selection, "full-suite");
+        let tree_types = tree
+            .scorecard
+            .measures
+            .gates
+            .iter()
+            .find(|gate| gate.id == "types")
+            .unwrap();
+        assert!(!tree_types.pass, "tree compile must see src/old.py");
+        assert!(
+            tree.scorecard.sections.findings.iter().any(|finding| {
+                finding.rule == "secrets.aws_access_key" && finding.file == "src/old.py"
+            }),
+            "{:?}",
+            tree.scorecard.sections.findings
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

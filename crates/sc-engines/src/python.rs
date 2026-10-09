@@ -74,6 +74,10 @@ pub struct PythonOutcome {
     pub crap: PythonCrap,
 }
 
+/// `py_only` limits compile, lint, imports, CRAP, and pytest to those
+/// `.py` paths. `None` keeps the whole tree. `file_only` drops secret
+/// findings whose path is not in the set. `None` keeps every secret finding.
+#[allow(clippy::too_many_arguments)]
 pub fn run_with_generated(
     root: &Path,
     deadline: Instant,
@@ -82,6 +86,8 @@ pub fn run_with_generated(
     started: std::time::SystemTime,
     scope: crate::scope::ScanScope<'_>,
     coverage_enabled: bool,
+    py_only: Option<&BTreeSet<String>>,
+    file_only: Option<&BTreeSet<String>>,
 ) -> PythonOutcome {
     let mut findings = Vec::new();
     let mut runs = Vec::new();
@@ -95,10 +101,14 @@ pub fn run_with_generated(
         &mut runs,
         &mut ran,
         &mut skipped,
+        py_only,
     );
     let scan =
         crate::poly_cc::scan_for_pack(root, "python", scope.exclude, scope.include_generated);
-    let functions = scan.functions;
+    let mut functions = scan.functions;
+    if let Some(only) = py_only {
+        functions.retain(|function| only.contains(&function.file));
+    }
     let (tests_enforced, tests_pass, tests_reason) = run_pytest(
         root,
         deadline,
@@ -108,6 +118,7 @@ pub fn run_with_generated(
         &mut ran,
         &mut skipped,
         coverage_enabled,
+        py_only,
     );
     let (lint_pass, lint_reason) = run_ruff(
         root,
@@ -116,8 +127,9 @@ pub fn run_with_generated(
         &mut runs,
         &mut ran,
         &mut skipped,
+        py_only,
     );
-    let sca = check_imports(root, &mut findings, &mut ran);
+    let sca = check_imports(root, &mut findings, &mut ran, py_only);
     let mut coverage = read_coverage_with_generated(
         root,
         &functions,
@@ -127,11 +139,24 @@ pub fn run_with_generated(
     );
     let mut coverage_reason: Option<String> = None;
     let mut coverage_fix: Option<&'static str> = None;
+    let diff_tests: Vec<String> = py_only
+        .map(|only| {
+            only.iter()
+                .filter(|rel| is_diff_test(rel))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
     if !coverage_enabled {
         coverage = None;
     } else if coverage.is_none() && tests_enforced && tests_pass {
-        if let Err(err) = run_coverage_fallback(root, deadline, &cov_sources(&functions), &mut runs)
-        {
+        if let Err(err) = run_coverage_fallback(
+            root,
+            deadline,
+            &cov_sources(&functions),
+            &diff_tests,
+            &mut runs,
+        ) {
             coverage_reason = Some(err);
             coverage_fix = Some(
                 "Install coverage.py (`python3 -m pip install coverage`) and re-run `sc analyze`",
@@ -207,8 +232,11 @@ pub fn run_with_generated(
     }
     findings.extend(crap.findings);
     ran.push("crap".into());
-    let secrets =
+    let mut secrets =
         crate::pack::text_secrets_with_generated(root, scope.exclude, scope.include_generated);
+    if let Some(files) = file_only {
+        secrets.retain(|finding| finding.file == "." || files.contains(&finding.file));
+    }
     let secret_errors = secrets
         .iter()
         .filter(|finding| finding.severity == "error")
@@ -271,6 +299,8 @@ pub fn run(
             include_generated: &[],
         },
         coverage_enabled,
+        None,
+        None,
     )
 }
 
@@ -281,20 +311,33 @@ fn compile_tree(
     runs: &mut Vec<RunRecord>,
     ran: &mut Vec<String>,
     skipped: &mut Vec<String>,
+    py_only: Option<&BTreeSet<String>>,
 ) -> (bool, String) {
-    let mut targets = Vec::new();
-    for name in ["src", "tests"] {
-        if root.join(name).is_dir() {
-            targets.push(name.to_string());
+    let (targets, quote) = if let Some(only) = py_only {
+        if only.is_empty() {
+            return (true, String::new());
         }
-    }
-    if targets.is_empty() {
-        targets.push(".".into());
-    }
+        (only.iter().cloned().collect::<Vec<_>>(), true)
+    } else {
+        let mut targets = Vec::new();
+        for name in ["src", "tests"] {
+            if root.join(name).is_dir() {
+                targets.push(name.to_string());
+            }
+        }
+        if targets.is_empty() {
+            targets.push(".".into());
+        }
+        (targets, false)
+    };
     let mut command = String::from("python3 -m compileall -q");
     for target in &targets {
         command.push(' ');
-        command.push_str(target);
+        if quote {
+            command.push_str(&crate::command::shell_quote_arg(target));
+        } else {
+            command.push_str(target);
+        }
     }
     match shell(root, &command, deadline) {
         Ok(captured) => {
@@ -335,6 +378,13 @@ fn compile_tree(
 }
 
 pub(crate) const NO_PYTEST_SUITE: &str = "no pytest suite was found. Add a test/ or tests/ directory, a test_*.py or *_test.py file, or a pytest config, then re-run `sc analyze`";
+
+const NO_DIFF_PYTEST: &str = "no Python tests in this diff. Diff-scoped analyze does not run the rest of the suite, so a failure outside the diff does not fail this gate. Re-run `sc analyze` without `--diff` to score the full suite.";
+
+fn is_diff_test(rel: &str) -> bool {
+    let name = rel.rsplit(['/', '\\']).next().unwrap_or(rel);
+    name.ends_with(".py") && (name.starts_with("test_") || name.ends_with("_test.py"))
+}
 
 fn has_tests(root: &Path) -> bool {
     root.join("tests").is_dir()
@@ -408,8 +458,21 @@ fn run_pytest(
     ran: &mut Vec<String>,
     skipped: &mut Vec<String>,
     coverage_enabled: bool,
+    py_only: Option<&BTreeSet<String>>,
 ) -> (bool, bool, String) {
-    if !has_tests(root) {
+    let targets: Vec<String> = match py_only {
+        Some(only) => only
+            .iter()
+            .filter(|rel| is_diff_test(rel))
+            .cloned()
+            .collect(),
+        None => Vec::new(),
+    };
+    if py_only.is_some() && targets.is_empty() {
+        skipped.push("tests".into());
+        return (false, true, NO_DIFF_PYTEST.into());
+    }
+    if py_only.is_none() && !has_tests(root) {
         skipped.push("tests".into());
         return (false, true, NO_PYTEST_SUITE.into());
     }
@@ -423,8 +486,8 @@ fn run_pytest(
         let _ = std::fs::create_dir_all(parent);
     }
     let _ = std::fs::remove_file(&cov_file);
-    let base_command = pytest_command(&base, sources, &cov_file, false);
-    let command = pytest_command(&base, sources, &cov_file, coverage_enabled);
+    let base_command = pytest_command(&base, sources, &cov_file, false, &targets);
+    let command = pytest_command(&base, sources, &cov_file, coverage_enabled, &targets);
     let command = if base.starts_with("uv ") || host_pytest() {
         command
     } else {
@@ -444,51 +507,78 @@ fn run_pytest(
         other => other,
     };
     match captured {
-        Ok(captured) => {
-            note(
-                runs,
-                "tests",
-                &executed,
-                captured.status.code(),
-                captured.elapsed,
-            );
-            if captured.status.success() {
-                ran.push("tests".into());
-                (true, true, String::new())
-            } else if let Some(message) =
-                missing_runner(&command, &captured.stderr, &captured.stdout)
-            {
-                skipped.push("tests".into());
-                let mut finding = unavailable("tests", message);
-                if message == "uv is not installed" {
-                    finding.suggested_action = Some("Install uv and re-run.".into());
-                }
-                findings.push(finding);
-                (true, false, message.into())
-            } else {
-                ran.push("tests".into());
-                let detail = brief(&format!("{}\n{}", captured.stdout, captured.stderr));
-                findings.push(error_finding(
-                    "tests:failed",
-                    "test.failed",
-                    "tests",
-                    if detail.is_empty() {
-                        "pytest failed".into()
-                    } else {
-                        format!("pytest failed: {detail}")
-                    },
-                    "Fix the failing test or the behavior it checks",
-                ));
-                (true, false, "pytest failed".into())
-            }
-        }
-        Err(err) => {
-            note(runs, "tests", &executed, None, Duration::ZERO);
-            skipped.push("tests".into());
-            findings.push(unavailable("tests", &err.message("pytest")));
-            (true, false, "pytest did not run".into())
-        }
+        Ok(captured) => record_pytest_output(
+            findings,
+            runs,
+            ran,
+            skipped,
+            &command,
+            &executed,
+            captured.status.success(),
+            captured.status.code(),
+            &captured.stdout,
+            &captured.stderr,
+            captured.elapsed,
+        ),
+        Err(err) => record_pytest_spawn_error(findings, runs, skipped, &executed, &err),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn record_pytest_output(
+    findings: &mut Vec<Finding>,
+    runs: &mut Vec<RunRecord>,
+    ran: &mut Vec<String>,
+    skipped: &mut Vec<String>,
+    command: &str,
+    executed: &str,
+    success: bool,
+    code: Option<i32>,
+    stdout: &str,
+    stderr: &str,
+    elapsed: Duration,
+) -> (bool, bool, String) {
+    note(runs, "tests", executed, code, elapsed);
+    if success {
+        ran.push("tests".into());
+        return (true, true, String::new());
+    }
+    if let Some(message) = missing_runner(command, stderr, stdout) {
+        skipped.push("tests".into());
+        let mut finding = unavailable("tests", message);
+        if message == "uv is not installed" {
+            finding.suggested_action = Some("Install uv and re-run.".into());
+        }
+        findings.push(finding);
+        return (true, false, message.into());
+    }
+    ran.push("tests".into());
+    let detail = brief(&format!("{stdout}\n{stderr}"));
+    findings.push(error_finding(
+        "tests:failed",
+        "test.failed",
+        "tests",
+        if detail.is_empty() {
+            "pytest failed".into()
+        } else {
+            format!("pytest failed: {detail}")
+        },
+        "Fix the failing test or the behavior it checks",
+    ));
+    (true, false, "pytest failed".into())
+}
+
+fn record_pytest_spawn_error(
+    findings: &mut Vec<Finding>,
+    runs: &mut Vec<RunRecord>,
+    skipped: &mut Vec<String>,
+    executed: &str,
+    err: &CommandError,
+) -> (bool, bool, String) {
+    note(runs, "tests", executed, None, Duration::ZERO);
+    skipped.push("tests".into());
+    findings.push(unavailable("tests", &err.message("pytest")));
+    (true, false, "pytest did not run".into())
 }
 
 /// Each directory that holds a scored function, as a `--cov` source. With no
@@ -550,35 +640,52 @@ fn pytest_command(
     sources: &[String],
     cov_file: &Path,
     coverage_enabled: bool,
+    targets: &[String],
 ) -> String {
     let pythonpath = pythonpath_prefix(sources);
-    if !coverage_enabled {
-        return format!("{pythonpath}{base}");
+    let mut command = if !coverage_enabled {
+        format!("{pythonpath}{base}")
+    } else {
+        let cov: Vec<String> = sources
+            .iter()
+            .map(|dir| format!("--cov={}", crate::command::shell_quote_arg(dir)))
+            .collect();
+        format!(
+            "{pythonpath}{base} {} --cov-report=json:{}",
+            cov.join(" "),
+            cov_file.display()
+        )
+    };
+    for target in targets {
+        command.push(' ');
+        command.push_str(&crate::command::shell_quote_arg(target));
     }
-    let cov: Vec<String> = sources
-        .iter()
-        .map(|dir| format!("--cov={}", crate::command::shell_quote_arg(dir)))
-        .collect();
-    format!(
-        "{pythonpath}{base} {} --cov-report=json:{}",
-        cov.join(" "),
-        cov_file.display()
-    )
+    command
 }
 
 /// `uv run` when the project has `uv.lock` or a `.venv` directory.
 /// Otherwise `python3 -m coverage`.
-fn coverage_fallback_command(root: &Path, cov_file: &Path, sources: &[String]) -> String {
+fn coverage_fallback_command(
+    root: &Path,
+    cov_file: &Path,
+    sources: &[String],
+    targets: &[String],
+) -> String {
     let pythonpath = pythonpath_prefix(sources);
     let source_flags = coverage_source_flags(sources);
     let output = cov_file.display();
+    let mut tests = String::new();
+    for target in targets {
+        tests.push(' ');
+        tests.push_str(&crate::command::shell_quote_arg(target));
+    }
     if root.join("uv.lock").is_file() || root.join(".venv").is_dir() {
         format!(
-            "{pythonpath}uv run --extra dev --with coverage coverage run {source_flags} -m pytest -q && uv run --extra dev --with coverage coverage json -o {output}"
+            "{pythonpath}uv run --extra dev --with coverage coverage run {source_flags} -m pytest -q{tests} && uv run --extra dev --with coverage coverage json -o {output}"
         )
     } else {
         format!(
-            "{pythonpath}python3 -m coverage run {source_flags} -m pytest -q && python3 -m coverage json -o {output}"
+            "{pythonpath}python3 -m coverage run {source_flags} -m pytest -q{tests} && python3 -m coverage json -o {output}"
         )
     }
 }
@@ -588,6 +695,7 @@ fn run_coverage_fallback(
     root: &Path,
     deadline: Instant,
     sources: &[String],
+    targets: &[String],
     runs: &mut Vec<RunRecord>,
 ) -> Result<(), String> {
     let cov_file = root.join(".sc").join("coverage").join("pytest.json");
@@ -596,7 +704,7 @@ fn run_coverage_fallback(
     }
     // Match pytest-cov's --cov sources so a never-imported file is still
     // measured at 0% instead of left out of the report (#120 / #79).
-    let command = coverage_fallback_command(root, &cov_file, sources);
+    let command = coverage_fallback_command(root, &cov_file, sources, targets);
     let result = shell(root, &command, deadline).map_err(|err| err.message("coverage.py"))?;
     note(
         runs,
@@ -621,6 +729,20 @@ fn run_coverage_fallback(
     }
 }
 
+fn ruff_check_command(tool: &str, py_only: Option<&BTreeSet<String>>) -> String {
+    let mut command = format!("{tool} check");
+    match py_only {
+        None => command.push_str(" ."),
+        Some(only) => {
+            for rel in only {
+                command.push(' ');
+                command.push_str(&crate::command::shell_quote_arg(rel));
+            }
+        }
+    }
+    command
+}
+
 fn run_ruff(
     root: &Path,
     deadline: Instant,
@@ -628,13 +750,17 @@ fn run_ruff(
     runs: &mut Vec<RunRecord>,
     ran: &mut Vec<String>,
     skipped: &mut Vec<String>,
+    py_only: Option<&BTreeSet<String>>,
 ) -> (bool, String) {
+    if py_only.is_some_and(|only| only.is_empty()) {
+        return (true, String::new());
+    }
     let command = if which("ruff") {
-        "ruff check .".to_string()
+        ruff_check_command("ruff", py_only)
     } else if which("uv") {
-        "uvx ruff check .".to_string()
+        ruff_check_command("uvx ruff", py_only)
     } else if crate::toolchain::prepare("ruff check .") != "ruff check ." {
-        crate::toolchain::force_image("ruff check .")
+        crate::toolchain::force_image(&ruff_check_command("ruff", py_only))
     } else {
         skipped.push("lint".into());
         findings.push(unavailable("lint", "ruff is not installed"));
@@ -682,8 +808,13 @@ fn run_ruff(
     }
 }
 
-fn check_imports(root: &Path, findings: &mut Vec<Finding>, ran: &mut Vec<String>) -> ScaCounts {
-    check_imports_with(root, findings, ran, &LiveIndex::new())
+fn check_imports(
+    root: &Path,
+    findings: &mut Vec<Finding>,
+    ran: &mut Vec<String>,
+    py_only: Option<&BTreeSet<String>>,
+) -> ScaCounts {
+    check_imports_with(root, findings, ran, &LiveIndex::new(), py_only)
 }
 
 fn check_imports_with(
@@ -691,6 +822,7 @@ fn check_imports_with(
     findings: &mut Vec<Finding>,
     ran: &mut Vec<String>,
     index: &dyn PackageIndex,
+    py_only: Option<&BTreeSet<String>>,
 ) -> ScaCounts {
     let manifest = std::fs::read_to_string(root.join("pyproject.toml")).unwrap_or_default();
     let place = declaration_place(root);
@@ -715,6 +847,9 @@ fn check_imports_with(
             .unwrap_or(&path)
             .to_string_lossy()
             .replace('\\', "/");
+        if py_only.is_some_and(|only| !only.contains(&rel)) {
+            continue;
+        }
         for (module, line) in import_roots(&text) {
             let name = normalize_mod(&module);
             if name.is_empty()
@@ -969,6 +1104,18 @@ fn import_finding(rel: &str, name: &str, line: u32, class: &Class, place: &str) 
     }
 }
 
+pub(crate) fn python_rels(root: &Path) -> Vec<String> {
+    python_files(root)
+        .iter()
+        .map(|path| {
+            path.strip_prefix(root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect()
+}
+
 fn stdlib_modules() -> BTreeSet<String> {
     let mut names = BTreeSet::from([
         "sys".into(),
@@ -1219,17 +1366,17 @@ mod tests {
     fn pytest_command_omits_cov_flags_when_coverage_is_disabled() {
         let cov_file = std::path::PathBuf::from("/tmp/sc-pytest.json");
         let sources = vec![".".to_string(), "src/app".to_string()];
-        let off = pytest_command("python3 -m pytest -q", &sources, &cov_file, false);
+        let off = pytest_command("python3 -m pytest -q", &sources, &cov_file, false, &[]);
         assert!(
             off.starts_with("PYTHONPATH='src'${PYTHONPATH:+:\"$PYTHONPATH\"} python3 -m pytest -q"),
             "{off}"
         );
         assert!(!off.contains("--cov"), "{off}");
         assert_eq!(
-            pytest_command("python3 -m pytest -q", &[".".into()], &cov_file, false),
+            pytest_command("python3 -m pytest -q", &[".".into()], &cov_file, false, &[]),
             "python3 -m pytest -q"
         );
-        let on = pytest_command("python3 -m pytest -q", &sources, &cov_file, true);
+        let on = pytest_command("python3 -m pytest -q", &sources, &cov_file, true, &[]);
         assert!(
             on.starts_with("PYTHONPATH='src'${PYTHONPATH:+:\"$PYTHONPATH\"} python3 -m pytest -q"),
             "{on}"
@@ -1285,6 +1432,7 @@ mod tests {
             &sources,
             &root.join("cov.json"),
             true,
+            &[],
         );
         assert!(!command.contains("cdk.out"), "{command}");
         let _ = std::fs::remove_dir_all(&root);
@@ -1368,6 +1516,7 @@ mod tests {
             &mut Vec::new(),
             &mut Vec::new(),
             true,
+            None,
         );
         assert!(enforced);
         assert!(!pass);
@@ -1390,6 +1539,7 @@ mod tests {
             &mut Vec::new(),
             &mut Vec::new(),
             true,
+            None,
         );
         assert!(!enforced);
         assert!(pass);
@@ -1470,6 +1620,7 @@ mod tests {
             &mut ran,
             &mut skipped,
             true,
+            None,
         );
         let _ = run_pytest(
             &root,
@@ -1480,6 +1631,7 @@ mod tests {
             &mut ran,
             &mut skipped,
             true,
+            None,
         );
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1896,6 +2048,7 @@ dev = ["pytest>=8"]
             &["src/sample_pkg".into()],
             &dir.join(".sc/coverage/pytest.json"),
             false,
+            &[],
         );
         let mut with_src = Command::new("sh");
         with_src
@@ -1924,7 +2077,7 @@ dev = ["pytest>=8"]
         let dir = scratch("cov-cmd");
         let cov_file = dir.join(".sc/coverage/pytest.json");
         let sources = ["src".to_string(), ".".to_string()];
-        let python3 = coverage_fallback_command(&dir, &cov_file, &sources);
+        let python3 = coverage_fallback_command(&dir, &cov_file, &sources, &[]);
         assert!(python3.starts_with(
             "PYTHONPATH='src'${PYTHONPATH:+:\"$PYTHONPATH\"} python3 -m coverage run --source='src' --source='.' -m pytest -q && "
         ));
@@ -1935,12 +2088,12 @@ dev = ["pytest>=8"]
         assert!(!python3.contains("uv run"));
 
         std::fs::write(dir.join(".venv"), "not a directory\n").unwrap();
-        assert!(coverage_fallback_command(&dir, &cov_file, &sources)
+        assert!(coverage_fallback_command(&dir, &cov_file, &sources, &[])
             .starts_with("PYTHONPATH='src'${PYTHONPATH:+:\"$PYTHONPATH\"} python3 -m coverage"));
         std::fs::remove_file(dir.join(".venv")).unwrap();
 
         std::fs::create_dir(dir.join(".venv")).unwrap();
-        let venv = coverage_fallback_command(&dir, &cov_file, &sources);
+        let venv = coverage_fallback_command(&dir, &cov_file, &sources, &[]);
         assert!(venv.starts_with(
             "PYTHONPATH='src'${PYTHONPATH:+:\"$PYTHONPATH\"} uv run --extra dev --with coverage coverage run --source='src' --source='.' -m pytest -q && "
         ));
@@ -1951,7 +2104,10 @@ dev = ["pytest>=8"]
         let _ = std::fs::remove_dir(dir.join(".venv"));
 
         std::fs::write(dir.join("uv.lock"), "").unwrap();
-        assert_eq!(coverage_fallback_command(&dir, &cov_file, &sources), venv);
+        assert_eq!(
+            coverage_fallback_command(&dir, &cov_file, &sources, &[]),
+            venv
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1964,6 +2120,7 @@ dev = ["pytest>=8"]
             &dir,
             Instant::now() + Duration::from_secs(20),
             &["src".into()],
+            &[],
             &mut runs,
         )
         .expect_err("an empty tree does not produce coverage");
@@ -1973,7 +2130,7 @@ dev = ["pytest>=8"]
         assert_eq!(runs[0].engine, "coverage");
         assert_eq!(
             runs[0].command,
-            coverage_fallback_command(&dir, &cov_file, &["src".into()])
+            coverage_fallback_command(&dir, &cov_file, &["src".into()], &[])
         );
         assert!(runs[0]
             .command
@@ -2036,8 +2193,429 @@ dev = ["pytest>=8"]
 
     fn classify_tree(dir: &Path, hit: IndexHit) -> (Vec<Finding>, ScaCounts) {
         let mut findings = Vec::new();
-        let counts = check_imports_with(dir, &mut findings, &mut Vec::new(), &FixedIndex(hit));
+        let counts =
+            check_imports_with(dir, &mut findings, &mut Vec::new(), &FixedIndex(hit), None);
         (findings, counts)
+    }
+
+    fn classify_only(
+        dir: &Path,
+        hit: IndexHit,
+        only: &BTreeSet<String>,
+    ) -> (Vec<Finding>, ScaCounts) {
+        let mut findings = Vec::new();
+        let counts = check_imports_with(
+            dir,
+            &mut findings,
+            &mut Vec::new(),
+            &FixedIndex(hit),
+            Some(only),
+        );
+        (findings, counts)
+    }
+
+    #[test]
+    fn ruff_diff_command_names_files_instead_of_the_tree() {
+        assert_eq!(ruff_check_command("ruff", None), "ruff check .");
+        let mut only = BTreeSet::new();
+        only.insert("src/new.py".into());
+        let command = ruff_check_command("ruff", Some(&only));
+        assert_eq!(command, "ruff check 'src/new.py'");
+        assert!(!command.contains("check ."), "{command}");
+        let mut two = BTreeSet::new();
+        two.insert("src/b.py".into());
+        two.insert("src/a.py".into());
+        assert_eq!(
+            ruff_check_command("uvx ruff", Some(&two)),
+            "uvx ruff check 'src/a.py' 'src/b.py'"
+        );
+    }
+
+    #[test]
+    fn pytest_command_appends_only_the_given_targets() {
+        let cov_file = PathBuf::from("/tmp/sc-pytest.json");
+        let with = pytest_command(
+            "python3 -m pytest -q",
+            &[".".into()],
+            &cov_file,
+            false,
+            &["tests/test_new.py".into()],
+        );
+        assert_eq!(with, "python3 -m pytest -q 'tests/test_new.py'");
+        assert!(!with.contains("test_old"));
+    }
+
+    #[test]
+    fn diff_import_check_reports_the_changed_file_only() {
+        let dir = scratch("diff-imports");
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("pyproject.toml"),
+            "[project]\nname = \"demo\"\ndependencies = []\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("src/old.py"), "import not_in_diff_pkg\n").unwrap();
+        std::fs::write(dir.join("src/new.py"), "import in_diff_pkg\n").unwrap();
+        let mut only = BTreeSet::new();
+        only.insert("src/new.py".into());
+        let (scoped, counts) = classify_only(&dir, IndexHit::Absent, &only);
+        assert_eq!(counts.hallucinated, 1, "{scoped:?}");
+        assert_eq!(scoped.len(), 1, "{scoped:?}");
+        assert_eq!(scoped[0].file, "src/new.py");
+        assert_eq!(scoped[0].symbol.as_deref(), Some("in_diff_pkg"));
+        let (tree, tree_counts) = classify_tree(&dir, IndexHit::Absent);
+        assert_eq!(tree_counts.hallucinated, 2, "{tree:?}");
+        assert!(tree.iter().any(|finding| finding.file == "src/old.py"));
+        assert!(tree.iter().any(|finding| finding.file == "src/new.py"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn empty_diff_does_not_compile_or_lint_the_tree() {
+        let dir = scratch("diff-empty");
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("src/old.py"), "def broken(\n").unwrap();
+        let only = BTreeSet::new();
+        let mut findings = Vec::new();
+        let mut runs = Vec::new();
+        let mut ran = Vec::new();
+        let mut skipped = Vec::new();
+        let (pass, reason) = compile_tree(
+            &dir,
+            Instant::now() + Duration::from_secs(20),
+            &mut findings,
+            &mut runs,
+            &mut ran,
+            &mut skipped,
+            Some(&only),
+        );
+        assert!(pass, "{reason}");
+        assert!(runs.is_empty(), "{runs:?}");
+        let (lint_pass, lint_reason) = run_ruff(
+            &dir,
+            Instant::now() + Duration::from_secs(20),
+            &mut findings,
+            &mut runs,
+            &mut ran,
+            &mut skipped,
+            Some(&only),
+        );
+        assert!(lint_pass, "{lint_reason}");
+        assert!(lint_reason.is_empty());
+        assert!(findings.is_empty(), "{findings:?}");
+        assert!(runs.is_empty(), "{runs:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn diff_compile_ignores_a_syntax_error_outside_the_diff() {
+        let dir = scratch("diff-compile");
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("src/old.py"), "def broken(\n").unwrap();
+        std::fs::write(dir.join("src/new.py"), "def ok():\n    return 1\n").unwrap();
+        let mut only = BTreeSet::new();
+        only.insert("src/new.py".into());
+        let mut findings = Vec::new();
+        let mut runs = Vec::new();
+        let mut ran = Vec::new();
+        let mut skipped = Vec::new();
+        let (pass, reason) = compile_tree(
+            &dir,
+            Instant::now() + Duration::from_secs(20),
+            &mut findings,
+            &mut runs,
+            &mut ran,
+            &mut skipped,
+            Some(&only),
+        );
+        assert!(pass, "{reason} {findings:?}");
+        assert!(
+            runs[0].command.contains("src/new.py"),
+            "{}",
+            runs[0].command
+        );
+        assert!(!runs[0].command.contains("old.py"), "{}", runs[0].command);
+        assert!(
+            !runs[0].command.contains("compileall -q ."),
+            "{}",
+            runs[0].command
+        );
+        findings.clear();
+        runs.clear();
+        ran.clear();
+        skipped.clear();
+        let (tree_pass, _) = compile_tree(
+            &dir,
+            Instant::now() + Duration::from_secs(20),
+            &mut findings,
+            &mut runs,
+            &mut ran,
+            &mut skipped,
+            None,
+        );
+        assert!(!tree_pass, "the tree scan must still compile src/old.py");
+        assert!(runs[0].command.contains(" src"), "{}", runs[0].command);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn diff_pytest_skips_the_suite_when_no_test_file_changed() {
+        let dir = scratch("diff-pytest-skip");
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::create_dir_all(dir.join("tests")).unwrap();
+        std::fs::write(dir.join("src/app.py"), "x = 1\n").unwrap();
+        std::fs::write(
+            dir.join("tests/test_old.py"),
+            "def test_old():\n    assert False\n",
+        )
+        .unwrap();
+        let mut only = BTreeSet::new();
+        only.insert("src/app.py".into());
+        let mut findings = Vec::new();
+        let mut runs = Vec::new();
+        let (enforced, pass, reason) = run_pytest(
+            &dir,
+            Instant::now() + Duration::from_secs(20),
+            &["src".into()],
+            &mut findings,
+            &mut runs,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            false,
+            Some(&only),
+        );
+        assert!(!enforced);
+        assert!(pass);
+        assert!(reason.contains("no Python tests in this diff"), "{reason}");
+        assert!(reason.contains("sc analyze"));
+        assert!(runs.is_empty(), "{runs:?}");
+        assert!(findings.is_empty(), "{findings:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn diff_pytest_runs_only_the_changed_test_file() {
+        let dir = scratch("diff-pytest-file");
+        std::fs::create_dir_all(dir.join("tests")).unwrap();
+        std::fs::write(
+            dir.join("tests/test_old.py"),
+            "def test_old():\n    assert False\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("tests/test_new.py"),
+            "def test_new():\n    assert True\n",
+        )
+        .unwrap();
+        let mut only = BTreeSet::new();
+        only.insert("tests/test_new.py".into());
+        let mut runs = Vec::new();
+        let _ = run_pytest(
+            &dir,
+            Instant::now() + Duration::from_secs(20),
+            &[".".into()],
+            &mut Vec::new(),
+            &mut runs,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            false,
+            Some(&only),
+        );
+        assert_eq!(runs.len(), 1, "{runs:?}");
+        assert!(
+            runs[0].command.contains("tests/test_new.py"),
+            "{}",
+            runs[0].command
+        );
+        assert!(!runs[0].command.contains("test_old"), "{}", runs[0].command);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn diff_secrets_drop_an_unchanged_file() {
+        let dir = scratch("diff-secrets");
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        let key = format!("AKIA{}{}", "0Z3VS5J4", "AB3KQM9Z");
+        std::fs::write(dir.join("src/old.py"), format!("KEY = \"{key}\"\n")).unwrap();
+        std::fs::write(dir.join("src/new.py"), format!("KEY = \"{key}\"\n")).unwrap();
+        std::fs::write(dir.join("pyproject.toml"), "[project]\nname = \"demo\"\n").unwrap();
+        let mut py = BTreeSet::new();
+        py.insert("src/new.py".into());
+        let mut files = py.clone();
+        let outcome = run_with_generated(
+            &dir,
+            Instant::now() + Duration::from_secs(30),
+            30,
+            15,
+            std::time::SystemTime::UNIX_EPOCH,
+            crate::scope::ScanScope {
+                exclude: &[],
+                include_generated: &[],
+            },
+            false,
+            Some(&py),
+            Some(&files),
+        );
+        let secret_files: Vec<_> = outcome
+            .findings
+            .iter()
+            .filter(|finding| finding.rule == "secrets.aws_access_key")
+            .map(|finding| finding.file.as_str())
+            .collect();
+        assert_eq!(secret_files, vec!["src/new.py"], "{secret_files:?}");
+        assert_eq!(outcome.checks.secret_errors, 1);
+        files.remove("src/new.py");
+        let dropped = run_with_generated(
+            &dir,
+            Instant::now() + Duration::from_secs(30),
+            30,
+            15,
+            std::time::SystemTime::UNIX_EPOCH,
+            crate::scope::ScanScope {
+                exclude: &[],
+                include_generated: &[],
+            },
+            false,
+            Some(&py),
+            Some(&files),
+        );
+        // py still includes new.py for the other engines; secrets follow `files`.
+        assert!(
+            !dropped
+                .findings
+                .iter()
+                .any(|finding| finding.rule == "secrets.aws_access_key"),
+            "{:?}",
+            dropped.findings
+        );
+        assert_eq!(dropped.checks.secret_errors, 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pytest_output_records_pass_failure_and_a_missing_runner() {
+        let mut findings = Vec::new();
+        let mut runs = Vec::new();
+        let mut ran = Vec::new();
+        let mut skipped = Vec::new();
+        let (enforced, pass, reason) = record_pytest_output(
+            &mut findings,
+            &mut runs,
+            &mut ran,
+            &mut skipped,
+            "python3 -m pytest -q",
+            "python3 -m pytest -q",
+            true,
+            Some(0),
+            "",
+            "",
+            Duration::from_millis(1),
+        );
+        assert!(enforced && pass && reason.is_empty());
+        assert_eq!(ran, ["tests"]);
+        assert!(findings.is_empty());
+
+        findings.clear();
+        runs.clear();
+        ran.clear();
+        skipped.clear();
+        let (enforced, pass, reason) = record_pytest_output(
+            &mut findings,
+            &mut runs,
+            &mut ran,
+            &mut skipped,
+            "python3 -m pytest -q",
+            "python3 -m pytest -q",
+            false,
+            Some(1),
+            "F test_old",
+            "",
+            Duration::from_millis(1),
+        );
+        assert!(enforced && !pass);
+        assert_eq!(reason, "pytest failed");
+        assert_eq!(findings[0].rule, "test.failed");
+        assert!(findings[0].message.contains("test_old"));
+
+        findings.clear();
+        ran.clear();
+        let (enforced, pass, reason) = record_pytest_output(
+            &mut findings,
+            &mut runs,
+            &mut ran,
+            &mut skipped,
+            "python3 -m pytest -q",
+            "python3 -m pytest -q",
+            false,
+            Some(1),
+            "",
+            "",
+            Duration::ZERO,
+        );
+        assert!(enforced && !pass);
+        assert_eq!(reason, "pytest failed");
+        assert_eq!(findings.last().unwrap().message, "pytest failed");
+
+        findings.clear();
+        ran.clear();
+        skipped.clear();
+        let (enforced, pass, reason) = record_pytest_output(
+            &mut findings,
+            &mut runs,
+            &mut ran,
+            &mut skipped,
+            "uv run pytest -q",
+            "uv run pytest -q",
+            false,
+            Some(1),
+            "",
+            "uv: command not found",
+            Duration::ZERO,
+        );
+        assert!(enforced && !pass);
+        assert_eq!(reason, "uv is not installed");
+        assert_eq!(skipped, ["tests"]);
+        assert_eq!(
+            findings[0].suggested_action.as_deref(),
+            Some("Install uv and re-run.")
+        );
+
+        findings.clear();
+        skipped.clear();
+        let (enforced, pass, reason) = record_pytest_output(
+            &mut findings,
+            &mut runs,
+            &mut ran,
+            &mut skipped,
+            "python3 -m pytest -q",
+            "python3 -m pytest -q",
+            false,
+            Some(1),
+            "",
+            "No module named pytest",
+            Duration::ZERO,
+        );
+        assert!(enforced && !pass);
+        assert_eq!(reason, "pytest is not installed");
+        assert_eq!(findings[0].rule, "engine.unavailable");
+        assert_eq!(
+            findings[0].suggested_action.as_deref(),
+            Some("Install the tool and re-run")
+        );
+
+        findings.clear();
+        skipped.clear();
+        let (enforced, pass, reason) = record_pytest_spawn_error(
+            &mut findings,
+            &mut runs,
+            &mut skipped,
+            "python3 -m pytest -q",
+            &CommandError::Timeout,
+        );
+        assert!(enforced && !pass);
+        assert_eq!(reason, "pytest did not run");
+        assert_eq!(skipped, ["tests"]);
+        assert!(findings[0].message.contains("timed out"));
     }
 
     fn symbols(findings: &[Finding]) -> Vec<String> {
