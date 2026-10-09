@@ -71,11 +71,35 @@ pub fn to_pretty(card: &Scorecard, opts: &PrettyOpts) -> String {
     push_gates(&mut out, card, opts, width);
     push_scores(&mut out, card, opts, width);
     push_crap(&mut out, card, opts, width);
+    push_test_value(&mut out, card, opts, width);
     push_generated_files(&mut out, card, opts, width);
     push_findings(&mut out, card, opts, width);
     push_llm(&mut out, card, opts, width);
     push_footer(&mut out, card, opts);
     out
+}
+
+fn push_test_value(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize) {
+    let Some(tv) = card.sections.test_value.as_ref() else {
+        return;
+    };
+    out.push_str("test value\n");
+    let m = &tv.mutation;
+    let pct = m
+        .score
+        .map(|s| format!("{:.0}%", s * 100.0))
+        .unwrap_or_else(|| "n/a".into());
+    let line = format!(
+        "  mutation: {} ({} killed, {} survived, {} timeout, {} unviable) [{}]",
+        pct,
+        m.killed,
+        m.survived,
+        m.timeout,
+        m.unviable,
+        m.status
+    );
+    out.push_str(&fit(&line, width, opts.color));
+    out.push_str("\n\n");
 }
 
 fn push_generated_files(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize) {

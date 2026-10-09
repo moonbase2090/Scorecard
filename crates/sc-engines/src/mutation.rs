@@ -230,6 +230,7 @@ pub fn parse_outcomes(text: &str) -> MutationOutcome {
     let mut killed = 0u64;
     let mut survived = 0u64;
     let mut timeout = 0u64;
+    let mut unviable = 0u64;
     let mut findings = Vec::new();
     for row in rows {
         let summary = row
@@ -240,6 +241,7 @@ pub fn parse_outcomes(text: &str) -> MutationOutcome {
         match summary.as_str() {
             "caught" | "caughtmutant" => killed += 1,
             "timeout" | "timedout" => timeout += 1,
+            "unviable" => unviable += 1,
             "missed" | "uncaught" => {
                 survived += 1;
                 findings.push(survivor_finding(row, findings.len()));
@@ -247,10 +249,11 @@ pub fn parse_outcomes(text: &str) -> MutationOutcome {
             _ => {}
         }
     }
-    let score = if killed + survived == 0 {
+    let denom = killed + survived + timeout;
+    let score = if denom == 0 {
         None
     } else {
-        Some(killed as f64 / (killed + survived) as f64)
+        Some(killed as f64 / denom as f64)
     };
     MutationOutcome {
         section: MutationSection {
@@ -259,6 +262,7 @@ pub fn parse_outcomes(text: &str) -> MutationOutcome {
             killed,
             survived,
             timeout,
+            unviable,
         },
         findings,
         ran: true,
@@ -278,15 +282,29 @@ fn survivor_finding(row: &Value, index: usize) -> Finding {
         .or_else(|| row.get("file"))
         .and_then(Value::as_str)
         .unwrap_or(".");
+    let line = scenario
+        .get("line")
+        .or_else(|| scenario.get("start_line"))
+        .and_then(Value::as_u64)
+        .map(|line| line as u32);
+    let span = line.map(|start_line| sc_core::Span {
+        start_line,
+        start_col: 1,
+        end_line: start_line,
+        end_col: 1,
+    });
+    let location = line
+        .map(|line| format!("{file}:{line}"))
+        .unwrap_or_else(|| file.to_string());
     Finding {
         id: format!("mutation:{file}:{index}"),
         rule: "mutation.survivor".into(),
         engine: "mutation".into(),
         severity: "error".into(),
         file: file.to_string(),
-        span: None,
+        span,
         symbol: None,
-        message: format!("mutant survived: {description}"),
+        message: format!("mutant survived at {location}: {description}"),
         evidence: serde_json::json!({"summary": description}),
         suggested_action: Some("Add a test that kills this mutant".into()),
         disposition: String::new(),
@@ -332,8 +350,9 @@ mod tests {
         assert_eq!(outcome.section.killed, 1);
         assert_eq!(outcome.section.survived, 1);
         assert_eq!(outcome.section.timeout, 1);
+        assert_eq!(outcome.section.unviable, 1);
         assert_eq!(outcome.findings[0].rule, "mutation.survivor");
-        assert!((outcome.section.score.unwrap() - 0.5).abs() < 1e-9);
+        assert!((outcome.section.score.unwrap() - (1.0 / 3.0)).abs() < 1e-9);
     }
 
     #[test]

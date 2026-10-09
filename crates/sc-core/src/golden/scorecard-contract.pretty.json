@@ -70,7 +70,8 @@
     "score": null,
     "killed": 0,
     "survived": 0,
-    "timeout": 0
+    "timeout": 0,
+    "unviable": 0
   },
   "findings": [
     {

@@ -835,7 +835,16 @@ fn deep(out: &mut String, card: &Scorecard) {
     out.push_str(&m.survived.to_string());
     out.push_str("</span><span class=\"pill dim\">timeout ");
     out.push_str(&m.timeout.to_string());
+    out.push_str("</span><span class=\"pill dim\">unviable ");
+    out.push_str(&m.unviable.to_string());
     out.push_str("</span></div>");
+    if let Some(tv) = card.sections.test_value.as_ref() {
+        out.push_str("<h3 style=\"margin-top:12px\">test value</h3><p style=\"font-size:12.5px\">status ");
+        out.push_str(&esc(&tv.status));
+        out.push_str(" · mutation ");
+        out.push_str(&esc(&tv.mutation.status));
+        out.push_str("</p>");
+    }
     match &card.sections.spec.path {
         Some(path) => {
             out.push_str("<p style=\"font-size:12.5px\">spec <code>");

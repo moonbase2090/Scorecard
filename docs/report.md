@@ -93,6 +93,8 @@ Top-level fields of `.sc/last-scorecard.json` and `--format json`:
 | `scores` | The score rows above |
 | `metrics` | Changed lines and files, `coverage_changed`, `crap_max`, `crap_over_threshold`, `hallucinated_imports` |
 | `crap` | Threshold and worst functions with `cc`, `coverage`, and `crap` |
+| `mutation` | `status`, `score`, `killed`, `survived`, `timeout`, `unviable` when `--mutation` is not `off` |
+| `test_value` | Present when `--mutation` is not `off`; mirrors `mutation` and reserves stubs for future test-value engines (see `docs/design/test-value.md`) |
 | `findings` | `rule`, `engine`, `severity`, `file`, `span`, `symbol`, `message`, `suggested_action`, `disposition`, `evidence` |
 | `engines_run`, `engines_skipped` | As in the terminal footer |
 | `runs` | Every command `sc` ran, with exit code and duration |
