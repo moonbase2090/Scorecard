@@ -121,16 +121,14 @@ fn interpret_list(
 ) -> Result<usize, Box<MutationOutcome>> {
     match list {
         Ok(captured) if captured.status.success() => Ok(parse_list_count(&captured.stdout)),
-        Ok(captured) if tool_missing(&captured.stderr) || tool_missing(&captured.stdout) => {
-            Err(Box::new(unavailable_outcome("cargo-mutants is not installed")))
-        }
+        Ok(captured) if tool_missing(&captured.stderr) || tool_missing(&captured.stdout) => Err(
+            Box::new(unavailable_outcome("cargo-mutants is not installed")),
+        ),
         Ok(_) => Ok(0),
-        Err(CommandError::NotFound) => {
-            Err(Box::new(unavailable_outcome("cargo is not installed")))
-        }
-        Err(CommandError::Timeout) => {
-            Err(Box::new(unavailable_outcome("cargo mutants --list timed out")))
-        }
+        Err(CommandError::NotFound) => Err(Box::new(unavailable_outcome("cargo is not installed"))),
+        Err(CommandError::Timeout) => Err(Box::new(unavailable_outcome(
+            "cargo mutants --list timed out",
+        ))),
         Err(CommandError::Spawn(err)) => Err(Box::new(unavailable_outcome(&err))),
     }
 }
