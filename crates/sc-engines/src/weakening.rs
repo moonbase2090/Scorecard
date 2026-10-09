@@ -97,7 +97,7 @@ fn is_test_rust_path(path: &str) -> bool {
 }
 
 fn file_touches_tests(file: &FileDiff) -> bool {
-    is_test_rust_path(&file.path) || file.hunks.iter().any(|hunk| hunk_looks_like_test(hunk))
+    is_test_rust_path(&file.path) || file.hunks.iter().any(hunk_looks_like_test)
 }
 
 fn hunk_looks_like_test(hunk: &Hunk) -> bool {
