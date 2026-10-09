@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Diff-scoped **test weakening** for Rust (`test_value.weakening`): report-only heuristics when `--diff` is set and product `.rs` changes, including assertion loosening, new `#[ignore]` / `#[should_panic]`, and removed tests. Runs even when `mutation.mode` is `off`. Terminal and HTML reports show weakening counts; see `docs/design/test-value.md`.
 - Release `.tar.gz` archives use a nested `sc-vX.Y.Z-<target>/` directory. `scripts/check-archive-layout.py` enforces the layout in release builds and CI. The GitHub Action still installs flat v0.1.6 archives.
 - The Scorecard action accepts `budget-seconds` and passes it to `sc analyze`.
 - Add `sc skills install` and once-per-version automatic skill installation for detected agents (#183).

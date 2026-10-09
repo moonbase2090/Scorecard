@@ -242,10 +242,14 @@ pub struct TestValueWeakening {
 
 impl TestValueWeakening {
     pub fn skipped() -> Self {
+        Self::skipped_with_reason(None)
+    }
+
+    pub fn skipped_with_reason(reason: Option<String>) -> Self {
         Self {
             status: "skipped".into(),
             findings: 0,
-            reason: None,
+            reason,
         }
     }
 }

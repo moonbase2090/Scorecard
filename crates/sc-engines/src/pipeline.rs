@@ -2562,7 +2562,9 @@ fn weakening_engine(
     if request.diff_base.is_none() {
         skipped.push("test_value.weakening".into());
         return WeakeningRun {
-            section: sc_core::TestValueWeakening::skipped(),
+            section: sc_core::TestValueWeakening::skipped_with_reason(
+                Some("needs --diff".into()),
+            ),
         };
     }
     let base = request.diff_base.clone().unwrap_or_else(|| "AUTO".into());
