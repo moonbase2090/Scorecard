@@ -91,12 +91,7 @@ fn push_test_value(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width:
         .unwrap_or_else(|| "n/a".into());
     let line = format!(
         "  mutation: {} ({} killed, {} survived, {} timeout, {} unviable) [{}]",
-        pct,
-        m.killed,
-        m.survived,
-        m.timeout,
-        m.unviable,
-        m.status
+        pct, m.killed, m.survived, m.timeout, m.unviable, m.status
     );
     out.push_str(&fit(&line, width, opts.color));
     out.push_str("\n\n");
