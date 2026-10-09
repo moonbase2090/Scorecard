@@ -198,6 +198,7 @@ pub struct MutationSection {
     pub killed: u64,
     pub survived: u64,
     pub timeout: u64,
+    pub unviable: u64,
 }
 
 impl MutationSection {
@@ -208,6 +209,72 @@ impl MutationSection {
             killed: 0,
             survived: 0,
             timeout: 0,
+            unviable: 0,
+        }
+    }
+}
+
+/// Report-only test-value signals (`test_value` in JSON). Mutation is mirrored from `mutation`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TestValueMutation {
+    pub status: String,
+    pub score: Option<f64>,
+    pub killed: u64,
+    pub survived: u64,
+    pub timeout: u64,
+    pub unviable: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TestValueStub {
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TestValueSection {
+    pub status: String,
+    pub mutation: TestValueMutation,
+    pub weakening: TestValueStub,
+    pub tautology: TestValueStub,
+    pub per_test: TestValueStub,
+    pub mix: TestValueStub,
+}
+
+impl TestValueSection {
+    pub fn from_mutation(section: &MutationSection) -> Self {
+        let status = match section.status.as_str() {
+            "ran" => "ran",
+            "skipped" => "skipped",
+            _ => "partial",
+        };
+        Self {
+            status: status.into(),
+            mutation: TestValueMutation {
+                status: section.status.clone(),
+                score: section.score,
+                killed: section.killed,
+                survived: section.survived,
+                timeout: section.timeout,
+                unviable: section.unviable,
+            },
+            weakening: TestValueStub {
+                status: "skipped".into(),
+                reason: None,
+            },
+            tautology: TestValueStub {
+                status: "not_measured".into(),
+                reason: Some("not implemented".into()),
+            },
+            per_test: TestValueStub {
+                status: "skipped".into(),
+                reason: None,
+            },
+            mix: TestValueStub {
+                status: "skipped".into(),
+                reason: None,
+            },
         }
     }
 }
@@ -359,6 +426,8 @@ pub struct ScorecardMeasures {
 pub struct ScorecardSections {
     pub crap: CrapSection,
     pub mutation: MutationSection,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_value: Option<TestValueSection>,
     pub findings: Vec<Finding>,
     /// Generated or vendored source files included in this scan.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -438,6 +507,7 @@ impl Scorecard {
                     worst: Vec::new(),
                 },
                 mutation: MutationSection::skipped(),
+                test_value: None,
                 findings: Vec::new(),
                 generated_files_warning: None,
                 spec: SpecSection::empty(),
@@ -477,6 +547,24 @@ mod tests {
         let card = Scorecard::skeleton("demo", 30);
         let json = serde_json::to_value(&card).unwrap();
         assert!(json["scope"].get("other_paths").is_none());
+    }
+
+    #[test]
+    fn test_value_section_mirrors_mutation() {
+        let mutation = MutationSection {
+            status: "ran".into(),
+            score: Some(0.5),
+            killed: 2,
+            survived: 1,
+            timeout: 1,
+            unviable: 3,
+        };
+        let tv = TestValueSection::from_mutation(&mutation);
+        assert_eq!(tv.status, "ran");
+        assert_eq!(tv.mutation.killed, 2);
+        assert_eq!(tv.mutation.unviable, 3);
+        assert_eq!(tv.weakening.status, "skipped");
+        assert_eq!(tv.tautology.status, "not_measured");
     }
 
     #[test]
@@ -574,6 +662,7 @@ mod tests {
                     }],
                 },
                 mutation: MutationSection::skipped(),
+                test_value: None,
                 findings: vec![Finding {
                     id: "crap:src/parse.rs:parse_input".into(),
                     rule: "crap.over_threshold".into(),

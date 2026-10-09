@@ -198,6 +198,7 @@ fn analyze_blocked(
         threshold: request.config.gates.crap_threshold,
         worst: Vec::new(),
         mutation: MutationSection::skipped(),
+        test_value: None,
         spec: SpecSection::empty(),
         intent: request.intent.clone(),
         llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),
@@ -403,6 +404,7 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         threshold: request.config.gates.crap_threshold,
         worst: crap.worst,
         mutation: MutationSection::skipped(),
+        test_value: None,
         spec: SpecSection::empty(),
         intent: request.intent.clone(),
         llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),
@@ -730,6 +732,7 @@ fn analyze_unsupported(
         threshold: request.config.gates.crap_threshold,
         worst: crap.worst,
         mutation: MutationSection::skipped(),
+        test_value: None,
         spec: SpecSection::empty(),
         intent: request.intent.clone(),
         llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),
@@ -887,6 +890,7 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         threshold: request.config.gates.crap_threshold,
         worst: outcome.crap.worst,
         mutation: MutationSection::skipped(),
+        test_value: None,
         spec: SpecSection::empty(),
         intent: request.intent.clone(),
         llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),
@@ -1529,6 +1533,7 @@ fn assemble_rust_report(
         threshold,
         worst: crap.worst,
         mutation: mutation.section,
+        test_value: mutation.test_value,
         spec: spec.section,
         intent: request.intent.clone(),
         llm,
@@ -1563,6 +1568,7 @@ struct Draft {
     threshold: u32,
     worst: Vec<sc_core::CrapFunction>,
     mutation: MutationSection,
+    test_value: Option<sc_core::TestValueSection>,
     spec: SpecSection,
     intent: Option<String>,
     llm: Option<LlmSection>,
@@ -1619,6 +1625,7 @@ fn finish(mut draft: Draft) -> AnalyzeOutput {
                 worst: draft.worst,
             },
             mutation: draft.mutation,
+            test_value: draft.test_value,
             findings: draft.findings,
             generated_files_warning: draft.generated_files_warning,
             spec: draft.spec,
@@ -2474,6 +2481,7 @@ fn spec_engine(
 
 struct MutationRun {
     section: MutationSection,
+    test_value: Option<sc_core::TestValueSection>,
     add_gate: bool,
     pass: bool,
     reason: String,
@@ -2494,6 +2502,7 @@ fn mutation_engine(
         skipped.push("mutation".into());
         return MutationRun {
             section: MutationSection::skipped(),
+            test_value: None,
             add_gate: false,
             pass: true,
             reason: String::new(),
@@ -2523,8 +2532,11 @@ fn mutation_engine(
     } else {
         String::new()
     };
+    let section = outcome.section;
+    let test_value = Some(sc_core::TestValueSection::from_mutation(&section));
     MutationRun {
-        section: outcome.section,
+        section,
+        test_value,
         add_gate: true,
         pass,
         reason,
