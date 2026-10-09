@@ -566,6 +566,7 @@ mod tests {
         assert_eq!(tv.tautology.status, "not_measured");
     }
 
+    #[test]
     fn llm_section_is_optional_and_round_trips() {
         let mut card = Scorecard::skeleton("demo", 30);
         let json = serde_json::to_value(&card).unwrap();
