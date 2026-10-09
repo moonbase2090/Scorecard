@@ -183,7 +183,7 @@ Missing tools produce `engine.unavailable` / `status: not_measured` with install
 
 **Purpose:** Summarize unit vs integration vs e2e where detectable.
 
-**Rust:** `tests/` and `#[test]` in `src/` → unit; `tests/*.rs` integration; `#[ignore]` e2e or `tests/e2e` convention if present.  
+**Rust:** `#[test]` in `src/` → unit; each `tests/*.rs` file (crate integration binary) → integration; `tests/e2e/**` or `#[ignore]` tests tagged as e2e in `.scorecard/INFO.md` → e2e.  
 **Node:** `*.test.ts` vs `*.spec.ts` vs Playwright/Cypress paths (best-effort).  
 Unknown bucket → `other`.
 

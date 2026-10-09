@@ -13,7 +13,7 @@ Evidence quality varies. Peer-reviewed empirical studies are cited with links. P
 
 | Antipattern | Detection | Packs (v1) | FP risk | Cost | Build priority |
 |---|---|---|---|---|---|
-| Low mutation score on diff | Dynamic (cargo mutants) | Rust first | Low–med | High | **P0** |
+| Low mutation score on diff (incl. weak / mirror-implementation oracles) | Dynamic (cargo mutants) + static follow-ons | Rust first | Low–med | High | **P0** |
 | Assertion weakened in diff | Git diff + AST | Rust, then others | Med | Low | **P0** |
 | Test deleted with code change | Git diff | All | Med | Low | **P0** |
 | Assertion-free / always-true test | Static AST | Rust first | Med | Low | **P1** |
@@ -25,7 +25,8 @@ Evidence quality varies. Peer-reviewed empirical studies are cited with links. P
 | Order-dependent test | Dynamic (shuffle) | Rust, Go | Med | High | **P3** |
 | Flaky (erratic) test | Dynamic (re-runs) | All | Med | Very high | **P3** |
 | High cost, zero unique mutants | Dynamic (mutation attribution) | Rust first | Low | High | **P1** (after P0 mutation) |
-| Weak LLM / mirror-implementation test | Mutation + static heuristics | All | Med | High | **P0** (via mutation) |
+
+The **[ranked build shortlist](#ranked-build-shortlist-drives-deliverables-26)** below is normative for deliverable order. Agent-era “mirror the implementation” tests are primarily caught by rank 1 (mutation) and rank 4 (static tautology), not a separate engine.
 
 ---
 
@@ -299,7 +300,7 @@ assert_eq!(got, double(2));
 
 | Rank | Capability | Maps to deliverable | Rationale |
 |---|---|---|---|
-| 1 | Diff-scoped mutation score + survivors | #2 Mutation engine | Strongest evidence link to fault detection; directly answers “would tests catch planted bugs in this change?” |
+| 1 | Diff-scoped mutation score + survivors | #2 Mutation engine | Strongest evidence link to fault detection; directly answers “would tests catch planted bugs in this change?” Catches many weak / mirror-implementation oracles that static rules miss. |
 | 2 | Test weakening + deletes in diff | #3 Test weakening | Cheap, high signal for agent/human gaming CI |
 | 3 | Ignore/skip added in diff | #3 (same engine) | Low cost, low FP |
 | 4 | Assertion-free / tautology (static) | #4 Tautology checks | Cheap; targets LLM weak-oracle pattern |
