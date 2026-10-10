@@ -25,6 +25,6 @@ findings
   (none)
 
 engines run: compile, tests, coverage, complexity, crap, sca, secrets, perf, lint
-engines skipped: spec, mutation, llm
+engines skipped: spec, mutation, llm, test_value.weakening
 duration: DURs
 exit 0: enforced gates passed
