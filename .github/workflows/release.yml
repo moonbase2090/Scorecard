@@ -118,11 +118,27 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: "*"
           merge-multiple: true
           path: dist
+      - name: Check release text
+        env:
+          RELEASE_DENYLIST: ${{ secrets.RELEASE_DENYLIST }}
+        run: |
+          set -eu
+          printf '%s\n' "$GITHUB_REF_NAME" > /tmp/release-title.txt
+          git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > /tmp/tag-message.txt 2>/dev/null || : > /tmp/tag-message.txt
+          printf 'Release %s\n' "$GITHUB_REF_NAME" > /tmp/release-body.txt
+          sh scripts/check-release-text.sh \
+            --release-title /tmp/release-title.txt \
+            --release-body /tmp/release-body.txt \
+            --tag-message /tmp/tag-message.txt \
+            --dist dist
       - name: Checksums and GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
