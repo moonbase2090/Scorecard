@@ -845,6 +845,13 @@ fn deep(out: &mut String, card: &Scorecard) {
         out.push_str(&esc(&tv.status));
         out.push_str(" · mutation ");
         out.push_str(&esc(&tv.mutation.status));
+        out.push_str(" · weakening ");
+        out.push_str(&esc(&tv.weakening.status));
+        if tv.weakening.status == "ran" {
+            out.push_str(" (");
+            out.push_str(&tv.weakening.findings.to_string());
+            out.push_str(" findings)");
+        }
         out.push_str("</p>");
     }
     match &card.sections.spec.path {

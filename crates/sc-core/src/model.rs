@@ -233,36 +233,56 @@ pub struct TestValueStub {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TestValueWeakening {
+    pub status: String,
+    pub findings: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+impl TestValueWeakening {
+    pub fn skipped() -> Self {
+        Self::skipped_with_reason(None)
+    }
+
+    pub fn skipped_with_reason(reason: Option<String>) -> Self {
+        Self {
+            status: "skipped".into(),
+            findings: 0,
+            reason,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TestValueSection {
     pub status: String,
     pub mutation: TestValueMutation,
-    pub weakening: TestValueStub,
+    pub weakening: TestValueWeakening,
     pub tautology: TestValueStub,
     pub per_test: TestValueStub,
     pub mix: TestValueStub,
 }
 
 impl TestValueSection {
-    pub fn from_mutation(section: &MutationSection) -> Self {
-        let status = match section.status.as_str() {
-            "ran" => "ran",
-            "skipped" => "skipped",
-            _ => "partial",
-        };
-        Self {
-            status: status.into(),
+    pub fn assemble(mutation: &MutationSection, weakening: &TestValueWeakening) -> Option<Self> {
+        let mutation_enabled = mutation.status != "skipped";
+        let weakening_enabled = weakening.status != "skipped";
+        if !mutation_enabled && !weakening_enabled {
+            return None;
+        }
+        let status = overall_test_value_status(mutation, weakening);
+        Some(Self {
+            status,
             mutation: TestValueMutation {
-                status: section.status.clone(),
-                score: section.score,
-                killed: section.killed,
-                survived: section.survived,
-                timeout: section.timeout,
-                unviable: section.unviable,
+                status: mutation.status.clone(),
+                score: mutation.score,
+                killed: mutation.killed,
+                survived: mutation.survived,
+                timeout: mutation.timeout,
+                unviable: mutation.unviable,
             },
-            weakening: TestValueStub {
-                status: "skipped".into(),
-                reason: None,
-            },
+            weakening: weakening.clone(),
             tautology: TestValueStub {
                 status: "not_measured".into(),
                 reason: Some("not implemented".into()),
@@ -275,8 +295,30 @@ impl TestValueSection {
                 status: "skipped".into(),
                 reason: None,
             },
+        })
+    }
+}
+
+fn overall_test_value_status(mutation: &MutationSection, weakening: &TestValueWeakening) -> String {
+    let mut ran = 0u8;
+    let mut partial = 0u8;
+    for status in [&mutation.status, &weakening.status] {
+        match status.as_str() {
+            "ran" => ran += 1,
+            "skipped" => {}
+            _ => partial += 1,
         }
     }
+    if ran > 0 && partial == 0 && (mutation.status == "skipped" || weakening.status == "skipped") {
+        return "partial".into();
+    }
+    if ran > 0 && partial == 0 {
+        return "ran".into();
+    }
+    if ran > 0 || partial > 0 {
+        return "partial".into();
+    }
+    "skipped".into()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -550,7 +592,7 @@ mod tests {
     }
 
     #[test]
-    fn test_value_section_mirrors_mutation() {
+    fn test_value_section_assembles_mutation_and_weakening() {
         let mutation = MutationSection {
             status: "ran".into(),
             score: Some(0.5),
@@ -559,12 +601,28 @@ mod tests {
             timeout: 1,
             unviable: 3,
         };
-        let tv = TestValueSection::from_mutation(&mutation);
+        let weakening = TestValueWeakening {
+            status: "ran".into(),
+            findings: 2,
+            reason: None,
+        };
+        let tv = TestValueSection::assemble(&mutation, &weakening).unwrap();
         assert_eq!(tv.status, "ran");
         assert_eq!(tv.mutation.killed, 2);
-        assert_eq!(tv.mutation.unviable, 3);
-        assert_eq!(tv.weakening.status, "skipped");
+        assert_eq!(tv.weakening.findings, 2);
         assert_eq!(tv.tautology.status, "not_measured");
+    }
+
+    #[test]
+    fn test_value_weakening_only_is_partial() {
+        let mutation = MutationSection::skipped();
+        let weakening = TestValueWeakening {
+            status: "ran".into(),
+            findings: 0,
+            reason: None,
+        };
+        let tv = TestValueSection::assemble(&mutation, &weakening).unwrap();
+        assert_eq!(tv.status, "partial");
     }
 
     #[test]

@@ -25,6 +25,7 @@ mod secrets;
 mod spec_check;
 mod toolchain;
 mod toolchain_plans;
+mod weakening;
 
 pub use pipeline::{
     analyze, analyze_with_generated_paths, AnalyzeOutput, AnalyzeRequest, ProgressCallback,

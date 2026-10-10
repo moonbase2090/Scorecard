@@ -47,6 +47,8 @@ trap 'rm -rf "$SC_DIR"' EXIT
 sc analyze .
 ```
 
+While analysis runs, an interactive terminal shows the current step and elapsed time on stderr, including with `NO_COLOR=1`. Use `--quiet` to hide progress.
+
 In a terminal the report looks like this (from `testdata/good_crate`):
 
 ```text

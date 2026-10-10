@@ -184,7 +184,7 @@ fn cargo(
     run_cmd(&mut cmd, timeout)
 }
 
-fn git_diff(root: &Path, base: &str) -> Result<String, String> {
+pub(crate) fn git_diff(root: &Path, base: &str) -> Result<String, String> {
     let mut cmd = Command::new("git");
     cmd.arg("-C")
         .arg(root)

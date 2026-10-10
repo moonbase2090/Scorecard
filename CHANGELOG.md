@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Add a Windows support plan at `docs/planning/windows.md`. Windows is not a supported platform. The README, the quickstart, and the release assets are unchanged.
+- Diff-scoped **test weakening** for Rust (`test_value.weakening`): report-only heuristics when `--diff` is set and product `.rs` changes, including assertion loosening, new `#[ignore]` / `#[should_panic]`, and removed tests. Runs even when `mutation.mode` is `off`. Terminal and HTML reports show weakening counts; see `docs/design/test-value.md`.
 - Release `.tar.gz` archives use a nested `sc-vX.Y.Z-<target>/` directory. `scripts/check-archive-layout.py` enforces the layout in release builds and CI. The GitHub Action still installs flat v0.1.6 archives.
 - The Scorecard action accepts `budget-seconds` and passes it to `sc analyze`.
 - Add `sc skills install` and once-per-version automatic skill installation for detected agents (#183).
@@ -22,6 +23,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Extract internal clippy, Makefile, HTML report, and scorecard data handling into focused modules without changing the JSON contract (#192, #197–#199).
 
 ### Fixed
+
+- `NO_COLOR` no longer hides analysis progress on interactive stderr. The uncolored spinner continues showing the current step and elapsed time; `--quiet` still suppresses it.
 
 - The Python pack honors `--diff`. Compile, Ruff, import, and CRAP findings are limited to changed `.py` files. Pytest runs only changed `test_*.py` and `*_test.py` files, so a pre-existing failure outside the diff does not fail the gate. Secret findings on unchanged paths are dropped. Tree mode is unchanged.
 - Tree-scope Rust analysis reuses its already-discovered source paths and text while checking out-of-line test modules, avoiding a second workspace walk and redundant reads without changing findings.
