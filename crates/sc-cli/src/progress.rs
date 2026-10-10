@@ -25,20 +25,18 @@ pub const TICK: Duration = Duration::from_millis(80);
 pub fn should_show(
     stderr_tty: bool,
     quiet: bool,
-    no_color: bool,
     term_dumb: bool,
     ci: bool,
     from_mcp: bool,
 ) -> bool {
-    stderr_tty && !quiet && !no_color && !term_dumb && !ci && !from_mcp
+    stderr_tty && !quiet && !term_dumb && !ci && !from_mcp
 }
 
 /// Read the environment for the gating decision.
 ///
-/// Silent when piped, in CI, with `NO_COLOR`/`TERM=dumb`, or when called
+/// Silent when piped, in CI, with `TERM=dumb`, or when called
 /// from `sc-mcp`, so agents and machine-readable output are unaffected.
 pub fn should_show_from_env(stderr_tty: bool, quiet: bool) -> bool {
-    let no_color = std::env::var_os("NO_COLOR").is_some();
     let term_dumb = matches!(std::env::var("TERM"), Ok(term) if term == "dumb");
     let ci = [
         "CI",
@@ -52,7 +50,7 @@ pub fn should_show_from_env(stderr_tty: bool, quiet: bool) -> bool {
     .iter()
     .any(|var| std::env::var_os(var).is_some());
     let from_mcp = std::env::var_os("SC_MCP").is_some();
-    should_show(stderr_tty, quiet, no_color, term_dumb, ci, from_mcp)
+    should_show(stderr_tty, quiet, term_dumb, ci, from_mcp)
 }
 
 /// Format elapsed time as `M:SS` (or `H:MM:SS` past an hour).
@@ -175,15 +173,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn no_color_does_not_hide_progress() {
+        const CHILD: &str = "SC_PROGRESS_TEST_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            assert!(should_show_from_env(true, false));
+            return;
+        }
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "progress::tests::no_color_does_not_hide_progress",
+            ])
+            .env_clear()
+            .env(CHILD, "1")
+            .env("TERM", "prismattyc-kitty")
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "NO_COLOR must preserve progress: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
     fn shows_only_on_an_interactive_stderr() {
-        // (stderr_tty, quiet, no_color, term_dumb, ci, from_mcp)
-        assert!(should_show(true, false, false, false, false, false));
-        assert!(!should_show(false, false, false, false, false, false));
-        assert!(!should_show(true, true, false, false, false, false));
-        assert!(!should_show(true, false, true, false, false, false));
-        assert!(!should_show(true, false, false, true, false, false));
-        assert!(!should_show(true, false, false, false, true, false));
-        assert!(!should_show(true, false, false, false, false, true));
+        // (stderr_tty, quiet, term_dumb, ci, from_mcp)
+        assert!(should_show(true, false, false, false, false));
+        assert!(!should_show(false, false, false, false, false));
+        assert!(!should_show(true, true, false, false, false));
+        assert!(!should_show(true, false, true, false, false));
+        assert!(!should_show(true, false, false, true, false));
+        assert!(!should_show(true, false, false, false, true));
     }
 
     #[test]

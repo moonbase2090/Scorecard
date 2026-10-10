@@ -49,6 +49,21 @@ The [secrets rules](../docs/reference/rules.md#rules) reference describes `secre
 
 For a project with `src/my_package/` and tests that import `my_package`, `sc analyze .` puts `src/` first on `PYTHONPATH` while it runs pytest and collects coverage. Coverage then refers to the package files in the checkout, even when another copy is installed.
 
+## Progress without color
+
+```bash
+NO_COLOR=1 sc analyze .
+```
+
+On interactive stderr, the uncolored spinner shows the current step and elapsed time. Use `--quiet` to hide it.
+
+These recordings compare the installed 0.1.6 binary without progress, develop before the `NO_COLOR` fix, and the fixed binary during tests and coverage:
+
+- [Prismattyc recording](terminal/progress-prismattyc.cast), `TERM=prismattyc-kitty`
+- [Terminal.app recording](terminal/progress-terminal.cast), `TERM=xterm-256color`
+
+Play either recording with `asciinema play examples/terminal/progress-prismattyc.cast` or `asciinema play examples/terminal/progress-terminal.cast` from this repository.
+
 ## Passing fixture
 
 From a checkout of this repository, with `sc` on `PATH`:
