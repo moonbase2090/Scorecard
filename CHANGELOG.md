@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Add a Windows support plan at `docs/planning/windows.md`. Windows is not a supported platform. The README, the quickstart, and the release assets are unchanged.
 - Release `.tar.gz` archives use a nested `sc-vX.Y.Z-<target>/` directory. `scripts/check-archive-layout.py` enforces the layout in release builds and CI. The GitHub Action still installs flat v0.1.6 archives.
 - The Scorecard action accepts `budget-seconds` and passes it to `sc analyze`.
 - Add `sc skills install` and once-per-version automatic skill installation for detected agents (#183).
