@@ -30,7 +30,7 @@ sc help [COMMAND]
 | `--config PATH` | see [config](config.md#where-sc-looks) | Config file to use. |
 | `--quiet` | off | Suppress the progress spinner on stderr. |
 
-While analysis runs, a spinner with the current step and elapsed time animates on stderr when it is a terminal (silent when piped, in CI, with `NO_COLOR`/`TERM=dumb`, or from `sc-mcp`); stdout is unchanged, so JSON/SARIF pipes are unaffected.
+While analysis runs, a spinner with the current step and elapsed time animates on stderr when it is a terminal (silent when piped, in CI, with `TERM=dumb`, or from `sc-mcp`); stdout is unchanged, so JSON/SARIF pipes are unaffected. `NO_COLOR` preserves this uncolored progress display, including step and elapsed-time updates during tests and coverage. Use `--quiet` to hide progress.
 
 Command-line flags override the matching config keys.
 
