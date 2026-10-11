@@ -75,6 +75,11 @@ jobs:
         run: cargo test --workspace --locked
       - name: archive layout
         run: bash scripts/test-archive-layout.sh
+      - name: release text check
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libarchive-tools p7zip-full
+          bash scripts/test-check-release-text.sh
       - name: release install staging
         run: bash scripts/test-release-install-staging.sh
 
