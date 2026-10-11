@@ -251,13 +251,13 @@ scan_pkg_archive() {
   archive="$1"
   tmp=$(mktemp -d)
   unpacked=false
-  if command -v xar >/dev/null 2>&1 && xar -xf "$archive" -C "$tmp" 2>/dev/null; then
+  if command -v bsdtar >/dev/null 2>&1 && bsdtar -xf "$archive" -C "$tmp" 2>/dev/null; then
+    unpacked=true
+  elif command -v xar >/dev/null 2>&1 && xar -xf "$archive" -C "$tmp" 2>/dev/null; then
     unpacked=true
   elif command -v pkgutil >/dev/null 2>&1 && pkgutil --expand-full "$archive" "$tmp" 2>/dev/null; then
     unpacked=true
   elif command -v pkgutil >/dev/null 2>&1 && pkgutil --expand "$archive" "$tmp" 2>/dev/null; then
-    unpacked=true
-  elif command -v bsdtar >/dev/null 2>&1 && bsdtar -xf "$archive" -C "$tmp" 2>/dev/null; then
     unpacked=true
   fi
   if [ "$unpacked" = false ]; then

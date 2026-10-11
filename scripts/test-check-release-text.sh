@@ -57,11 +57,9 @@ if run_mini --dist "$dist"; then
 fi
 echo "tar.gz unpack scan ok"
 
-if command -v xar >/dev/null 2>&1; then
-  pkg_src=$(mktemp -d)
-  printf '/Users/pkgleak\n' >"$pkg_src/note.txt"
-  (cd "$pkg_src" && xar -cf "$dist/leak.pkg" note.txt)
-  rm -rf "$pkg_src"
+fixture="$root/scripts/fixtures/release-text-leak.pkg"
+if [ -f "$fixture" ]; then
+  cp "$fixture" "$dist/leak.pkg"
   if run_mini --dist "$dist"; then
     echo "expected pkg member leak to fail" >&2
     exit 1

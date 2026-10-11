@@ -132,7 +132,7 @@ jobs:
         run: |
           set -eu
           sudo apt-get update -qq
-          sudo apt-get install -y -qq xar p7zip-full
+          sudo apt-get install -y -qq libarchive-tools p7zip-full
           printf '%s\n' "$GITHUB_REF_NAME" > /tmp/release-title.txt
           git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > /tmp/tag-message.txt 2>/dev/null || : > /tmp/tag-message.txt
           printf 'Release %s\n' "$GITHUB_REF_NAME" > /tmp/release-body.txt

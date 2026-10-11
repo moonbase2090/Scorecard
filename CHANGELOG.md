@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- `scripts/check-release-text.sh` and `RELEASING.md`: block release publish when changelog, release metadata, docs, or built assets match private-infrastructure patterns (generic rules in git; optional `RELEASE_DENYLIST` / local denylist for site-specific terms). Unpacks release `.tar.gz`, `.pkg`, and `.dmg` archives for inspection; invalid denylist regexes or unpack failures fail closed.
+- `scripts/check-release-text.sh` and `RELEASING.md`: block release publish when changelog, release metadata, docs, or built assets match private-infrastructure patterns (generic rules in git; optional `RELEASE_DENYLIST` / local denylist for site-specific terms). Unpacks release `.tar.gz`, `.pkg` (`bsdtar`), and `.dmg` (`p7zip` / `hdiutil`) archives for inspection; invalid denylist regexes or unpack failures fail closed.
 - Add a Windows support plan at `docs/planning/windows.md`. Windows is not a supported platform. The README, the quickstart, and the release assets are unchanged.
 - Diff-scoped **test weakening** for Rust (`test_value.weakening`): report-only heuristics when `--diff` is set and product `.rs` changes, including assertion loosening, new `#[ignore]` / `#[should_panic]`, and removed tests. Runs even when `mutation.mode` is `off`. Terminal and HTML reports show weakening counts; see `docs/design/test-value.md`.
 - Release `.tar.gz` archives use a nested `sc-vX.Y.Z-<target>/` directory. `scripts/check-archive-layout.py` enforces the layout in release builds and CI. The GitHub Action still installs flat v0.1.6 archives.
