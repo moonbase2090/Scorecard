@@ -57,6 +57,18 @@ if run_mini --dist "$dist"; then
 fi
 echo "tar.gz unpack scan ok"
 
+symlink_fixture="$root/scripts/fixtures/release-text-symlink.tar.gz"
+if [ -f "$symlink_fixture" ]; then
+  dist_sym="$work/dist-sym"
+  mkdir -p "$dist_sym"
+  cp "$symlink_fixture" "$dist_sym/symlink.tar.gz"
+  if run_mini --dist "$dist_sym"; then
+    echo "expected symlink tar.gz leak to fail" >&2
+    exit 1
+  fi
+  echo "symlink archive scan ok"
+fi
+
 nest_fixture="$root/scripts/fixtures/release-text-nested.tar.gz"
 if [ -f "$nest_fixture" ]; then
   dist_nest="$work/dist-nest"

@@ -136,12 +136,12 @@ scan_emails_in_line() {
 
 scan_text_file() {
   label="$1"
-  file="$2"
-  [ -f "$file" ] || return 0
+  text_path="$2"
+  [ -f "$text_path" ] || return 0
   grep_out=$(mktemp)
   grep_err=$(mktemp)
   set +e
-  grep -Ein -f "$patterns" "$file" >"$grep_out" 2>"$grep_err"
+  grep -Ein -f "$patterns" "$text_path" >"$grep_out" 2>"$grep_err"
   grep_status=$?
   set -e
   if [ "$grep_status" -eq 2 ]; then
@@ -160,7 +160,7 @@ scan_text_file() {
   while IFS= read -r line || [ -n "$line" ]; do
     line_no=$((line_no + 1))
     scan_emails_in_line "$label" "$line_no" "$line"
-  done <"$file"
+  done <"$text_path"
 }
 
 looks_like_text() {
@@ -231,20 +231,60 @@ scan_member() {
   esac
 }
 
+scan_symlink() {
+  label="$1"
+  link="$2"
+  target=$(readlink "$link" 2>/dev/null) || target=""
+  if [ -z "$target" ]; then
+    fatal_scan "could not read symlink $label"
+  fi
+  probe=$(mktemp)
+  printf '%s\n' "$target" >"$probe"
+  scan_text_file "$label@target" "$probe"
+  rm -f "$probe"
+  if [ -f "$link" ]; then
+    scan_member "$label" "$link"
+  fi
+}
+
+scan_entry() {
+  label="$1"
+  path="$2"
+  if [ -L "$path" ]; then
+    scan_symlink "$label" "$path"
+  elif [ -f "$path" ]; then
+    scan_member "$label" "$path"
+  elif [ -d "$path" ]; then
+    :
+  else
+    record_hit "$label:special"
+  fi
+}
+
 scan_tree() {
   prefix="$1"
   dir="$2"
-  find "$dir" -type f 2>/dev/null | sort | while IFS= read -r member; do
+  find "$dir" 2>/dev/null | sort | while IFS= read -r member; do
+    [ "$member" = "$dir" ] && continue
     rel=${member#"$dir"/}
-    scan_member "$prefix:$rel" "$member"
+    rel=${rel#/}
+    scan_entry "$prefix:$rel" "$member"
   done
 }
 
 scan_tar_archive() {
   label="$1"
-  file="$2"
+  archive_path="$2"
+  names=$(mktemp)
+  if tar -tzvf "$archive_path" >"$names" 2>/dev/null; then
+    scan_text_file "$label@members" "$names"
+  else
+    rm -f "$names"
+    fatal_scan "could not list $label"
+  fi
+  rm -f "$names"
   tmp=$(mktemp -d)
-  if ! tar -xzf "$file" -C "$tmp" 2>/dev/null; then
+  if ! tar -xzf "$archive_path" -C "$tmp" 2>/dev/null; then
     rm -rf "$tmp"
     fatal_scan "could not unpack $label"
   fi
@@ -289,7 +329,8 @@ scan_pkg_archive() {
     rm -rf "$tmp"
     fatal_scan "could not unpack $label"
   fi
-  find "$tmp" -type f 2>/dev/null | sort | while IFS= read -r member; do
+  find "$tmp" 2>/dev/null | sort | while IFS= read -r member; do
+    [ "$member" = "$tmp" ] && continue
     base=$(basename "$member")
     case "$base" in
       Payload)
@@ -297,7 +338,8 @@ scan_pkg_archive() {
         ;;
       *)
         rel=${member#"$tmp"/}
-        scan_member "$label:$rel" "$member"
+        rel=${rel#/}
+        scan_entry "$label:$rel" "$member"
         ;;
     esac
   done
