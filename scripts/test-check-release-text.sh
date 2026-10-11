@@ -57,6 +57,18 @@ if run_mini --dist "$dist"; then
 fi
 echo "tar.gz unpack scan ok"
 
+zip_path_fixture="$root/scripts/fixtures/release-text-zip-path.zip"
+if [ -f "$zip_path_fixture" ]; then
+  dist_zip="$work/dist-zip"
+  mkdir -p "$dist_zip"
+  cp "$zip_path_fixture" "$dist_zip/member-name.zip"
+  if run_mini --dist "$dist_zip"; then
+    echo "expected zip member path leak to fail" >&2
+    exit 1
+  fi
+  echo "zip member path scan ok"
+fi
+
 symlink_fixture="$root/scripts/fixtures/release-text-symlink.tar.gz"
 if [ -f "$symlink_fixture" ]; then
   dist_sym="$work/dist-sym"

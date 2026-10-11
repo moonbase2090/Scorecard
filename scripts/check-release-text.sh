@@ -247,6 +247,16 @@ scan_symlink() {
   fi
 }
 
+scan_rel_path() {
+  label="$1"
+  rel_path="$2"
+  [ -n "$rel_path" ] || return 0
+  probe=$(mktemp)
+  printf '%s\n' "$rel_path" >"$probe"
+  scan_text_file "$label@path" "$probe"
+  rm -f "$probe"
+}
+
 scan_entry() {
   label="$1"
   path="$2"
@@ -268,8 +278,27 @@ scan_tree() {
     [ "$member" = "$dir" ] && continue
     rel=${member#"$dir"/}
     rel=${rel#/}
+    scan_rel_path "$prefix:$rel" "$rel"
     scan_entry "$prefix:$rel" "$member"
   done
+}
+
+list_zip_members() {
+  label="$1"
+  archive_path="$2"
+  names=$(mktemp)
+  listed=false
+  if command -v unzip >/dev/null 2>&1 && unzip -Z1 "$archive_path" >"$names" 2>/dev/null; then
+    listed=true
+  elif command -v 7z >/dev/null 2>&1 && 7z l -ba "$archive_path" >"$names" 2>/dev/null; then
+    listed=true
+  fi
+  if [ "$listed" = false ]; then
+    rm -f "$names"
+    fatal_scan "could not list $label"
+  fi
+  scan_text_file "$label@members" "$names"
+  rm -f "$names"
 }
 
 scan_tar_archive() {
@@ -373,12 +402,13 @@ scan_dmg_archive() {
 
 scan_zip_archive() {
   label="$1"
-  file="$2"
+  archive_path="$2"
+  list_zip_members "$label" "$archive_path"
   tmp=$(mktemp -d)
   extracted=false
-  if command -v 7z >/dev/null 2>&1 && 7z x -y "-o$tmp" "$file" >/dev/null 2>&1; then
+  if command -v 7z >/dev/null 2>&1 && 7z x -y "-o$tmp" "$archive_path" >/dev/null 2>&1; then
     extracted=true
-  elif command -v unzip >/dev/null 2>&1 && unzip -qq "$file" -d "$tmp" >/dev/null 2>&1; then
+  elif command -v unzip >/dev/null 2>&1 && unzip -qq "$archive_path" -d "$tmp" >/dev/null 2>&1; then
     extracted=true
   fi
   if [ "$extracted" = false ]; then
