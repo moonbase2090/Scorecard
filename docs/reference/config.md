@@ -46,6 +46,8 @@ All recursive scans respect `.gitignore`, including nested files. They also skip
 
 Scorecard also skips source files whose first 16 KiB contain `@generated`, or both `Code generated` and `DO NOT EDIT`. Add an explicit path pattern to `scope.include_generated` to scan one of these files or reopen one of the listed directories. If `.gitignore` also excludes the path, remove that ignore rule or add a negation there. `scope.exclude` always takes precedence. When a generated or vendored path is scanned, every report lists it and suggests adding it to `scope.exclude`.
 
+If exclusions leave no files for secrets scanning, `secrets.empty_scope` fails the secrets gate. Restore the intended scan scope before treating the report as a completed check.
+
 ### `[engines]`
 
 | Key | Default | Meaning |

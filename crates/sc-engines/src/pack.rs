@@ -235,6 +235,9 @@ pub fn text_secrets_with_generated(
             }
         }
     }
+    if files.is_empty() && findings.is_empty() {
+        return vec![empty_secrets_scope()];
+    }
     let mut big_text = Vec::new();
     for path in files {
         let rel = path
@@ -275,6 +278,24 @@ pub fn text_secrets_with_generated(
         findings.push(partial_scan(&oversized));
     }
     findings
+}
+
+fn empty_secrets_scope() -> sc_core::Finding {
+    sc_core::Finding {
+        id: "secrets:empty-scope".into(),
+        rule: "secrets.empty_scope".into(),
+        engine: "secrets".into(),
+        severity: "error".into(),
+        file: ".".into(),
+        span: None,
+        symbol: None,
+        message: "No files were selected for secrets scanning, so the scan is incomplete. Check the project path, .gitignore and [scope].exclude in analyzer.toml, then run `sc analyze .` again.".into(),
+        evidence: serde_json::json!({ "files_selected": 0 }),
+        suggested_action: Some(
+            "Analyze the intended project directory and remove exclusions that hide every file, then run `sc analyze .`".into(),
+        ),
+        disposition: String::new(),
+    }
 }
 
 fn scan_file(path: &Path, rel: &str, findings: &mut Vec<sc_core::Finding>) {

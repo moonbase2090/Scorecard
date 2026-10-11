@@ -64,6 +64,10 @@ These recordings compare the installed 0.1.6 binary without progress, develop be
 
 Play either recording with `asciinema play examples/terminal/progress-prismattyc.cast` or `asciinema play examples/terminal/progress-terminal.cast` from this repository.
 
+## Empty scan scope
+
+An exclusion such as `[scope] exclude = ["/**"]` leaves no files to scan. The report includes `secrets.empty_scope`, the secrets gate fails, and `sc analyze . --fail-on secrets` exits 1. Remove the exclusion and rerun against the intended project. With `--fail-on none`, the process exits 0 while the report still records the failed gate.
+
 ## Passing fixture
 
 From a checkout of this repository, with `sc` on `PATH`:

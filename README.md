@@ -85,6 +85,8 @@ exit 0: enforced gates passed
 
 Exit status: `1` a gate selected by `--fail-on` failed; `0` none did; `2` `sc` could not run. Use `--fail-on none` to return 0 for every gate while keeping failures in the report. If an enforced gate fails while the exit code is 0, `sc` writes one stderr warning with the failed gate names. An empty or blank `--fail-on` selection is invalid. Omit the option to use the default gates. [Reading the report](docs/report.md) explains every section.
 
+If the configured scope selects no files for secrets scanning, the report contains `secrets.empty_scope` and the secrets gate fails. Check the project path and exclusions before rerunning.
+
 A dirty report lists up to three changed paths. JSON includes every path in `git.dirty_paths`. Scorecard's saved report, cache and coverage files under `.sc/`, and files selected by `--out` do not make a clean checkout dirty.
 
 `sc analyze . --diff BASE` scores only what changed against that git ref. Python compiles, lints, and checks imports only in changed `.py` files, and runs pytest only on changed `test_*.py` and `*_test.py` files. When the project is a subdirectory of a larger repository, the changed paths are still relative to the project (`src/a.rs`). A bare `--diff` picks the base automatically (`HEAD~1`, else `main`, else `master`) and skips a candidate that is the same commit as `HEAD`. A shallow clone, a single-commit branch, a depth-1 clone of `main` or `master`, or a missing explicit base exits 2 with verdict `fail` and one stderr line that names `fetch-depth: 0`. An explicit `--diff HEAD` still works.
