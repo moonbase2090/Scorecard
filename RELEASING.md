@@ -6,7 +6,7 @@ Releases are cut from `main` by pushing a `vX.Y.Z` tag; see `.github/workflows/r
 
 Release text and artifacts must not reference private infrastructure, hostnames, personal paths, or internal tooling. That includes release titles and bodies, tag messages, `CHANGELOG.md`, README and docs, and strings embedded in shipped binaries and archives.
 
-Before publish, CI runs `scripts/check-release-text.sh` on those sources plus built assets in `dist/`. The checker unpacks `.tar.gz` members and scans each file; formats it cannot inspect (for example `.dmg` or `.pkg` on Linux) fail the run. Optional deny rules may live in `~/.config/moonbase/release-denylist.txt` (local, untracked) or the `RELEASE_DENYLIST` secret in CI (newline-separated extended regexes). Invalid configured patterns or incomplete scans exit non-zero (fail closed). Missing optional deny lists are ignored.
+Before publish, CI runs `scripts/check-release-text.sh` on those sources plus built assets in `dist/`. The checker unpacks `.tar.gz`, `.pkg` (xar), and `.dmg` (7z on Linux, `hdiutil` on macOS) and scans each member; unpack or scan errors fail the run. Optional deny rules may live in `~/.config/moonbase/release-denylist.txt` (local, untracked) or the `RELEASE_DENYLIST` secret in CI (newline-separated extended regexes). Invalid configured patterns or incomplete scans exit non-zero (fail closed). Missing optional deny lists are ignored.
 
 ## Maintainer checklist
 

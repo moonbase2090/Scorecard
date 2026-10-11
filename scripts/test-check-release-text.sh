@@ -29,7 +29,6 @@ if run_mini "$mini/bad.txt"; then
 fi
 echo "generic marker ok"
 
-printf 'ok\n' >"$mini/README.md"
 printf 'PRIVATE-NODE-TEST\n' >"$mini/README.md"
 export RELEASE_DENYLIST='PRIVATE-NODE-TEST'
 if run_mini; then
@@ -58,11 +57,30 @@ if run_mini --dist "$dist"; then
 fi
 echo "tar.gz unpack scan ok"
 
-printf 'x' >"$dist/opaque.pkg"
-if run_mini --dist "$dist"; then
-  echo "expected uninspectable pkg to fail" >&2
+if command -v xar >/dev/null 2>&1; then
+  pkg_src=$(mktemp -d)
+  printf '/Users/pkgleak\n' >"$pkg_src/note.txt"
+  (cd "$pkg_src" && xar -cf "$dist/leak.pkg" note.txt)
+  rm -rf "$pkg_src"
+  if run_mini --dist "$dist"; then
+    echo "expected pkg member leak to fail" >&2
+    exit 1
+  fi
+  rm -f "$dist/leak.pkg"
+  echo "pkg unpack scan ok"
+fi
+
+dist_bad="$work/dist-bad"
+mkdir -p "$dist_bad"
+printf 'x' >"$dist_bad/bad.pkg"
+set +e
+run_mini --dist "$dist_bad" >/dev/null 2>&1
+bad_status=$?
+set -e
+if [ "$bad_status" -ne 2 ]; then
+  echo "expected corrupt pkg to exit 2, got $bad_status" >&2
   exit 1
 fi
-echo "uninspectable archive ok"
+echo "corrupt pkg rejected ok"
 
 echo "check-release-text self-test ok"

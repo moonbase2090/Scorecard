@@ -1,6 +1,6 @@
 #!/bin/sh
 # Scan release-facing text and built artifacts for private infrastructure leaks.
-# Prints only path:line (or path:binary / path:uninspectable). Never prints matched text.
+# Prints only path:line (or path:binary). Never prints matched text.
 set -eu
 
 script_root="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
@@ -208,6 +208,15 @@ scan_payload() {
   fi
 }
 
+scan_tree() {
+  prefix="$1"
+  dir="$2"
+  find "$dir" -type f 2>/dev/null | sort | while IFS= read -r member; do
+    rel=${member#"$dir"/}
+    scan_payload "$prefix:$rel" "$member"
+  done
+}
+
 scan_tar_archive() {
   archive="$1"
   tmp=$(mktemp -d)
@@ -215,10 +224,99 @@ scan_tar_archive() {
     rm -rf "$tmp"
     fatal_scan "could not unpack $archive"
   fi
+  scan_tree "$archive" "$tmp"
+  rm -rf "$tmp"
+}
+
+extract_cpio_payload() {
+  archive="$1"
+  payload="$2"
+  cpio_dir=$(mktemp -d)
+  extracted=false
+  if gzip -dc "$payload" 2>/dev/null | (cd "$cpio_dir" && cpio -idm 2>/dev/null); then
+    extracted=true
+  elif (cd "$cpio_dir" && cpio -idm <"$payload" 2>/dev/null); then
+    extracted=true
+  fi
+  if [ "$extracted" = false ]; then
+    rm -rf "$cpio_dir"
+    scan_binary_payload "$archive:Payload" "$payload"
+    return
+  fi
+  scan_tree "$archive:Payload" "$cpio_dir"
+  rm -rf "$cpio_dir"
+}
+
+scan_pkg_archive() {
+  archive="$1"
+  tmp=$(mktemp -d)
+  unpacked=false
+  if command -v xar >/dev/null 2>&1 && xar -xf "$archive" -C "$tmp" 2>/dev/null; then
+    unpacked=true
+  elif command -v pkgutil >/dev/null 2>&1 && pkgutil --expand-full "$archive" "$tmp" 2>/dev/null; then
+    unpacked=true
+  elif command -v pkgutil >/dev/null 2>&1 && pkgutil --expand "$archive" "$tmp" 2>/dev/null; then
+    unpacked=true
+  elif command -v bsdtar >/dev/null 2>&1 && bsdtar -xf "$archive" -C "$tmp" 2>/dev/null; then
+    unpacked=true
+  fi
+  if [ "$unpacked" = false ]; then
+    rm -rf "$tmp"
+    fatal_scan "could not unpack $archive"
+  fi
   find "$tmp" -type f 2>/dev/null | sort | while IFS= read -r member; do
-    rel=${member#"$tmp"/}
-    scan_payload "$archive:$rel" "$member"
+    base=$(basename "$member")
+    case "$base" in
+      Payload)
+        extract_cpio_payload "$archive" "$member"
+        ;;
+      *)
+        rel=${member#"$tmp"/}
+        scan_payload "$archive:$rel" "$member"
+        ;;
+    esac
   done
+  rm -rf "$tmp"
+}
+
+scan_dmg_archive() {
+  archive="$1"
+  tmp=$(mktemp -d)
+  if command -v 7z >/dev/null 2>&1 && 7z x -y "-o$tmp" "$archive" >/dev/null 2>&1; then
+    scan_tree "$archive" "$tmp"
+    rm -rf "$tmp"
+    return
+  fi
+  if command -v hdiutil >/dev/null 2>&1; then
+    mnt="$tmp/mnt"
+    mkdir -p "$mnt"
+    if hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$archive" >/dev/null 2>&1; then
+      scan_tree "$archive" "$mnt"
+      hdiutil detach "$mnt" -quiet >/dev/null 2>&1 ||
+        hdiutil detach "$mnt" -force -quiet >/dev/null 2>&1 ||
+        true
+      rm -rf "$tmp"
+      return
+    fi
+  fi
+  rm -rf "$tmp"
+  fatal_scan "could not unpack $archive"
+}
+
+scan_zip_archive() {
+  archive="$1"
+  tmp=$(mktemp -d)
+  extracted=false
+  if command -v 7z >/dev/null 2>&1 && 7z x -y "-o$tmp" "$archive" >/dev/null 2>&1; then
+    extracted=true
+  elif command -v unzip >/dev/null 2>&1 && unzip -qq "$archive" -d "$tmp" >/dev/null 2>&1; then
+    extracted=true
+  fi
+  if [ "$extracted" = false ]; then
+    rm -rf "$tmp"
+    fatal_scan "could not unpack $archive"
+  fi
+  scan_tree "$archive" "$tmp"
   rm -rf "$tmp"
 }
 
@@ -229,8 +327,14 @@ scan_dist_artifact() {
     *.tar.gz | *.tgz)
       scan_tar_archive "$artifact"
       ;;
-    *.dmg | *.pkg | *.zip)
-      record_hit "$artifact:uninspectable"
+    *.pkg)
+      scan_pkg_archive "$artifact"
+      ;;
+    *.dmg)
+      scan_dmg_archive "$artifact"
+      ;;
+    *.zip)
+      scan_zip_archive "$artifact"
       ;;
     *)
       scan_payload "$artifact" "$artifact"
