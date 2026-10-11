@@ -4,6 +4,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-10-11
+
 ### Added
 
 - `scripts/check-release-text.sh` and `RELEASING.md`: block release publish when changelog, release metadata, docs, or built assets match private-infrastructure patterns (generic rules in git; optional `RELEASE_DENYLIST` / local denylist for site-specific terms). Unpacks release `.tar.gz`, `.pkg` (`bsdtar`), and `.dmg` (`p7zip` / `hdiutil`) archives for inspection; invalid denylist regexes or unpack failures fail closed.
