@@ -27,6 +27,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Validate installation links against the published release so preparing the next version does not require unpublished downloads.
+
 - Harden secrets scan file selection while preserving configured path exclusions.
 - Report `secrets.empty_scope` and fail the secrets gate when the scan selects no files, instead of reporting a perfect pass (#239).
 - Install Rust coverage and Python lint tools for macOS core tests in CI.
