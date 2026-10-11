@@ -113,7 +113,7 @@ Packs whose command is a POSIX pipeline stay unavailable on Windows until a late
 The server binary is portable once it is built with the MSVC toolchain. The work around it is not:
 
 - `mcp_bin` misses `sc-mcp.exe`.
-- Registration writes the absolute path into JSON and TOML. `setup.rs` already escapes `\`, so a path like `C:\Users\...\sc-mcp.exe` can be stored. Confirm that on the PC.
+- Registration writes the absolute path into JSON and TOML. `setup.rs` already escapes `\`, so a path like `%USERPROFILE%\...\sc-mcp.exe` can be stored. Confirm that on the PC.
 - The process it launches is `sc`. That child has the same `PATH`, config, and console gaps as a terminal run.
 
 No MCP protocol change.
