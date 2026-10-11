@@ -24,6 +24,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Install Rust coverage and Python lint tools for macOS core tests in CI.
+
 - `NO_COLOR` no longer hides analysis progress on interactive stderr. The uncolored spinner continues showing the current step and elapsed time; `--quiet` still suppresses it.
 
 - The Python pack honors `--diff`. Compile, Ruff, import, and CRAP findings are limited to changed `.py` files. Pytest runs only changed `test_*.py` and `*_test.py` files, so a pre-existing failure outside the diff does not fail the gate. Secret findings on unchanged paths are dropped. Tree mode is unchanged.

@@ -79,9 +79,8 @@ jobs:
         run: bash scripts/test-release-install-staging.sh
 
   # macOS coverage runs on pushes to develop and manual dispatch, not PRs.
-  # No fixture tooling here (setup-php hung 10+ min): build plus fmt,
-  # clippy, and the fixture-free lib unit tests only. Ubuntu covers
-  # the full fixture matrix.
+  # Library tests exercise Rust coverage and Python linting. Ubuntu covers
+  # the full multi-language fixture matrix.
   check-macos:
     if: github.event_name != 'pull_request'
     runs-on: macos-14
@@ -90,14 +89,23 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
-          components: rustfmt, clippy
+          components: rustfmt, clippy, llvm-tools-preview
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - name: Install core test tools
+        run: |
+          cargo install cargo-llvm-cov --locked
+          python3 -m venv "$RUNNER_TEMP/sc-core-tools"
+          "$RUNNER_TEMP/sc-core-tools/bin/python" -m pip install ruff
+          echo "$RUNNER_TEMP/sc-core-tools/bin" >> "$GITHUB_PATH"
       - name: fmt
         run: cargo fmt --check
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test core
-        run: cargo test --workspace --locked --lib
+        run: |
+          cargo llvm-cov --version
+          ruff --version
+          cargo test --workspace --locked --lib
 
   # Supply chain and MSRV stay Ubuntu-only and cached, like everything else.
   deny:
