@@ -208,23 +208,47 @@ scan_payload() {
   fi
 }
 
+scan_member() {
+  label="$1"
+  file="$2"
+  base=${file##*/}
+  case "$base" in
+    *.tar.gz | *.tgz)
+      scan_tar_archive "$label" "$file"
+      ;;
+    *.pkg)
+      scan_pkg_archive "$label" "$file"
+      ;;
+    *.dmg)
+      scan_dmg_archive "$label" "$file"
+      ;;
+    *.zip)
+      scan_zip_archive "$label" "$file"
+      ;;
+    *)
+      scan_payload "$label" "$file"
+      ;;
+  esac
+}
+
 scan_tree() {
   prefix="$1"
   dir="$2"
   find "$dir" -type f 2>/dev/null | sort | while IFS= read -r member; do
     rel=${member#"$dir"/}
-    scan_payload "$prefix:$rel" "$member"
+    scan_member "$prefix:$rel" "$member"
   done
 }
 
 scan_tar_archive() {
-  archive="$1"
+  label="$1"
+  file="$2"
   tmp=$(mktemp -d)
-  if ! tar -xzf "$archive" -C "$tmp" 2>/dev/null; then
+  if ! tar -xzf "$file" -C "$tmp" 2>/dev/null; then
     rm -rf "$tmp"
-    fatal_scan "could not unpack $archive"
+    fatal_scan "could not unpack $label"
   fi
-  scan_tree "$archive" "$tmp"
+  scan_tree "$label" "$tmp"
   rm -rf "$tmp"
 }
 
@@ -248,31 +272,32 @@ extract_cpio_payload() {
 }
 
 scan_pkg_archive() {
-  archive="$1"
+  label="$1"
+  file="$2"
   tmp=$(mktemp -d)
   unpacked=false
-  if command -v bsdtar >/dev/null 2>&1 && bsdtar -xf "$archive" -C "$tmp" 2>/dev/null; then
+  if command -v bsdtar >/dev/null 2>&1 && bsdtar -xf "$file" -C "$tmp" 2>/dev/null; then
     unpacked=true
-  elif command -v xar >/dev/null 2>&1 && xar -xf "$archive" -C "$tmp" 2>/dev/null; then
+  elif command -v xar >/dev/null 2>&1 && xar -xf "$file" -C "$tmp" 2>/dev/null; then
     unpacked=true
-  elif command -v pkgutil >/dev/null 2>&1 && pkgutil --expand-full "$archive" "$tmp" 2>/dev/null; then
+  elif command -v pkgutil >/dev/null 2>&1 && pkgutil --expand-full "$file" "$tmp" 2>/dev/null; then
     unpacked=true
-  elif command -v pkgutil >/dev/null 2>&1 && pkgutil --expand "$archive" "$tmp" 2>/dev/null; then
+  elif command -v pkgutil >/dev/null 2>&1 && pkgutil --expand "$file" "$tmp" 2>/dev/null; then
     unpacked=true
   fi
   if [ "$unpacked" = false ]; then
     rm -rf "$tmp"
-    fatal_scan "could not unpack $archive"
+    fatal_scan "could not unpack $label"
   fi
   find "$tmp" -type f 2>/dev/null | sort | while IFS= read -r member; do
     base=$(basename "$member")
     case "$base" in
       Payload)
-        extract_cpio_payload "$archive" "$member"
+        extract_cpio_payload "$label" "$member"
         ;;
       *)
         rel=${member#"$tmp"/}
-        scan_payload "$archive:$rel" "$member"
+        scan_member "$label:$rel" "$member"
         ;;
     esac
   done
@@ -280,18 +305,19 @@ scan_pkg_archive() {
 }
 
 scan_dmg_archive() {
-  archive="$1"
+  label="$1"
+  file="$2"
   tmp=$(mktemp -d)
-  if command -v 7z >/dev/null 2>&1 && 7z x -y "-o$tmp" "$archive" >/dev/null 2>&1; then
-    scan_tree "$archive" "$tmp"
+  if command -v 7z >/dev/null 2>&1 && 7z x -y "-o$tmp" "$file" >/dev/null 2>&1; then
+    scan_tree "$label" "$tmp"
     rm -rf "$tmp"
     return
   fi
   if command -v hdiutil >/dev/null 2>&1; then
     mnt="$tmp/mnt"
     mkdir -p "$mnt"
-    if hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$archive" >/dev/null 2>&1; then
-      scan_tree "$archive" "$mnt"
+    if hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$file" >/dev/null 2>&1; then
+      scan_tree "$label" "$mnt"
       hdiutil detach "$mnt" -quiet >/dev/null 2>&1 ||
         hdiutil detach "$mnt" -force -quiet >/dev/null 2>&1 ||
         true
@@ -300,46 +326,30 @@ scan_dmg_archive() {
     fi
   fi
   rm -rf "$tmp"
-  fatal_scan "could not unpack $archive"
+  fatal_scan "could not unpack $label"
 }
 
 scan_zip_archive() {
-  archive="$1"
+  label="$1"
+  file="$2"
   tmp=$(mktemp -d)
   extracted=false
-  if command -v 7z >/dev/null 2>&1 && 7z x -y "-o$tmp" "$archive" >/dev/null 2>&1; then
+  if command -v 7z >/dev/null 2>&1 && 7z x -y "-o$tmp" "$file" >/dev/null 2>&1; then
     extracted=true
-  elif command -v unzip >/dev/null 2>&1 && unzip -qq "$archive" -d "$tmp" >/dev/null 2>&1; then
+  elif command -v unzip >/dev/null 2>&1 && unzip -qq "$file" -d "$tmp" >/dev/null 2>&1; then
     extracted=true
   fi
   if [ "$extracted" = false ]; then
     rm -rf "$tmp"
-    fatal_scan "could not unpack $archive"
+    fatal_scan "could not unpack $label"
   fi
-  scan_tree "$archive" "$tmp"
+  scan_tree "$label" "$tmp"
   rm -rf "$tmp"
 }
 
 scan_dist_artifact() {
   artifact="$1"
-  base=${artifact##*/}
-  case "$base" in
-    *.tar.gz | *.tgz)
-      scan_tar_archive "$artifact"
-      ;;
-    *.pkg)
-      scan_pkg_archive "$artifact"
-      ;;
-    *.dmg)
-      scan_dmg_archive "$artifact"
-      ;;
-    *.zip)
-      scan_zip_archive "$artifact"
-      ;;
-    *)
-      scan_payload "$artifact" "$artifact"
-      ;;
-  esac
+  scan_member "$artifact" "$artifact"
 }
 
 scan_text_file CHANGELOG.md CHANGELOG.md

@@ -57,6 +57,18 @@ if run_mini --dist "$dist"; then
 fi
 echo "tar.gz unpack scan ok"
 
+nest_fixture="$root/scripts/fixtures/release-text-nested.tar.gz"
+if [ -f "$nest_fixture" ]; then
+  dist_nest="$work/dist-nest"
+  mkdir -p "$dist_nest"
+  cp "$nest_fixture" "$dist_nest/nested.tar.gz"
+  if run_mini --dist "$dist_nest"; then
+    echo "expected nested tar.gz+zip leak to fail" >&2
+    exit 1
+  fi
+  echo "nested archive scan ok"
+fi
+
 fixture="$root/scripts/fixtures/release-text-leak.pkg"
 if [ -f "$fixture" ]; then
   cp "$fixture" "$dist/leak.pkg"
