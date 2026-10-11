@@ -1,10 +1,10 @@
 #!/bin/sh
 # Scan release-facing text and built artifacts for private infrastructure leaks.
-# Prints only path:line (or path:binary for strings hits). Never prints matched text.
+# Prints only path:line (or path:binary / path:uninspectable). Never prints matched text.
 set -eu
 
-root="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
-cd "$root"
+script_root="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
+root="$script_root"
 
 ALLOWED_EMAIL='322824348+mb2090@users.noreply.github.com'
 dist_dir=""
@@ -13,16 +13,19 @@ release_body=""
 tag_message=""
 hits=$(mktemp)
 patterns=$(mktemp)
-strict_patterns=$(mktemp)
-trap 'rm -f "$hits" "$patterns" "$strict_patterns"' EXIT
+trap 'rm -f "$hits" "$patterns"' EXIT
 
 usage() {
-  echo "usage: $0 [--dist DIR] [--release-title FILE] [--release-body FILE] [--tag-message FILE] [FILE ...]" >&2
+  echo "usage: $0 [--root DIR] [--dist DIR] [--release-title FILE] [--release-body FILE] [--tag-message FILE] [FILE ...]" >&2
   exit 2
 }
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --root)
+      root="${2:-}"
+      shift 2
+      ;;
     --dist)
       dist_dir="${2:-}"
       shift 2
@@ -56,6 +59,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+cd "$root"
+
 {
   printf '%s\n' \
     'DESKTOP-[A-Z0-9]+' \
@@ -68,25 +73,45 @@ done
     '\b(10\.[0-9]+\.[0-9]+\.[0-9]+|192\.168\.[0-9]+\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+)\b'
 } >>"$patterns"
 
-cp "$patterns" "$strict_patterns"
-
 if [ -f "${HOME:-}/.config/moonbase/release-denylist.txt" ]; then
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
       '' | \#*) continue ;;
     esac
-    printf '%s\n' "$line" >>"$strict_patterns"
+    printf '%s\n' "$line" >>"$patterns"
   done <"${HOME}/.config/moonbase/release-denylist.txt"
 fi
 
 if [ -n "${RELEASE_DENYLIST:-}" ]; then
-  printf '%s\n' "$RELEASE_DENYLIST" >>"$strict_patterns"
+  printf '%s\n' "$RELEASE_DENYLIST" >>"$patterns"
 fi
+
+validate_patterns() {
+  probe=$(mktemp)
+  : >"$probe"
+  if grep -Ein -f "$patterns" "$probe" >/dev/null 2>&1; then
+    rm -f "$probe"
+    return 0
+  fi
+  status=$?
+  rm -f "$probe"
+  if [ "$status" -eq 2 ]; then
+    echo "check-release-text: invalid configured pattern" >&2
+    exit 2
+  fi
+}
+
+validate_patterns
 
 email_ere='[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
 
 record_hit() {
   printf '%s\n' "$1" >>"$hits"
+}
+
+fatal_scan() {
+  echo "check-release-text: $1" >&2
+  exit 2
 }
 
 email_is_forbidden() {
@@ -99,84 +124,149 @@ email_is_forbidden() {
 }
 
 scan_emails_in_line() {
-  file="$1"
+  label="$1"
   line_no="$2"
   line="$3"
   for addr in $(printf '%s\n' "$line" | grep -Eo "$email_ere" 2>/dev/null || true); do
     if email_is_forbidden "$addr"; then
-      record_hit "$file:$line_no"
+      record_hit "$label:$line_no"
     fi
   done
 }
 
 scan_text_file() {
-  file="$1"
-  pattern_file="$2"
+  label="$1"
+  file="$2"
   [ -f "$file" ] || return 0
   grep_out=$(mktemp)
-  if grep -Ein -f "$pattern_file" "$file" >"$grep_out" 2>/dev/null; then
+  grep_err=$(mktemp)
+  set +e
+  grep -Ein -f "$patterns" "$file" >"$grep_out" 2>"$grep_err"
+  grep_status=$?
+  set -e
+  if [ "$grep_status" -eq 2 ]; then
+    rm -f "$grep_out" "$grep_err"
+    fatal_scan "pattern match failed for $label"
+  fi
+  if [ "$grep_status" -eq 0 ]; then
     while IFS= read -r row; do
       [ -n "$row" ] || continue
       num=${row%%:*}
-      record_hit "$file:$num"
+      record_hit "$label:$num"
     done <"$grep_out"
   fi
-  rm -f "$grep_out"
+  rm -f "$grep_out" "$grep_err"
   line_no=0
   while IFS= read -r line || [ -n "$line" ]; do
     line_no=$((line_no + 1))
-    scan_emails_in_line "$file" "$line_no" "$line"
+    scan_emails_in_line "$label" "$line_no" "$line"
   done <"$file"
 }
 
-scan_binary_file() {
+looks_like_text() {
   file="$1"
-  [ -f "$file" ] || return 0
+  if LC_ALL=C grep -q $'\0' "$file" 2>/dev/null; then
+    return 1
+  fi
+  return 0
+}
+
+scan_binary_payload() {
+  label="$1"
+  file="$2"
   strings_out=$(mktemp)
   if ! strings -a "$file" >"$strings_out" 2>/dev/null; then
     rm -f "$strings_out"
-    return 0
+    fatal_scan "strings failed for $label"
   fi
-  if grep -Ein -f "$strict_patterns" "$strings_out" >/dev/null 2>&1; then
-    record_hit "$file:binary"
+  set +e
+  grep -Ein -f "$patterns" "$strings_out" >/dev/null 2>&1
+  grep_status=$?
+  set -e
+  if [ "$grep_status" -eq 2 ]; then
+    rm -f "$strings_out"
+    fatal_scan "pattern match failed for $label"
+  fi
+  if [ "$grep_status" -eq 0 ]; then
+    record_hit "$label:binary"
   fi
   for addr in $(grep -Eo "$email_ere" "$strings_out" 2>/dev/null | sort -u || true); do
     if email_is_forbidden "$addr"; then
-      record_hit "$file:binary"
+      record_hit "$label:binary"
     fi
   done
   rm -f "$strings_out"
 }
 
-scan_text_file CHANGELOG.md "$strict_patterns"
-scan_text_file README.md "$patterns"
-scan_text_file CONTRIBUTING.md "$patterns"
-scan_text_file REVIEW_POLICY.md "$patterns"
-scan_text_file SECURITY.md "$patterns"
-scan_text_file SUPPORT.md "$patterns"
-scan_text_file RELEASING.md "$patterns"
+scan_payload() {
+  label="$1"
+  file="$2"
+  if looks_like_text "$file"; then
+    scan_text_file "$label" "$file"
+  else
+    scan_binary_payload "$label" "$file"
+  fi
+}
+
+scan_tar_archive() {
+  archive="$1"
+  tmp=$(mktemp -d)
+  if ! tar -xzf "$archive" -C "$tmp" 2>/dev/null; then
+    rm -rf "$tmp"
+    fatal_scan "could not unpack $archive"
+  fi
+  find "$tmp" -type f 2>/dev/null | sort | while IFS= read -r member; do
+    rel=${member#"$tmp"/}
+    scan_payload "$archive:$rel" "$member"
+  done
+  rm -rf "$tmp"
+}
+
+scan_dist_artifact() {
+  artifact="$1"
+  base=${artifact##*/}
+  case "$base" in
+    *.tar.gz | *.tgz)
+      scan_tar_archive "$artifact"
+      ;;
+    *.dmg | *.pkg | *.zip)
+      record_hit "$artifact:uninspectable"
+      ;;
+    *)
+      scan_payload "$artifact" "$artifact"
+      ;;
+  esac
+}
+
+scan_text_file CHANGELOG.md CHANGELOG.md
+scan_text_file README.md README.md
+scan_text_file CONTRIBUTING.md CONTRIBUTING.md
+scan_text_file REVIEW_POLICY.md REVIEW_POLICY.md
+scan_text_file SECURITY.md SECURITY.md
+scan_text_file SUPPORT.md SUPPORT.md
+scan_text_file RELEASING.md RELEASING.md
 
 if [ -d docs ]; then
   find docs -type f \( -name '*.md' -o -name '*.txt' \) ! -path '*/.*' 2>/dev/null | sort | while IFS= read -r f; do
-    scan_text_file "$f" "$patterns"
+    scan_text_file "$f" "$f"
   done
 fi
 
 for f in release-notes release-notes.md; do
-  scan_text_file "$f" "$strict_patterns"
+  scan_text_file "$f" "$f"
 done
 
-[ -n "$release_title" ] && scan_text_file "$release_title" "$strict_patterns"
-[ -n "$release_body" ] && scan_text_file "$release_body" "$strict_patterns"
-[ -n "$tag_message" ] && scan_text_file "$tag_message" "$strict_patterns"
+[ -n "$release_title" ] && scan_text_file "$release_title" "$release_title"
+[ -n "$release_body" ] && scan_text_file "$release_body" "$release_body"
+[ -n "$tag_message" ] && scan_text_file "$tag_message" "$tag_message"
 
 for extra in "$@"; do
-  scan_text_file "$extra" "$strict_patterns"
+  scan_text_file "$extra" "$extra"
 done
 
 if [ -n "$dist_dir" ] && [ -d "$dist_dir" ]; then
   find "$dist_dir" -type f ! -name SHA256SUMS 2>/dev/null | sort | while IFS= read -r artifact; do
-    scan_binary_file "$artifact"
+    scan_dist_artifact "$artifact"
   done
 fi
 
