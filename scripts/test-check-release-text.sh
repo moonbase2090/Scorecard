@@ -62,11 +62,28 @@ if [ -f "$zip_path_fixture" ]; then
   dist_zip="$work/dist-zip"
   mkdir -p "$dist_zip"
   cp "$zip_path_fixture" "$dist_zip/member-name.zip"
-  if run_mini --dist "$dist_zip"; then
+  out=$(run_mini --dist "$dist_zip" 2>&1 || true)
+  if [ -z "$out" ]; then
     echo "expected zip member path leak to fail" >&2
     exit 1
   fi
+  if printf '%s\n' "$out" | grep -q '/Users/'; then
+    echo "zip hit output must not echo private paths" >&2
+    exit 1
+  fi
   echo "zip member path scan ok"
+fi
+
+pkg_path_fixture="$root/scripts/fixtures/release-text-pkg-path.pkg"
+if [ -f "$pkg_path_fixture" ]; then
+  dist_pkg="$work/dist-pkg-path"
+  mkdir -p "$dist_pkg"
+  cp "$pkg_path_fixture" "$dist_pkg/leak.pkg"
+  if run_mini --dist "$dist_pkg"; then
+    echo "expected pkg member path leak to fail" >&2
+    exit 1
+  fi
+  echo "pkg member path scan ok"
 fi
 
 symlink_fixture="$root/scripts/fixtures/release-text-symlink.tar.gz"

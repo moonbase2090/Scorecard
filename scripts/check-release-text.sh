@@ -135,7 +135,7 @@ scan_emails_in_line() {
 }
 
 scan_text_file() {
-  label="$1"
+  hit_label="$1"
   text_path="$2"
   [ -f "$text_path" ] || return 0
   grep_out=$(mktemp)
@@ -146,20 +146,20 @@ scan_text_file() {
   set -e
   if [ "$grep_status" -eq 2 ]; then
     rm -f "$grep_out" "$grep_err"
-    fatal_scan "pattern match failed for $label"
+    fatal_scan "pattern match failed for $hit_label"
   fi
   if [ "$grep_status" -eq 0 ]; then
     while IFS= read -r row; do
       [ -n "$row" ] || continue
       num=${row%%:*}
-      record_hit "$label:$num"
+      record_hit "$hit_label:$num"
     done <"$grep_out"
   fi
   rm -f "$grep_out" "$grep_err"
   line_no=0
   while IFS= read -r line || [ -n "$line" ]; do
     line_no=$((line_no + 1))
-    scan_emails_in_line "$label" "$line_no" "$line"
+    scan_emails_in_line "$hit_label" "$line_no" "$line"
   done <"$text_path"
 }
 
@@ -248,12 +248,12 @@ scan_symlink() {
 }
 
 scan_rel_path() {
-  label="$1"
+  archive_prefix="$1"
   rel_path="$2"
   [ -n "$rel_path" ] || return 0
   probe=$(mktemp)
   printf '%s\n' "$rel_path" >"$probe"
-  scan_text_file "$label@path" "$probe"
+  scan_text_file "$archive_prefix@path" "$probe"
   rm -f "$probe"
 }
 
@@ -274,11 +274,15 @@ scan_entry() {
 scan_tree() {
   prefix="$1"
   dir="$2"
+  skip_leaf="${3:-}"
   find "$dir" 2>/dev/null | sort | while IFS= read -r member; do
     [ "$member" = "$dir" ] && continue
+    if [ -n "$skip_leaf" ] && [ "$(basename "$member")" = "$skip_leaf" ] && [ -f "$member" ]; then
+      continue
+    fi
     rel=${member#"$dir"/}
     rel=${rel#/}
-    scan_rel_path "$prefix:$rel" "$rel"
+    scan_rel_path "$prefix" "$rel"
     scan_entry "$prefix:$rel" "$member"
   done
 }
@@ -302,22 +306,22 @@ list_zip_members() {
 }
 
 scan_tar_archive() {
-  label="$1"
+  archive_label="$1"
   archive_path="$2"
   names=$(mktemp)
   if tar -tzvf "$archive_path" >"$names" 2>/dev/null; then
-    scan_text_file "$label@members" "$names"
+    scan_text_file "$archive_label@members" "$names"
   else
     rm -f "$names"
-    fatal_scan "could not list $label"
+    fatal_scan "could not list $archive_label"
   fi
   rm -f "$names"
   tmp=$(mktemp -d)
   if ! tar -xzf "$archive_path" -C "$tmp" 2>/dev/null; then
     rm -rf "$tmp"
-    fatal_scan "could not unpack $label"
+    fatal_scan "could not unpack $archive_label"
   fi
-  scan_tree "$label" "$tmp"
+  scan_tree "$archive_label" "$tmp"
   rm -rf "$tmp"
 }
 
@@ -341,37 +345,29 @@ extract_cpio_payload() {
 }
 
 scan_pkg_archive() {
-  label="$1"
-  file="$2"
+  archive_label="$1"
+  archive_path="$2"
   tmp=$(mktemp -d)
   unpacked=false
-  if command -v bsdtar >/dev/null 2>&1 && bsdtar -xf "$file" -C "$tmp" 2>/dev/null; then
+  if command -v bsdtar >/dev/null 2>&1 && bsdtar -xf "$archive_path" -C "$tmp" 2>/dev/null; then
     unpacked=true
-  elif command -v xar >/dev/null 2>&1 && xar -xf "$file" -C "$tmp" 2>/dev/null; then
+  elif command -v xar >/dev/null 2>&1 && xar -xf "$archive_path" -C "$tmp" 2>/dev/null; then
     unpacked=true
-  elif command -v pkgutil >/dev/null 2>&1 && pkgutil --expand-full "$file" "$tmp" 2>/dev/null; then
+  elif command -v pkgutil >/dev/null 2>&1 && pkgutil --expand-full "$archive_path" "$tmp" 2>/dev/null; then
     unpacked=true
-  elif command -v pkgutil >/dev/null 2>&1 && pkgutil --expand "$file" "$tmp" 2>/dev/null; then
+  elif command -v pkgutil >/dev/null 2>&1 && pkgutil --expand "$archive_path" "$tmp" 2>/dev/null; then
     unpacked=true
   fi
   if [ "$unpacked" = false ]; then
     rm -rf "$tmp"
-    fatal_scan "could not unpack $label"
+    fatal_scan "could not unpack $archive_label"
   fi
   find "$tmp" 2>/dev/null | sort | while IFS= read -r member; do
     [ "$member" = "$tmp" ] && continue
-    base=$(basename "$member")
-    case "$base" in
-      Payload)
-        extract_cpio_payload "$label" "$member"
-        ;;
-      *)
-        rel=${member#"$tmp"/}
-        rel=${rel#/}
-        scan_entry "$label:$rel" "$member"
-        ;;
-    esac
+    [ "$(basename "$member")" = "Payload" ] || continue
+    extract_cpio_payload "$archive_label" "$member"
   done
+  scan_tree "$archive_label" "$tmp" Payload
   rm -rf "$tmp"
 }
 
