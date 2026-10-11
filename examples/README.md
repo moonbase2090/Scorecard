@@ -2,9 +2,9 @@
 
 ## Generated and vendored files
 
-Recursive scans honor root and nested `.gitignore` files. They also skip common build outputs, dependency trees, dot-directories, and source files marked with `@generated` or `Code generated ... DO NOT EDIT`.
+Recursive source scans honor root and nested `.gitignore` files. They also skip common build outputs, dependency trees, dot-directories, and source files marked with `@generated` or `Code generated ... DO NOT EDIT`.
 
-Add project-specific paths to `[scope].exclude`. To inspect a built-in generated or vendored directory, add it to `[scope].include_generated`:
+Secret scanning includes generated files within the configured scope. Add project-specific paths to `[scope].exclude`. To inspect a built-in generated or vendored directory, add it to `[scope].include_generated`:
 
 ```toml
 [scope]

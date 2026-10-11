@@ -69,6 +69,7 @@ pub enum WalkItem {
 pub struct Walk {
     root: PathBuf,
     includes: Vec<String>,
+    include_generated_files: bool,
     inner: IgnoreWalk,
 }
 
@@ -79,6 +80,8 @@ pub struct WalkOptions {
     pub include_hidden_directories: bool,
     /// Match `directory/**` exclusions from the project root only.
     pub root_directory_excludes: bool,
+    /// Read generated files while preserving directory and path exclusions.
+    pub include_generated_files: bool,
 }
 
 /// Walk a project subtree with the shared defaults, nested `.gitignore`
@@ -145,6 +148,7 @@ pub fn walk_with_options(
     Walk {
         root,
         includes,
+        include_generated_files: options.include_generated_files,
         inner: builder.build(),
     }
 }
@@ -238,21 +242,9 @@ pub fn source_walk_skips_path(
     skip_directory(rel, include_generated, include_hidden_directories)
 }
 
-/// Whether a git-listed path should be scanned for secrets (excludes, generated markers).
-pub fn secrets_scan_includes_path(
-    root: &Path,
-    rel: &str,
-    exclude: &[String],
-    include_generated: &[String],
-) -> bool {
-    if rel.is_empty() {
-        return false;
-    }
-    if is_excluded(rel, exclude, true) {
-        return false;
-    }
-    let path = root.join(rel);
-    included_path(rel, include_generated) || !is_generated_file(&path)
+/// Whether the configured scope includes a git-listed path for secrets scanning.
+pub fn secrets_scan_includes_path(rel: &str, exclude: &[String]) -> bool {
+    !rel.is_empty() && !is_excluded(rel, exclude, true)
 }
 
 /// Return regular files from a shared project walk.
@@ -339,7 +331,10 @@ impl Iterator for Walk {
                     let kind = if file_type.is_dir() {
                         WalkKind::Directory
                     } else if file_type.is_file() {
-                        if !included_path(&rel, &self.includes) && is_generated_file(&path) {
+                        if !self.include_generated_files
+                            && !included_path(&rel, &self.includes)
+                            && is_generated_file(&path)
+                        {
                             continue;
                         }
                         WalkKind::File
