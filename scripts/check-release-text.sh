@@ -165,9 +165,17 @@ scan_text_file() {
 
 looks_like_text() {
   file="$1"
-  if LC_ALL=C grep -q $'\0' "$file" 2>/dev/null; then
+  mime=$(file -b --mime-type "$file" 2>/dev/null || true)
+  case "$mime" in
+    text/*) return 0 ;;
+  esac
+  sample=$(mktemp)
+  dd if="$file" of="$sample" bs=8192 count=1 2>/dev/null || : >"$sample"
+  if LC_ALL=C grep -q $'\0' "$sample" 2>/dev/null; then
+    rm -f "$sample"
     return 1
   fi
+  rm -f "$sample"
   return 0
 }
 
