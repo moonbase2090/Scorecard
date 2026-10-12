@@ -4,7 +4,7 @@ Status: plan. Windows is not a supported platform. This page does not say that `
 
 Audited on `develop` at `7d8d4274d6250b2ab3578ed70fcb6e9f10c056c3` (2026-10-10). The repository has no roadmap file. The README quickstart names only Darwin and Linux targets. `.github/workflows/ci.yml` and `release.yml` have no Windows job.
 
-Real-Windows proof is a later step, on the PC, by windows-1. Grok signs off on this plan before those leaves start.
+Real-Windows proof is a later step, on the PC. Sign-off happens before those leaves start.
 
 ## Decisions
 
@@ -12,7 +12,7 @@ Real-Windows proof is a later step, on the PC, by windows-1. Grok signs off on t
 2. Unix behavior stays as it is. Windows work is new branches, not `cfg` edits that change Unix results.
 3. GitHub-hosted `windows-latest` is report-only. Hosted Windows minutes are billing-blocked, so a green PC run is the proof. The job is not a required check and cannot block Apple or Linux releases.
 4. The unsigned zip ships before an MSI. Signing is later, through Azure Artifact Signing (`moonbase2090-signing`).
-5. The README and the quickstart gain a Windows download only after windows-1 posts `sc analyze` output and screenshots from the PC.
+5. The README and the quickstart gain a Windows download only after a PC run posts `sc analyze` output and screenshots.
 
 ## Already portable
 
@@ -76,7 +76,7 @@ Width: when `COLUMNS` is unset, read the console window with `GetConsoleScreenBu
 | Cursor MCP | `$HOME/.cursor/mcp.json` |
 | Claude Code MCP | `$HOME/.claude.json` |
 
-Muse config also checks `XDG_CONFIG_HOME` and `$HOME/.muse`. The version stamp ignores `XDG_CONFIG_HOME` and always uses `$HOME/.config/sc`.
+Another local config also checks `XDG_CONFIG_HOME` and a directory under `$HOME`. The version stamp ignores `XDG_CONFIG_HOME` and always uses `$HOME/.config/sc`.
 
 Windows resolution for the later leaf:
 
@@ -113,7 +113,7 @@ Packs whose command is a POSIX pipeline stay unavailable on Windows until a late
 The server binary is portable once it is built with the MSVC toolchain. The work around it is not:
 
 - `mcp_bin` misses `sc-mcp.exe`.
-- Registration writes the absolute path into JSON and TOML. `setup.rs` already escapes `\`, so a path like `%USERPROFILE%\...\sc-mcp.exe` can be stored. Confirm that on the PC.
+- Registration writes the absolute path into JSON and TOML. `setup.rs` already escapes `\`, so a path like `~\sc-mcp.exe` can be stored. Confirm that on the PC.
 - The process it launches is `sc`. That child has the same `PATH`, config, and console gaps as a terminal run.
 
 No MCP protocol change.
@@ -171,7 +171,7 @@ Each leaf is its own PR into `develop`, labeled `leaf`. None of them edit the RE
 6. CI. The report-only `check-windows` job.
 7. Release zip. The asset above, still not a publish dependency.
 
-windows-1 runs the proof on the PC after leaf 2, and again after the zip exists: `sc analyze` on `testdata/good_crate` and on a real repository, with the command output and screenshots of the pretty report. Name the console host (Windows Terminal or conhost). That proof is the point at which a later PR may mention Windows in the README.
+A PC run covers the proof after leaf 2, and again after the zip exists: `sc analyze` on `testdata/good_crate` and on a real repository, with the command output and screenshots of the pretty report. Name the console host (Windows Terminal or conhost). That proof is the point at which a later PR may mention Windows in the README.
 
 ## Out of scope
 
