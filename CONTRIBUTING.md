@@ -16,7 +16,7 @@ Keep pull requests small and focused. One commit per logical change.
 Every PR update runs `check-ubuntu` (fmt, clippy, the full fixture test
 suite), `deny`, and `msrv`. The macOS core tests, the LLVM coverage job,
 and the self-analysis dogfood run on pushes to `develop`, so a green PR
-still gets checked again at merge time.
+still gets checked again at merge time. The macOS library tests require `cargo-llvm-cov`, the Rust `llvm-tools-preview` component, and `ruff`; CI installs them before `test core`.
 
 ## Before you push
 

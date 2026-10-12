@@ -27,6 +27,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Harden secrets scan file selection while preserving configured path exclusions.
 - Report `secrets.empty_scope` and fail the secrets gate when the scan selects no files, instead of reporting a perfect pass (#239).
+- Install Rust coverage and Python lint tools for macOS core tests in CI.
 
 - `NO_COLOR` no longer hides analysis progress on interactive stderr. The uncolored spinner continues showing the current step and elapsed time; `--quiet` still suppresses it.
 
