@@ -5,7 +5,7 @@ sc analyze [PATH] [OPTIONS]
 sc config path
 sc config init [--force]
 sc setup
-sc skills install [--agent all|codex|shared|claude|cursor|kiro|muse|detected] [--check] [--force]
+sc skills install [--agent AGENT] [--check] [--force]
 sc help [COMMAND]
 ```
 
@@ -50,11 +50,11 @@ Installs the Scorecard agent skill for the legacy agent locations and registers 
 
 ## sc skills install
 
-Installs the embedded Scorecard skill. Default `--agent all` targets Codex (`~/.codex` and shared `~/.agents` skills), Claude Code, Cursor, Kiro, and Muse. `--agent codex` writes both Codex and shared locations. `--agent detected` targets only existing config directories or agents whose CLI is on `PATH`; when Codex is detected, it uses existing Codex/shared directories and creates `~/.codex` only when Codex is detected by its CLI and neither directory exists. This mode is used by the macOS package hook and honors automatic-install opt-outs.
+Installs the embedded Scorecard skill. Default `--agent all` targets all supported integrations. Run `sc skills install --help` for the supported agent identifiers. `--agent codex` writes both Codex and shared locations. `--agent detected` targets only existing config directories or agents whose CLI is on `PATH`; when Codex is detected, it uses existing Codex/shared directories and creates `~/.codex` only when Codex is detected by its CLI and neither directory exists. This mode is used by the macOS package hook and honors automatic-install opt-outs.
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--agent AGENT` | `all` | `all`, `codex`, `shared`, `claude`, `cursor`, `kiro`, `muse`, or `detected`. |
+| `--agent AGENT` | `all` | Agent identifier, `all`, or `detected`. Run `sc skills install --help` for supported values. |
 | `--check` | off | Check selected targets without writing. Exits 1 if a skill is missing or differs from the embedded copy. Cannot be combined with `--force`. |
 | `--force` | off | Replace an existing skill, including a user-edited copy. |
 
