@@ -146,6 +146,7 @@ fn run_analyze(
         mutation_override: None,
         llm_override: Some(false),
         intent,
+        progress: None,
         config,
     });
     serde_json::to_string(&output.scorecard).map_err(|err| err.to_string())

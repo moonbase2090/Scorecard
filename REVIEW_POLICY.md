@@ -53,11 +53,26 @@ Every PR meets these. Reviewers block on any miss.
 9. Every new flag or config key earns its place. Defaults beat options.
 10. Docs are tight and exact: no filler, no marketing tone, no restating the obvious.
 11. Every claim in a PR body or doc is verified by a command you ran.
-12. Tests assert real behavior (no snapshot-everything, no tautologies), and each one fails without the fix.
+12. Tests assert real behavior (no snapshot-everything, no tautologies), and each one fails without the fix. For every test, ask: would it fail if the behavior it names broke? If not, reject it. `sc analyze --mutation diff` runs cargo-mutants and reports each mutant the tests miss (`mutation.survivor`). Reject tests that:
+    - assert a value against itself, or a constant against the same constant
+    - compute the expected value with the code under test or a copy of its logic
+    - mock or stub the unit under test, then assert what the mock returns
+    - only check that something ran, was called, or didn't panic, with no assertion on the result
+    - compare against a snapshot or golden file regenerated from current output without review
+    - still pass when the implementation is deleted or replaced with a stub or default
 13. `sc` passes its own strict gates on this repository, with no new suppressions.
 
 ## 7. Merging
 
 - Merge commits only. No admin overrides.
 - Code-scanning threads are resolved only when they are report-only or addressed, never just to unblock a merge.
-- Releases and tags need owner approval.
+- Releases and tags need owner approval. Release text and artifacts must not reference private infrastructure, hostnames, personal paths, or internal tooling (`RELEASING.md`, `scripts/check-release-text.sh`).
+
+## Review exceptions
+
+These rules narrow when a fresh review is needed. They replace nothing above unless they say so.
+
+- **Docs-only and changelog-only PRs** may merge on green checks plus the release-text check, with no review. A PR qualifies only if every changed file is documentation or the changelog; any code, config, CI, or workflow change makes it a normal PR.
+- **A SHIP carries over** a clean rebase or a label-only change, as long as the PR's own diff is unchanged. Compare the old and new tips with `git range-diff` or the patch-id (`git diff <base>...<tip> | git patch-id --stable`). If the diff changed at all, the PR needs a new review at the new tip.
+- **Leaf Windows fixes** merge on a code SHIP and green CI. Windows runtime proof for them is batched and recorded before each release instead of blocking each PR.
+- **Still need a full cross-family review at the exact tip**: security and red-team fixes, trunk PRs, CI and workflow changes, release PRs, and public-API changes. The reviewer is a different model family than the author, and the review names the tip SHA.

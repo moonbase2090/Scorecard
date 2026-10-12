@@ -124,8 +124,11 @@ pack_arch() {
   triple=$1
   src="$root/target/$triple/release"
   tmp=$(mktemp -d)
-  cp "$src/sc" "$src/sc-mcp" "$root/LICENSE" "$root/README.md" "$tmp/"
-  tar -C "$tmp" -czf "$dist/sc-v${ver}-${triple}.tar.gz" sc sc-mcp LICENSE README.md
+  bundle="sc-v${ver}-${triple}"
+  mkdir -p "$tmp/$bundle"
+  cp "$src/sc" "$src/sc-mcp" "$root/LICENSE" "$root/README.md" "$tmp/$bundle/"
+  sh "$root/scripts/tar-release.sh" "$dist/${bundle}.tar.gz" "$tmp" "$bundle"
+  python3 "$root/scripts/check-archive-layout.py" "$dist/${bundle}.tar.gz"
   rm -rf "$tmp"
 }
 mkdir -p "$dist"

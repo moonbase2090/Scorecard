@@ -2,11 +2,11 @@
 
 [![CI](https://github.com/moonbase2090/Scorecard/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/moonbase2090/Scorecard/actions/workflows/ci.yml?query=branch%3Amain)
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-blue.svg)](LICENSE)
-[![MSRV 1.85](https://img.shields.io/badge/MSRV-1.85-blue.svg)](https://github.com/moonbase2090/Scorecard/blob/main/Cargo.toml)
+[![MSRV 1.88](https://img.shields.io/badge/MSRV-1.88-blue.svg)](https://github.com/moonbase2090/Scorecard/blob/main/Cargo.toml)
 
 `sc` is a local code-quality gate. In one run it checks that a project builds, its tests pass, complex code is covered by tests ([CRAP](docs/crap.md)), no secrets are committed, the linter is clean, and every import is a declared dependency. It prints a verdict for people and a JSON scorecard for agents and CI. Ten language packs are built in. Project site: [scorecardcli.com](https://scorecardcli.com).
 
-The secrets scan checks files up to 64 MiB even when they contain NUL bytes. It skips gitignored large files. A non-ignored file over 64 MiB produces `secrets.partial`.
+The secrets scan checks files up to 64 MiB even when they contain NUL bytes. It skips gitignored large files. A non-ignored file over 64 MiB produces `secrets.partial`, except when the file begins with a known object format (ELF, Mach-O, PE, WebAssembly, or `ar` archive); those binaries are not scanned at any size and the report lists `secrets.skipped_object` (info) instead of matching token patterns inside the binary.
 
 The secrets gate recognizes Slack incoming webhooks, Stripe restricted live keys (`rk_live_`), and AWS provider secret keys in Terraform, alongside the existing token and key formats.
 
@@ -22,25 +22,37 @@ case "$(uname -s)-$(uname -m)" in
   Linux-aarch64) TARGET=aarch64-unknown-linux-gnu ;;
   Linux-x86_64) TARGET=x86_64-unknown-linux-gnu ;;
 esac
-URL="https://github.com/moonbase2090/Scorecard/releases/download/$VERSION/sc-$VERSION-$TARGET.tar.gz"
+URL="https://github.com/moonbase2090/Scorecard/releases/download/$VERSION/sc-v${VERSION#v}-$TARGET.tar.gz"
 SC_DIR="$(mktemp -d)"
-trap 'rm -rf "$SC_DIR"' EXIT
 HTTP_STATUS="$(curl -sSL -w '%{http_code}' -o "$SC_DIR/scorecard.tar.gz" "$URL")" || HTTP_STATUS=000
 if [ "$HTTP_STATUS" = 200 ]; then
-  tar -xzf "$SC_DIR/scorecard.tar.gz" -C "$SC_DIR" sc
+  tar -xzf "$SC_DIR/scorecard.tar.gz" -C "$SC_DIR"
+  if [ -f "$SC_DIR/sc" ]; then
+    SC_BIN="$SC_DIR/sc"
+  else
+    SC_BIN="$(find "$SC_DIR" -maxdepth 2 -type f -name sc | head -1)"
+  fi
+  mkdir -p "$HOME/.local/bin"
+  install -m 755 "$SC_BIN" "$HOME/.local/bin/sc"
+  export PATH="$HOME/.local/bin:$PATH"
 elif [ "$HTTP_STATUS" = 404 ] && [ -n "${SCORECARD_DOCS_BINARY:-}" ]; then
-  cp "$SCORECARD_DOCS_BINARY" "$SC_DIR/sc"
+  mkdir -p "$HOME/.local/bin"
+  install -m 755 "$SCORECARD_DOCS_BINARY" "$HOME/.local/bin/sc"
+  export PATH="$HOME/.local/bin:$PATH"
 else
   printf 'Could not download Scorecard %s (HTTP %s). Try again or install from source: https://github.com/moonbase2090/Scorecard#install\n' "$VERSION" "$HTTP_STATUS" >&2
   exit 1
 fi
-"$SC_DIR/sc" analyze .
+trap 'rm -rf "$SC_DIR"' EXIT
+sc analyze .
 ```
+
+While analysis runs, an interactive terminal shows the current step and elapsed time on stderr, including with `NO_COLOR=1`. Use `--quiet` to hide progress.
 
 In a terminal the report looks like this (from `testdata/good_crate`):
 
 ```text
-sc 0.1.6  testdata/good_crate  rust  5ac851c clean  scope tree
+sc 0.1.7  testdata/good_crate  rust  5ac851c clean  scope tree
 
 PASS
 
@@ -71,13 +83,15 @@ duration: 0.7s
 exit 0: enforced gates passed
 ```
 
-Exit status: `1` a gate selected by `--fail-on` failed; `0` none did; `2` `sc` could not run. The report still shows `FAIL` when any enforced gate fails, even if `--fail-on` keeps the process exit code at 0. [Reading the report](docs/report.md) explains every section.
+Exit status: `1` a gate selected by `--fail-on` failed; `0` none did; `2` `sc` could not run. Use `--fail-on none` to return 0 for every gate while keeping failures in the report. If an enforced gate fails while the exit code is 0, `sc` writes one stderr warning with the failed gate names. An empty or blank `--fail-on` selection is invalid. Omit the option to use the default gates. [Reading the report](docs/report.md) explains every section.
+
+If the configured scope selects no files for secrets scanning, the report contains `secrets.empty_scope` and the secrets gate fails. Check the project path and exclusions before rerunning.
 
 A dirty report lists up to three changed paths. JSON includes every path in `git.dirty_paths`. Scorecard's saved report, cache and coverage files under `.sc/`, and files selected by `--out` do not make a clean checkout dirty.
 
-`sc analyze . --diff BASE` scores only what changed against that git ref. When the project is a subdirectory of a larger repository, the changed paths are still relative to the project (`src/a.rs`).
+`sc analyze . --diff BASE` scores only what changed against that git ref. Python compiles, lints, and checks imports only in changed `.py` files, and runs pytest only on changed `test_*.py` and `*_test.py` files. When the project is a subdirectory of a larger repository, the changed paths are still relative to the project (`src/a.rs`). A bare `--diff` picks the base automatically (`HEAD~1`, else `main`, else `master`) and skips a candidate that is the same commit as `HEAD`. A shallow clone, a single-commit branch, a depth-1 clone of `main` or `master`, or a missing explicit base exits 2 with verdict `fail` and one stderr line that names `fetch-depth: 0`. An explicit `--diff HEAD` still works.
 
-Scans honor nested `.gitignore` files and skip common build and vendor directories such as `build/`, `target/`, `dist/`, and `node_modules/`. See [scan scope configuration](docs/reference/config.md#scope) to add exclusions or include generated paths.
+Scans honor nested `.gitignore` files and skip common build and vendor directories such as `build/`, `target/`, `dist/`, and `node_modules/` for source discovery. The secrets scan lists every tracked and non-ignored file from git (`git ls-files`) when the project is in a work tree, so a committed token under `vendor/`, `dist/`, or `build/` is still reported. Secret scanning includes generated files within that scope. See [scan scope configuration](docs/reference/config.md#scope) to add exclusions or include generated paths.
 
 `sc analyze . --format sarif` writes SARIF for GitHub code scanning. Only `secrets.*` findings are level `error`, which code scanning counts as a security vulnerability. Every other rule, including a failing test or missing coverage, is level `warning` and still fails its gate ([CI](docs/how-to/ci.md)).
 
@@ -95,9 +109,10 @@ grep -Eq 'src/lib.rs:[0-9]+  clippy::let_and_return' <<<"$output"
 
 Next:
 
-- Put `sc` on your `PATH`: `sudo mv sc /usr/local/bin/`, or see [Install](#install).
+- Put `sc` on your `PATH` (the quickstart installs to `~/.local/bin`), or see [Install](#install).
 - Add `.sc/` to `.gitignore`. `sc` keeps its last report and caches there.
 - Run `sc setup` so coding agents on this machine can use `sc` ([agents](docs/how-to/agents.md)).
+- Install just the agent instructions with `sc skills install --agent detected`; see [skill installation](docs/how-to/agents.md#install-the-skill).
 - Write a user config with `sc config init`, or put `analyzer.toml` at the project root ([configure](docs/how-to/config.md)).
 
 The secrets scan also finds PEM private keys split across source string literals, including Go or Java concatenations and YAML lists. See [PEM examples](examples/README.md#pem-keys-in-source-files).
@@ -119,7 +134,7 @@ The secrets scan also finds PEM private keys split across source string literals
 
 ## Install
 
-Release [v0.1.6](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.6). Each `.tar.gz` holds `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md`.
+Published release [v0.1.6](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.6). Each `.tar.gz` holds a top-level directory `sc-v<version>-<target>/` with `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md` (v0.1.6 archives use a flat layout; the GitHub Action accepts both).
 
 | Platform | Asset |
 |---|---|
@@ -136,7 +151,7 @@ curl -fsSLO https://github.com/moonbase2090/Scorecard/releases/download/v0.1.6/S
 shasum -a 256 -c --ignore-missing SHA256SUMS   # Linux: sha256sum -c --ignore-missing SHA256SUMS
 ```
 
-From source (Rust 1.85 or newer), in a clone of this repository:
+From source (Rust 1.88 or newer), in a clone of this repository:
 
 ```bash
 cargo install --locked --path crates/sc-cli

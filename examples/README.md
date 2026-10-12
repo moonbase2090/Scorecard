@@ -2,9 +2,9 @@
 
 ## Generated and vendored files
 
-Recursive scans honor root and nested `.gitignore` files. They also skip common build outputs, dependency trees, dot-directories, and source files marked with `@generated` or `Code generated ... DO NOT EDIT`.
+Recursive source scans honor root and nested `.gitignore` files. They also skip common build outputs, dependency trees, dot-directories, and source files marked with `@generated` or `Code generated ... DO NOT EDIT`.
 
-Add project-specific paths to `[scope].exclude`. To inspect a built-in generated or vendored directory, add it to `[scope].include_generated`:
+Secret scanning includes generated files within the configured scope. Add project-specific paths to `[scope].exclude`. To inspect a built-in generated or vendored directory, add it to `[scope].include_generated`:
 
 ```toml
 [scope]
@@ -48,6 +48,25 @@ The [secrets rules](../docs/reference/rules.md#rules) reference describes `secre
 ## Python source layout
 
 For a project with `src/my_package/` and tests that import `my_package`, `sc analyze .` puts `src/` first on `PYTHONPATH` while it runs pytest and collects coverage. Coverage then refers to the package files in the checkout, even when another copy is installed.
+
+## Progress without color
+
+```bash
+NO_COLOR=1 sc analyze .
+```
+
+On interactive stderr, the uncolored spinner shows the current step and elapsed time. Use `--quiet` to hide it.
+
+These recordings compare the installed 0.1.6 binary without progress, develop before the `NO_COLOR` fix, and the fixed binary during tests and coverage:
+
+- [Prismattyc recording](terminal/progress-prismattyc.cast), `TERM=prismattyc-kitty`
+- [Terminal.app recording](terminal/progress-terminal.cast), `TERM=xterm-256color`
+
+Play either recording with `asciinema play examples/terminal/progress-prismattyc.cast` or `asciinema play examples/terminal/progress-terminal.cast` from this repository.
+
+## Empty scan scope
+
+An exclusion such as `[scope] exclude = ["/**"]` leaves no files to scan. The report includes `secrets.empty_scope`, the secrets gate fails, and `sc analyze . --fail-on secrets` exits 1. Remove the exclusion and rerun against the intended project. With `--fail-on none`, the process exits 0 while the report still records the failed gate.
 
 ## Passing fixture
 

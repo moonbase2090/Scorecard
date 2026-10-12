@@ -183,30 +183,60 @@ pub fn text_secrets_with_generated(
 ) -> Vec<sc_core::Finding> {
     let mut files = Vec::new();
     let mut findings = Vec::new();
-    for item in sc_graph::walk_with_options(
-        root,
-        root,
-        exclude,
-        include_generated,
-        None,
-        sc_graph::WalkOptions {
-            include_hidden_directories: true,
-            root_directory_excludes: true,
-        },
-    ) {
-        match item {
-            sc_graph::WalkItem::Entry(entry) if entry.kind == sc_graph::WalkKind::File => {
-                files.push(entry.path);
+    if let Some(listing) = sc_graph::git_secrets_paths(root) {
+        match listing {
+            Ok(listing) => {
+                for rel in listing.paths {
+                    if !listing.tracked.contains(&rel)
+                        && sc_graph::source_walk_skips_path(&rel, include_generated, true)
+                    {
+                        continue;
+                    }
+                    if !sc_graph::secrets_scan_includes_path(&rel, exclude) {
+                        continue;
+                    }
+                    let path = root.join(&rel);
+                    if !path.is_file() {
+                        continue;
+                    }
+                    files.push(path);
+                }
             }
-            sc_graph::WalkItem::Error { path, message } => {
-                let rel = path
-                    .as_deref()
-                    .map(|path| rel_path(root, path))
-                    .unwrap_or_else(|| ".".into());
-                findings.push(unreadable_message(&rel, &message));
+            Err(message) => {
+                findings.push(unreadable_message(".", &message));
+                return findings;
             }
-            _ => {}
         }
+    } else {
+        for item in sc_graph::walk_with_options(
+            root,
+            root,
+            exclude,
+            include_generated,
+            None,
+            sc_graph::WalkOptions {
+                include_hidden_directories: true,
+                root_directory_excludes: true,
+                include_generated_files: true,
+            },
+        ) {
+            match item {
+                sc_graph::WalkItem::Entry(entry) if entry.kind == sc_graph::WalkKind::File => {
+                    files.push(entry.path);
+                }
+                sc_graph::WalkItem::Error { path, message } => {
+                    let rel = path
+                        .as_deref()
+                        .map(|path| rel_path(root, path))
+                        .unwrap_or_else(|| ".".into());
+                    findings.push(unreadable_message(&rel, &message));
+                }
+                _ => {}
+            }
+        }
+    }
+    if files.is_empty() && findings.is_empty() {
+        return vec![empty_secrets_scope()];
     }
     let mut big_text = Vec::new();
     for path in files {
@@ -235,7 +265,11 @@ pub fn text_secrets_with_generated(
     let mut oversized = Vec::new();
     for (path, rel, len) in big_text {
         if len > MAX_TEXT_BYTES {
-            oversized.push(rel);
+            if file_starts_with_object_magic(&path) {
+                findings.push(skipped_object_file(&rel));
+            } else {
+                oversized.push(rel);
+            }
             continue;
         }
         scan_file(&path, &rel, &mut findings);
@@ -244,6 +278,24 @@ pub fn text_secrets_with_generated(
         findings.push(partial_scan(&oversized));
     }
     findings
+}
+
+fn empty_secrets_scope() -> sc_core::Finding {
+    sc_core::Finding {
+        id: "secrets:empty-scope".into(),
+        rule: "secrets.empty_scope".into(),
+        engine: "secrets".into(),
+        severity: "error".into(),
+        file: ".".into(),
+        span: None,
+        symbol: None,
+        message: "No files were selected for secrets scanning, so the scan is incomplete. Check the project path, .gitignore and [scope].exclude in analyzer.toml, then run `sc analyze .` again.".into(),
+        evidence: serde_json::json!({ "files_selected": 0 }),
+        suggested_action: Some(
+            "Analyze the intended project directory and remove exclusions that hide every file, then run `sc analyze .`".into(),
+        ),
+        disposition: String::new(),
+    }
 }
 
 fn scan_file(path: &Path, rel: &str, findings: &mut Vec<sc_core::Finding>) {
@@ -256,8 +308,87 @@ fn scan_file(path: &Path, rel: &str, findings: &mut Vec<sc_core::Finding>) {
             return;
         }
     };
+    if file_has_object_magic(&bytes) {
+        findings.push(skipped_object_file(rel));
+        return;
+    }
     let text = String::from_utf8_lossy(&bytes);
     findings.extend(crate::secrets::secrets_in_text(&text, rel));
+}
+
+/// Read only a prefix large enough for PE `e_lfanew` and the PE signature.
+fn file_starts_with_object_magic(path: &Path) -> bool {
+    use std::io::Read;
+    let mut file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(_) => return false,
+    };
+    let mut prefix = [0u8; 512];
+    let read = match file.read(&mut prefix) {
+        Ok(n) => n,
+        Err(_) => return false,
+    };
+    file_has_object_magic(&prefix[..read])
+}
+
+/// Recognized executable / archive magics. A leading NUL pair alone is not enough (#155).
+fn file_has_object_magic(bytes: &[u8]) -> bool {
+    if bytes.starts_with(b"\x7fELF") {
+        return true;
+    }
+    if bytes.starts_with(b"\0asm") {
+        return true;
+    }
+    if bytes.starts_with(b"!<arch>\n") {
+        return true;
+    }
+    if bytes.len() >= 4 {
+        let be = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        let le = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        const MH_MAGIC: u32 = 0xfeed_face;
+        const MH_CIGAM: u32 = 0xcefa_edfe;
+        const MH_MAGIC_64: u32 = 0xfeed_facf;
+        const MH_CIGAM_64: u32 = 0xcffa_edfe;
+        const FAT_MAGIC: u32 = 0xcafe_babe;
+        const FAT_CIGAM: u32 = 0xbebafeca;
+        if matches!(
+            be,
+            MH_MAGIC | MH_CIGAM | MH_MAGIC_64 | MH_CIGAM_64 | FAT_MAGIC | FAT_CIGAM
+        ) || matches!(
+            le,
+            MH_MAGIC | MH_CIGAM | MH_MAGIC_64 | MH_CIGAM_64 | FAT_MAGIC | FAT_CIGAM
+        ) {
+            return true;
+        }
+    }
+    is_pe_image(bytes)
+}
+
+fn is_pe_image(bytes: &[u8]) -> bool {
+    if !bytes.starts_with(b"MZ") || bytes.len() < 0x40 {
+        return false;
+    }
+    let pe_offset = u32::from_le_bytes(bytes[0x3c..0x40].try_into().unwrap_or([0, 0, 0, 0]));
+    let pe_offset = pe_offset as usize;
+    bytes.len() >= pe_offset + 4 && bytes[pe_offset..pe_offset + 4] == *b"PE\0\0"
+}
+
+fn skipped_object_file(rel: &str) -> sc_core::Finding {
+    sc_core::Finding {
+        id: format!("secrets:skipped-object:{rel}"),
+        rule: "secrets.skipped_object".into(),
+        engine: "secrets".into(),
+        severity: "info".into(),
+        file: rel.to_string(),
+        span: None,
+        symbol: None,
+        message: format!(
+            "skipped {rel} because it looks like a binary or object file (ELF, Mach-O, PE, WebAssembly, or ar archive), so the secrets scan did not read its contents"
+        ),
+        evidence: serde_json::json!({ "reason": "object_magic" }),
+        suggested_action: None,
+        disposition: String::new(),
+    }
 }
 
 fn unreadable(rel: &str, err: &std::io::Error) -> sc_core::Finding {
@@ -548,6 +679,70 @@ mod tests {
         format!("{begin}{kind} {end} {body}\n")
     }
 
+    fn check_secrets_content_policy(git_mode: &str) {
+        let root = temp(&format!("secrets-content-{git_mode}"));
+        let key = planted_access_key();
+        for (file, header) in [
+            ("export.rs", "// Code generated by fixture; DO NOT EDIT.\n"),
+            ("metadata.rs", "// @generated\n"),
+            ("plain.rs", ""),
+            ("ignored.rs", "// @generated\n"),
+        ] {
+            fs::write(
+                root.join(file),
+                format!("{header}const KEY: &str = \"{key}\";\n"),
+            )
+            .unwrap();
+        }
+        fs::write(root.join(".gitignore"), "ignored.rs\n").unwrap();
+        match git_mode {
+            "tracked" => git_commit(&root),
+            "untracked" => {
+                assert!(std::process::Command::new("git")
+                    .args(["init", "-q"])
+                    .current_dir(&root)
+                    .status()
+                    .unwrap()
+                    .success());
+            }
+            _ => {}
+        }
+        let mut actual: Vec<_> = text_secrets(&root, &[])
+            .into_iter()
+            .map(|finding| (finding.file, finding.rule))
+            .collect();
+        actual.sort();
+        assert_eq!(
+            actual,
+            [
+                ("export.rs".into(), "secrets.aws_access_key".into()),
+                ("metadata.rs".into(), "secrets.aws_access_key".into()),
+                ("plain.rs".into(), "secrets.aws_access_key".into()),
+            ]
+        );
+        let filtered: Vec<_> = text_secrets(&root, &["export.rs".into(), "metadata.rs".into()])
+            .into_iter()
+            .map(|finding| finding.file)
+            .collect();
+        assert_eq!(filtered, ["plain.rs"]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn secrets_content_policy_in_tracked_files() {
+        check_secrets_content_policy("tracked");
+    }
+
+    #[test]
+    fn secrets_content_policy_in_untracked_files() {
+        check_secrets_content_policy("untracked");
+    }
+
+    #[test]
+    fn secrets_content_policy_outside_git() {
+        check_secrets_content_policy("standalone");
+    }
+
     #[test]
     fn secrets_walk_reaches_deep_files_dotenv_and_honors_exclude() {
         let key = planted_access_key();
@@ -781,6 +976,243 @@ mod tests {
         assert!(
             findings.iter().any(|finding| {
                 finding.file == "config.js" && finding.rule == "secrets.aws_access_key"
+            }),
+            "{findings:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    fn runtime_github_token() -> String {
+        let parts = ["Ab", "3k", "Qm", "9Z", "nR", "4p", "Lx", "7w"];
+        let tail: String = parts.iter().cycle().take(18).copied().collect();
+        format!("ghp_{tail}")
+    }
+
+    fn git_commit(root: &std::path::Path) {
+        let git = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .arg("-C")
+                .arg(root)
+                .args(args)
+                .env("GIT_AUTHOR_NAME", "sc")
+                .env("GIT_AUTHOR_EMAIL", "sc@example.com")
+                .env("GIT_COMMITTER_NAME", "sc")
+                .env("GIT_COMMITTER_EMAIL", "sc@example.com")
+                .status()
+                .unwrap();
+            assert!(status.success(), "{args:?}");
+        };
+        git(&["init", "-q"]);
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "init"]);
+    }
+
+    #[test]
+    fn tracked_vendor_dist_and_build_are_scanned_in_git() {
+        let token = runtime_github_token();
+        let root = temp("secrets-git-tracked");
+        fs::create_dir_all(root.join("vendor/dep")).unwrap();
+        fs::create_dir_all(root.join("dist")).unwrap();
+        fs::create_dir_all(root.join("build")).unwrap();
+        fs::write(
+            root.join("vendor/dep/lib.js"),
+            format!("const V = \"{token}\";\n"),
+        )
+        .unwrap();
+        fs::write(root.join("dist/app.js"), format!("var k=\"{token}\";\n")).unwrap();
+        fs::write(root.join("build/c.txt"), format!("k={token}\n")).unwrap();
+        git_commit(&root);
+        let findings = text_secrets(&root, &[]);
+        for file in ["vendor/dep/lib.js", "dist/app.js", "build/c.txt"] {
+            assert!(
+                findings.iter().any(|finding| {
+                    finding.file == file && finding.rule.starts_with("secrets.")
+                }),
+                "missing {file}: {findings:?}"
+            );
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn gitignored_env_and_target_are_not_scanned() {
+        let token = runtime_github_token();
+        let root = temp("secrets-git-ignored");
+        fs::write(root.join(".gitignore"), ".env\ntarget/\nnode_modules/\n").unwrap();
+        fs::write(root.join(".env"), format!("TOKEN={token}\n")).unwrap();
+        fs::create_dir_all(root.join("target/debug")).unwrap();
+        fs::write(root.join("target/debug/leak.txt"), format!("{token}\n")).unwrap();
+        fs::create_dir_all(root.join("node_modules/pkg")).unwrap();
+        fs::write(
+            root.join("node_modules/pkg/index.js"),
+            format!("\"{token}\"\n"),
+        )
+        .unwrap();
+        git_commit(&root);
+        let findings = text_secrets(&root, &[]);
+        assert!(
+            !findings.iter().any(|finding| {
+                finding.file == ".env"
+                    || finding.file.starts_with("target/")
+                    || finding.file.starts_with("node_modules/")
+            }),
+            "{findings:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn scope_exclude_hides_dist_secret_in_git() {
+        let token = runtime_github_token();
+        let root = temp("secrets-git-exclude-dist");
+        fs::create_dir_all(root.join("vendor/dep")).unwrap();
+        fs::create_dir_all(root.join("dist")).unwrap();
+        fs::create_dir_all(root.join("build")).unwrap();
+        fs::write(
+            root.join("vendor/dep/lib.js"),
+            format!("const V = \"{token}\";\n"),
+        )
+        .unwrap();
+        fs::write(root.join("dist/app.js"), format!("var k=\"{token}\";\n")).unwrap();
+        fs::write(root.join("build/c.txt"), format!("k={token}\n")).unwrap();
+        git_commit(&root);
+        let findings = text_secrets(&root, &["dist/**".into()]);
+        assert!(
+            !findings
+                .iter()
+                .any(|finding| finding.file.starts_with("dist/")),
+            "{findings:?}"
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.file == "vendor/dep/lib.js"),
+            "{findings:?}"
+        );
+        assert!(
+            findings.iter().any(|finding| finding.file == "build/c.txt"),
+            "{findings:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn git_submodule_gitlink_does_not_fail_the_secrets_gate() {
+        let root = temp("secrets-git-submodule");
+        let sub = root.join("sub-repo");
+        fs::create_dir_all(&sub).unwrap();
+        fs::write(sub.join("README.md"), "nested\n").unwrap();
+        let git = |cwd: &std::path::Path, args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .arg("-C")
+                .arg(cwd)
+                .args(args)
+                .env("GIT_AUTHOR_NAME", "sc")
+                .env("GIT_AUTHOR_EMAIL", "sc@example.com")
+                .env("GIT_COMMITTER_NAME", "sc")
+                .env("GIT_COMMITTER_EMAIL", "sc@example.com")
+                .status()
+                .unwrap();
+            assert!(status.success(), "{args:?} in {cwd:?}");
+        };
+        git(&sub, &["init", "-q"]);
+        git(&sub, &["add", "-A"]);
+        git(&sub, &["commit", "-q", "-m", "sub"]);
+        fs::write(root.join("src.txt"), "ok\n").unwrap();
+        git(&root, &["init", "-q"]);
+        let hash = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&sub)
+            .arg("rev-parse")
+            .arg("HEAD")
+            .output()
+            .expect("rev-parse");
+        assert!(hash.status.success());
+        let hash = String::from_utf8_lossy(&hash.stdout).trim().to_string();
+        let index = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args([
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                "160000",
+                &hash,
+                "vendor/sub",
+            ])
+            .status()
+            .expect("update-index");
+        assert!(index.success());
+        fs::create_dir_all(root.join("vendor/sub")).unwrap();
+        git(&root, &["add", "src.txt"]);
+        git(&root, &["commit", "-q", "-m", "parent"]);
+        let findings = text_secrets(&root, &[]);
+        assert!(
+            !findings
+                .iter()
+                .any(|finding| finding.rule == "secrets.unreadable"),
+            "{findings:?}"
+        );
+        assert!(
+            !findings.iter().any(|finding| {
+                finding.severity == "error" && finding.rule.starts_with("secrets.")
+            }),
+            "{findings:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn elf_magic_skips_lossy_scan_for_runtime_tokens() {
+        let tail = ["Ab", "3k", "Qm", "9Z", "nR", "4p", "Lx", "7w"]
+            .iter()
+            .cycle()
+            .take(18)
+            .copied()
+            .collect::<String>();
+        let token = format!("ghp_{tail}");
+        let root = temp("secrets-elf-magic");
+        let mut bytes = vec![0x7f, b'E', b'L', b'F'];
+        bytes.resize(4 + 64, 0);
+        bytes.extend(token.as_bytes());
+        fs::write(root.join("tool"), &bytes).unwrap();
+        let findings = text_secrets(&root, &[]);
+        assert!(
+            !findings.iter().any(|finding| {
+                finding.file == "tool"
+                    && finding.severity == "error"
+                    && finding.rule.starts_with("secrets.")
+            }),
+            "{findings:?}"
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.file == "tool" && finding.rule == "secrets.skipped_object"),
+            "{findings:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn oversized_elf_is_skipped_not_partial() {
+        let tail = "x".repeat(32);
+        let token = format!("ghp_{tail}");
+        let root = temp("secrets-oversized-elf");
+        let mut bytes = vec![0x7f, b'E', b'L', b'F'];
+        bytes.resize(MAX_TEXT_BYTES as usize + 1, 0);
+        bytes.extend(token.as_bytes());
+        fs::write(root.join("big"), &bytes).unwrap();
+        let findings = text_secrets(&root, &[]);
+        assert!(
+            !findings
+                .iter()
+                .any(|finding| finding.rule == "secrets.partial"),
+            "{findings:?}"
+        );
+        assert!(
+            findings.iter().any(|finding| {
+                finding.file == "big" && finding.rule == "secrets.skipped_object"
             }),
             "{findings:?}"
         );

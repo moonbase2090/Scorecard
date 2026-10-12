@@ -14,6 +14,7 @@ Only the first file found is read. Command-line flags override the matching keys
 
 | Key | Default | Meaning |
 |---|---|---|
+| `install_agent_skills` | `true` | Allow installer hooks to install the Scorecard skill for detected agents. Hooks read this from the user config `~/.config/sc/analyzer.toml`. Set it to `false` to opt out. `SCORECARD_NO_AGENT_SKILLS=1` also skips automatic installation. |
 | `pack` | detected | Language pack when the tree has more than one marker. Same values as `--pack`. |
 | `toolchain` | empty | Rustup channel for check, test, coverage, and lint (`1.85.0`, `stable`, …). When set, Cargo uses that channel. When empty, a `rust-toolchain.toml` / `rust-toolchain` at or above the project clears an inherited `RUSTUP_TOOLCHAIN` so rustup reads the file; with no file, the inherited variable is left alone. |
 
@@ -21,7 +22,7 @@ Only the first file found is read. Command-line flags override the matching keys
 
 | Key | Default | Meaning |
 |---|---|---|
-| `gates.fail_on` | `["types", "tests", "crap", "secrets", "lint"]` | [Gates](gates.md) whose failures set exit 1. `--fail-on` overrides; already enforced failures remain in the report verdict. An unknown gate name is an error (exit 2). |
+| `gates.fail_on` | `["types", "tests", "crap", "secrets", "lint"]` | [Gates](gates.md) whose failures set exit 1. Set it to `["none"]` to suppress gate failures from the exit code. An empty list, blank value, mixed `none` list, or unknown gate is an error (exit 2). Enforced failures remain in the report verdict. |
 | `gates.crap_threshold` | `30` | A function with a [CRAP](../crap.md) score above this fails the `crap` gate. |
 | `gates.new_fn_untested_cc` | `15` | A function at or above this complexity with 0% measured coverage fails the `crap` gate (`complexity.untested`). With `--diff`, only new functions count. |
 
@@ -32,9 +33,20 @@ Only the first file found is read. Command-line flags override the matching keys
 | `scope.exclude` | `[]` | Additional paths to leave out of scans. A matching exclusion wins over `scope.include_generated`. |
 | `scope.include_generated` | `[]` | Paths that may reopen built-in generated or vendored directory skips, or generated file markers. `.gitignore` rules still apply. |
 
-All recursive scans respect `.gitignore`, including nested files. They also skip `.git`, `.hg`, `.svn`, `.sc`, and other dot-directories. The built-in generated and vendored directories are `target`, `dist`, `build`, `out`, `coverage`, `generated`, `vendor`, `node_modules`, `__pycache__`, `.next`, `.nuxt`, `.output`, `.turbo`, `.parcel-cache`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.tox`, `.venv`, `venv`, `.gradle`, `.yarn`, `bin`, `obj`, `Pods`, `Carthage`, `bower_components`, and `storybook-static`.
+To exclude committed test certificates in a public repository, add a narrow path pattern:
 
-Scorecard also skips source files whose first 16 KiB contain `@generated`, or both `Code generated` and `DO NOT EDIT`. Add an explicit path pattern to `scope.include_generated` to scan one of these files or reopen one of the listed directories. If `.gitignore` also excludes the path, remove that ignore rule or add a negation there. `scope.exclude` always takes precedence. When a generated or vendored path is scanned, every report lists it and suggests adding it to `scope.exclude`.
+```toml
+[scope]
+exclude = ["tests/certs/**"]
+```
+
+This skips files under `tests/certs/` from scans. Keep the pattern limited to test fixtures so real credentials elsewhere remain detectable.
+
+All recursive scans respect `.gitignore`, including nested files. They also skip `.git`, `.hg`, `.svn`, `.sc`, and other dot-directories. The built-in generated and vendored directories are `target`, `dist`, `build`, `out`, `cdk.out`, `coverage`, `generated`, `vendor`, `node_modules`, `__pycache__`, `.next`, `.nuxt`, `.output`, `.turbo`, `.parcel-cache`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.tox`, `.venv`, `venv`, `.gradle`, `.yarn`, `bin`, `obj`, `Pods`, `Carthage`, `bower_components`, and `storybook-static`. The secrets scan is different: in a git work tree it uses `git ls-files` (tracked and non-ignored untracked files), so committed secrets under those directories are still checked. Outside git it follows the directory and ignore rules above. Secret scanning includes generated files within the configured scope.
+
+Source analysis also skips source files whose first 16 KiB contain `@generated`, or both `Code generated` and `DO NOT EDIT`. Add an explicit path pattern to `scope.include_generated` to scan one of these files or reopen one of the listed directories. If `.gitignore` also excludes the path, remove that ignore rule or add a negation there. `scope.exclude` always takes precedence. When source analysis includes a generated or vendored path, every report lists it and suggests adding it to `scope.exclude`.
+
+If exclusions leave no files for secrets scanning, `secrets.empty_scope` fails the secrets gate. Restore the intended scan scope before treating the report as a completed check.
 
 ### `[engines]`
 

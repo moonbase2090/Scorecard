@@ -198,6 +198,7 @@ pub struct MutationSection {
     pub killed: u64,
     pub survived: u64,
     pub timeout: u64,
+    pub unviable: u64,
 }
 
 impl MutationSection {
@@ -208,8 +209,116 @@ impl MutationSection {
             killed: 0,
             survived: 0,
             timeout: 0,
+            unviable: 0,
         }
     }
+}
+
+/// Report-only test-value signals (`test_value` in JSON). Mutation is mirrored from `mutation`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TestValueMutation {
+    pub status: String,
+    pub score: Option<f64>,
+    pub killed: u64,
+    pub survived: u64,
+    pub timeout: u64,
+    pub unviable: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TestValueStub {
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TestValueWeakening {
+    pub status: String,
+    pub findings: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+impl TestValueWeakening {
+    pub fn skipped() -> Self {
+        Self::skipped_with_reason(None)
+    }
+
+    pub fn skipped_with_reason(reason: Option<String>) -> Self {
+        Self {
+            status: "skipped".into(),
+            findings: 0,
+            reason,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TestValueSection {
+    pub status: String,
+    pub mutation: TestValueMutation,
+    pub weakening: TestValueWeakening,
+    pub tautology: TestValueStub,
+    pub per_test: TestValueStub,
+    pub mix: TestValueStub,
+}
+
+impl TestValueSection {
+    pub fn assemble(mutation: &MutationSection, weakening: &TestValueWeakening) -> Option<Self> {
+        let mutation_enabled = mutation.status != "skipped";
+        let weakening_enabled = weakening.status != "skipped";
+        if !mutation_enabled && !weakening_enabled {
+            return None;
+        }
+        let status = overall_test_value_status(mutation, weakening);
+        Some(Self {
+            status,
+            mutation: TestValueMutation {
+                status: mutation.status.clone(),
+                score: mutation.score,
+                killed: mutation.killed,
+                survived: mutation.survived,
+                timeout: mutation.timeout,
+                unviable: mutation.unviable,
+            },
+            weakening: weakening.clone(),
+            tautology: TestValueStub {
+                status: "not_measured".into(),
+                reason: Some("not implemented".into()),
+            },
+            per_test: TestValueStub {
+                status: "skipped".into(),
+                reason: None,
+            },
+            mix: TestValueStub {
+                status: "skipped".into(),
+                reason: None,
+            },
+        })
+    }
+}
+
+fn overall_test_value_status(mutation: &MutationSection, weakening: &TestValueWeakening) -> String {
+    let mut ran = 0u8;
+    let mut partial = 0u8;
+    for status in [&mutation.status, &weakening.status] {
+        match status.as_str() {
+            "ran" => ran += 1,
+            "skipped" => {}
+            _ => partial += 1,
+        }
+    }
+    if ran > 0 && partial == 0 && (mutation.status == "skipped" || weakening.status == "skipped") {
+        return "partial".into();
+    }
+    if ran > 0 && partial == 0 {
+        return "ran".into();
+    }
+    if ran > 0 || partial > 0 {
+        return "partial".into();
+    }
+    "skipped".into()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -314,30 +423,53 @@ impl GeneratedFilesWarning {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Scorecard {
+/// Report identity. Flattened into the scorecard JSON object.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScorecardIdentity {
     pub version: String,
     pub id: String,
     pub repo: String,
     /// `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, `command`, `unknown`, or `ambiguous`.
     #[serde(default)]
     pub pack: String,
-    /// `rust-tests` selects Rust `#[test]` names. Every other pack uses `full-suite`.
+    /// `rust-tests` selects Rust `#[test]` names. `diff-tests` is the Python
+    /// pack on `--diff`. Tree mode and the other packs use `full-suite`.
     #[serde(default)]
     pub test_selection: String,
+}
+
+/// Git, caller intent, and the paths this run scored. Flattened into the scorecard JSON object.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScorecardContext {
     pub git: GitInfo,
     /// Caller-supplied goal. Not inferred from transcripts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intent: Option<String>,
     pub scope: Scope,
-    pub verdict: String,
+}
+
+/// Engines that ran and engines that were skipped. Flattened into the scorecard JSON object.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScorecardEngines {
     pub engines_run: Vec<String>,
     pub engines_skipped: Vec<String>,
+}
+
+/// Scores, gates, and diff metrics. Flattened into the scorecard JSON object.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScorecardMeasures {
     pub scores: Scores,
     pub gates: Vec<Gate>,
     pub metrics: Metrics,
+}
+
+/// Findings and the per-engine sections. Flattened into the scorecard JSON object.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScorecardSections {
     pub crap: CrapSection,
     pub mutation: MutationSection,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_value: Option<TestValueSection>,
     pub findings: Vec<Finding>,
     /// Generated or vendored source files included in this scan.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -347,6 +479,24 @@ pub struct Scorecard {
     /// Omitted when llm is off. Old scorecards load without this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub llm: Option<LlmSection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Scorecard {
+    #[serde(flatten)]
+    pub identity: ScorecardIdentity,
+    #[serde(flatten)]
+    pub context: ScorecardContext,
+    pub verdict: String,
+    #[serde(flatten)]
+    pub engines: ScorecardEngines,
+    #[serde(flatten)]
+    pub measures: ScorecardMeasures,
+    #[serde(flatten)]
+    pub sections: ScorecardSections,
+    /// Gates whose failures set exit 1. An empty list means no gate is selected.
+    #[serde(default)]
+    pub fail_on: Vec<String>,
     #[serde(default)]
     pub runs: Vec<RunRecord>,
 }
@@ -354,46 +504,58 @@ pub struct Scorecard {
 impl Scorecard {
     pub fn skeleton(repo: impl Into<String>, threshold: u32) -> Self {
         Self {
-            version: SCORECARD_VERSION.to_string(),
-            id: crate::new_scorecard_id(),
-            repo: repo.into(),
-            pack: "unknown".into(),
-            test_selection: "full-suite".into(),
-            git: GitInfo {
-                head: None,
-                dirty: false,
-                dirty_paths: Vec::new(),
+            identity: ScorecardIdentity {
+                version: SCORECARD_VERSION.to_string(),
+                id: crate::new_scorecard_id(),
+                repo: repo.into(),
+                pack: "unknown".into(),
+                test_selection: "full-suite".into(),
             },
-            scope: Scope {
-                mode: "tree".to_string(),
-                paths: Vec::new(),
-                base: None,
-                other_paths: None,
+            context: ScorecardContext {
+                git: GitInfo {
+                    head: None,
+                    dirty: false,
+                    dirty_paths: Vec::new(),
+                },
+                intent: None,
+                scope: Scope {
+                    mode: "tree".to_string(),
+                    paths: Vec::new(),
+                    base: None,
+                    other_paths: None,
+                },
             },
-            intent: None,
             verdict: "fail".to_string(),
-            engines_run: Vec::new(),
-            engines_skipped: vec![
-                "compile".into(),
-                "tests".into(),
-                "coverage".into(),
-                "complexity".into(),
-                "crap".into(),
-                "llm".into(),
-                "mutation".into(),
-            ],
-            scores: Scores::perfect(),
-            gates: Vec::new(),
-            metrics: Metrics::zeros(),
-            crap: CrapSection {
-                threshold,
-                worst: Vec::new(),
+            engines: ScorecardEngines {
+                engines_run: Vec::new(),
+                engines_skipped: vec![
+                    "compile".into(),
+                    "tests".into(),
+                    "coverage".into(),
+                    "complexity".into(),
+                    "crap".into(),
+                    "llm".into(),
+                    "mutation".into(),
+                ],
             },
-            mutation: MutationSection::skipped(),
-            findings: Vec::new(),
-            generated_files_warning: None,
-            spec: SpecSection::empty(),
-            llm: None,
+            measures: ScorecardMeasures {
+                scores: Scores::perfect(),
+                gates: Vec::new(),
+                metrics: Metrics::zeros(),
+            },
+            sections: ScorecardSections {
+                crap: CrapSection {
+                    threshold,
+                    worst: Vec::new(),
+                },
+                mutation: MutationSection::skipped(),
+                test_value: None,
+                findings: Vec::new(),
+                generated_files_warning: None,
+                spec: SpecSection::empty(),
+                llm: None,
+            },
+            fail_on: Vec::new(),
             runs: Vec::new(),
         }
     }
@@ -409,15 +571,15 @@ mod tests {
         let mut card = Scorecard::skeleton("demo", 30);
         let json = serde_json::to_value(&card).unwrap();
         assert!(json["scope"].get("base").is_none());
-        card.scope.mode = "diff".into();
-        card.scope.base = Some("origin/main".into());
+        card.context.scope.mode = "diff".into();
+        card.context.scope.base = Some("origin/main".into());
         let json = serde_json::to_value(&card).unwrap();
         assert_eq!(json["scope"]["base"], "origin/main");
         // Scorecards written before the field existed still load.
         let old: Scope = serde_json::from_str(r#"{"mode":"tree","paths":[]}"#).unwrap();
         assert_eq!(old.base, None);
         assert_eq!(old.other_paths, None);
-        card.scope.other_paths = Some(40);
+        card.context.scope.other_paths = Some(40);
         let json = serde_json::to_value(&card).unwrap();
         assert_eq!(json["scope"]["other_paths"], 40);
     }
@@ -430,13 +592,47 @@ mod tests {
     }
 
     #[test]
+    fn test_value_section_assembles_mutation_and_weakening() {
+        let mutation = MutationSection {
+            status: "ran".into(),
+            score: Some(0.5),
+            killed: 2,
+            survived: 1,
+            timeout: 1,
+            unviable: 3,
+        };
+        let weakening = TestValueWeakening {
+            status: "ran".into(),
+            findings: 2,
+            reason: None,
+        };
+        let tv = TestValueSection::assemble(&mutation, &weakening).unwrap();
+        assert_eq!(tv.status, "ran");
+        assert_eq!(tv.mutation.killed, 2);
+        assert_eq!(tv.weakening.findings, 2);
+        assert_eq!(tv.tautology.status, "not_measured");
+    }
+
+    #[test]
+    fn test_value_weakening_only_is_partial() {
+        let mutation = MutationSection::skipped();
+        let weakening = TestValueWeakening {
+            status: "ran".into(),
+            findings: 0,
+            reason: None,
+        };
+        let tv = TestValueSection::assemble(&mutation, &weakening).unwrap();
+        assert_eq!(tv.status, "partial");
+    }
+
+    #[test]
     fn llm_section_is_optional_and_round_trips() {
         let mut card = Scorecard::skeleton("demo", 30);
         let json = serde_json::to_value(&card).unwrap();
         assert!(json.get("llm").is_none());
         let old: Scorecard = serde_json::from_value(json).unwrap();
-        assert!(old.llm.is_none());
-        card.llm = Some(LlmSection::ran(
+        assert!(old.sections.llm.is_none());
+        card.sections.llm = Some(LlmSection::ran(
             "ollama",
             "qwen2.5-coder",
             4,
@@ -447,98 +643,112 @@ mod tests {
         assert_eq!(json["llm"]["verdict"], "no gaps");
         assert_eq!(json["llm"]["notes"][0], "checked src/lib.rs");
         let back: Scorecard = serde_json::from_value(json).unwrap();
-        assert_eq!(back.llm.unwrap().status, "ran");
+        assert_eq!(back.sections.llm.unwrap().status, "ran");
     }
 
     #[test]
     fn field_names_match_the_contract() {
         let card = Scorecard {
-            version: "0.1".into(),
-            id: "abc".into(),
-            repo: ".".into(),
-            pack: "rust".into(),
-            test_selection: "full-suite".into(),
-            git: GitInfo {
-                head: Some("abc123".into()),
-                dirty: true,
-                dirty_paths: Vec::new(),
+            identity: ScorecardIdentity {
+                version: "0.1".into(),
+                id: "abc".into(),
+                repo: ".".into(),
+                pack: "rust".into(),
+                test_selection: "full-suite".into(),
             },
-            scope: Scope {
-                mode: "tree".into(),
-                paths: vec!["src/parse.rs".into()],
-                base: None,
-                other_paths: None,
+            context: ScorecardContext {
+                git: GitInfo {
+                    head: Some("abc123".into()),
+                    dirty: true,
+                    dirty_paths: Vec::new(),
+                },
+                intent: Some("keep parse_input under the CRAP threshold".into()),
+                scope: Scope {
+                    mode: "tree".into(),
+                    paths: vec!["src/parse.rs".into()],
+                    base: None,
+                    other_paths: None,
+                },
             },
-            intent: Some("keep parse_input under the CRAP threshold".into()),
             verdict: "fail".into(),
-            engines_run: vec!["compile".into(), "tests".into()],
-            engines_skipped: vec!["llm".into(), "mutation".into()],
-            scores: Scores {
-                correctness: 0.62,
-                efficiency: 0.81,
-                maintainability: 0.54,
-                security: 0.9,
-                a11y: 1.0,
+            fail_on: vec!["types".into(), "tests".into()],
+            engines: ScorecardEngines {
+                engines_run: vec!["compile".into(), "tests".into()],
+                engines_skipped: vec!["llm".into(), "mutation".into()],
             },
-            gates: vec![
-                Gate {
-                    id: "types".into(),
-                    pass: true,
-                    enforced: true,
-                    reason: None,
+            measures: ScorecardMeasures {
+                scores: Scores {
+                    correctness: 0.62,
+                    efficiency: 0.81,
+                    maintainability: 0.54,
+                    security: 0.9,
+                    a11y: 1.0,
                 },
-                Gate {
-                    id: "crap".into(),
-                    pass: false,
-                    enforced: true,
-                    reason: Some("4 functions over threshold".into()),
+                gates: vec![
+                    Gate {
+                        id: "types".into(),
+                        pass: true,
+                        enforced: true,
+                        reason: None,
+                    },
+                    Gate {
+                        id: "crap".into(),
+                        pass: false,
+                        enforced: true,
+                        reason: Some("4 functions over threshold".into()),
+                    },
+                ],
+                metrics: Metrics {
+                    loc_changed: 1840,
+                    files_changed: 12,
+                    coverage_changed: 0.64,
+                    crap_max: 156.0,
+                    crap_over_threshold: 4,
+                    hallucinated_imports: 1,
+                    undeclared_dependencies: 2,
                 },
-            ],
-            metrics: Metrics {
-                loc_changed: 1840,
-                files_changed: 12,
-                coverage_changed: 0.64,
-                crap_max: 156.0,
-                crap_over_threshold: 4,
-                hallucinated_imports: 1,
-                undeclared_dependencies: 2,
             },
-            crap: CrapSection {
-                threshold: 30,
-                worst: vec![CrapFunction {
-                    symbol: "parse_input".into(),
+            sections: ScorecardSections {
+                crap: CrapSection {
+                    threshold: 30,
+                    worst: vec![CrapFunction {
+                        symbol: "parse_input".into(),
+                        file: "src/parse.rs".into(),
+                        cc: 12,
+                        coverage: 0.0,
+                        crap: 156.0,
+                    }],
+                },
+                mutation: MutationSection::skipped(),
+                test_value: None,
+                findings: vec![Finding {
+                    id: "crap:src/parse.rs:parse_input".into(),
+                    rule: "crap.over_threshold".into(),
+                    engine: "crap".into(),
+                    severity: "error".into(),
                     file: "src/parse.rs".into(),
-                    cc: 12,
-                    coverage: 0.0,
-                    crap: 156.0,
+                    span: Some(Span {
+                        start_line: 42,
+                        start_col: 1,
+                        end_line: 88,
+                        end_col: 2,
+                    }),
+                    symbol: Some("parse_input".into()),
+                    message: "CRAP 156 (CC=12, cov=0%) exceeds threshold 30".into(),
+                    evidence: json!({"cc": 12, "coverage": 0.0, "crap": 156.0}),
+                    suggested_action: Some(
+                        "Add tests covering branches or split the function".into(),
+                    ),
+                    disposition: String::new(),
                 }],
+                generated_files_warning: None,
+                spec: SpecSection {
+                    path: Some("TASK.md".into()),
+                    gaps: vec![],
+                    llm_rounds: None,
+                },
+                llm: None,
             },
-            mutation: MutationSection::skipped(),
-            findings: vec![Finding {
-                id: "crap:src/parse.rs:parse_input".into(),
-                rule: "crap.over_threshold".into(),
-                engine: "crap".into(),
-                severity: "error".into(),
-                file: "src/parse.rs".into(),
-                span: Some(Span {
-                    start_line: 42,
-                    start_col: 1,
-                    end_line: 88,
-                    end_col: 2,
-                }),
-                symbol: Some("parse_input".into()),
-                message: "CRAP 156 (CC=12, cov=0%) exceeds threshold 30".into(),
-                evidence: json!({"cc": 12, "coverage": 0.0, "crap": 156.0}),
-                suggested_action: Some("Add tests covering branches or split the function".into()),
-                disposition: String::new(),
-            }],
-            generated_files_warning: None,
-            spec: SpecSection {
-                path: Some("TASK.md".into()),
-                gaps: vec![],
-                llm_rounds: None,
-            },
-            llm: None,
             runs: vec![RunRecord {
                 engine: "tests".into(),
                 command: "cargo test".into(),
@@ -547,6 +757,24 @@ mod tests {
                 budget_ms: None,
             }],
         };
+
+        assert_eq!(
+            serde_json::to_string(&card).unwrap(),
+            include_str!("golden/scorecard-contract.json"),
+            "compact scorecard JSON changed"
+        );
+        assert_eq!(
+            serde_json::to_string_pretty(&card).unwrap(),
+            include_str!("golden/scorecard-contract.pretty.json"),
+            "pretty scorecard JSON changed"
+        );
+        let back: Scorecard =
+            serde_json::from_str(include_str!("golden/scorecard-contract.json")).unwrap();
+        assert_eq!(
+            serde_json::to_string(&back).unwrap(),
+            include_str!("golden/scorecard-contract.json"),
+            "reloaded scorecard JSON changed"
+        );
 
         let v = serde_json::to_value(&card).unwrap();
         for key in [

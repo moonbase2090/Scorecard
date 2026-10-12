@@ -824,7 +824,7 @@ mod tests {
         let fns = python_functions(&dir, &paths);
         assert_eq!(fns.len(), 1);
         assert_eq!(fns[0].symbol, "choose");
-        assert!(fns[0].cc >= 2, "cc {}", fns[0].cc);
+        assert_eq!(fns[0].cc, 2, "cc {}", fns[0].cc);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -832,27 +832,27 @@ mod tests {
     fn each_pack_counts_a_branch() {
         let java = scan_text("App.java", "class App {\n    int choose(int n) {\n        if (n > 0) {\n            return 1;\n        }\n        return 0;\n    }\n}\n", &Lang::C);
         assert_eq!(java[0].symbol, "choose");
-        assert!(java[0].cc >= 2, "java {}", java[0].cc);
+        assert_eq!(java[0].cc, 2, "java {}", java[0].cc);
         let node = scan_text(
             "app.js",
             "function choose(n) {\n  if (n) return 1;\n  return 0;\n}\n",
             &Lang::C,
         );
         assert_eq!(node[0].symbol, "choose");
-        assert!(node[0].cc >= 2, "node {}", node[0].cc);
+        assert_eq!(node[0].cc, 2, "node {}", node[0].cc);
         let php = scan_text(
             "app.php",
             "<?php\nfunction choose($n) {\n    if ($n) { return 1; }\n    return 0;\n}\n",
             &Lang::C,
         );
         assert_eq!(php[0].symbol, "choose");
-        assert!(php[0].cc >= 2, "php {}", php[0].cc);
+        assert_eq!(php[0].cc, 2, "php {}", php[0].cc);
         let bash = scan_bash(
             "run.sh",
             "choose() {\n  if [ \"$1\" ]; then\n    echo yes\n  fi\n}\n",
         );
         assert_eq!(bash[0].symbol, "choose");
-        assert!(bash[0].cc >= 2, "bash {}", bash[0].cc);
+        assert_eq!(bash[0].cc, 2, "bash {}", bash[0].cc);
     }
 
     #[test]
@@ -883,6 +883,6 @@ mod tests {
             &Lang::Go,
         );
         assert_eq!(fns[0].symbol, "main");
-        assert!(fns[0].cc >= 2, "cc {}", fns[0].cc);
+        assert_eq!(fns[0].cc, 2, "cc {}", fns[0].cc);
     }
 }

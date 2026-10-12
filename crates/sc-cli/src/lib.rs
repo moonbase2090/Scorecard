@@ -5,8 +5,10 @@
 
 mod format;
 mod pretty;
+mod progress;
 mod report;
 mod setup;
+mod skills;
 mod user_config;
 
 use std::fs;
@@ -43,17 +45,21 @@ struct AnalyzeArgs {
     /// Omitted: `pretty` when stdout is a terminal, otherwise `json`.
     #[arg(long, value_parser = ["json", "pretty", "md", "sarif", "html", "all"])]
     format: Option<String>,
-    /// Also write the report to this path.
+    /// Also write the report to this path. Stdout prints a short summary.
+    /// Without this flag, stdout is the full report.
     #[arg(long)]
     out: Option<PathBuf>,
-    /// Gates that set exit 1 when they fail. The report verdict still reflects every enforced gate.
+    /// Gates that set exit 1 when they fail. Use `none` by itself to suppress every gate failure.
+    /// An empty list is invalid. The report verdict still reflects every enforced gate.
     /// Default: types,tests,crap,secrets,lint.
     #[arg(long, value_name = "LIST")]
     fail_on: Option<String>,
     /// Pack override when several manifests match: rust, node, python, bash, go, java, csharp, php, cpp, web, or command.
     #[arg(long, value_name = "PACK")]
     pack: Option<String>,
-    /// Score only the git diff against BASE. Omit BASE to use HEAD~1, else main.
+    /// Score only the git diff against BASE. Omit BASE for AUTO (HEAD~1, else
+    /// main, else master). A candidate that is HEAD itself is skipped. AUTO
+    /// and a missing explicit BASE exit 2 with verdict fail.
     #[arg(long, num_args = 0..=1, default_missing_value = "AUTO")]
     diff: Option<String>,
     /// Compare `--diff` BASE to this commit instead of the worktree.
@@ -80,6 +86,9 @@ struct AnalyzeArgs {
     /// Path to analyzer.toml. Default: ./analyzer.toml, then ~/.config/sc/analyzer.toml.
     #[arg(long)]
     config: Option<PathBuf>,
+    /// Suppress the progress spinner on stderr.
+    #[arg(long)]
+    quiet: bool,
 }
 
 #[derive(Subcommand)]
@@ -106,6 +115,11 @@ enum Commands {
     },
     /// Install the agent skill and register the sc-mcp server for this user.
     Setup,
+    /// Install the Scorecard skill for coding agents.
+    Skills {
+        #[command(subcommand)]
+        command: skills::SkillsCommand,
+    },
 }
 
 struct View<'a> {
@@ -113,12 +127,26 @@ struct View<'a> {
     file_format: &'a str,
     color: bool,
     width: usize,
+    tty: bool,
+}
+
+/// Pick what lands on stdout. With `--out`, print the short summary in
+/// every environment and write the chosen format to the file. Without
+/// `--out`, stdout is the chosen format, so `sc analyze --format json | jq .`
+/// is unchanged.
+fn stdout_body_format(stdout_format: &str, has_out: bool, _tty: bool) -> &str {
+    if has_out {
+        "pretty"
+    } else {
+        stdout_format
+    }
 }
 
 pub fn run() -> i32 {
     let cli = Cli::parse();
     match cli.command {
         Commands::Setup => setup::run(),
+        Commands::Skills { command } => skills::run(command),
         Commands::Config { command } => match command {
             ConfigCmd::Path => user_config::run_path(),
             ConfigCmd::Init { force } => user_config::run_init(force),
@@ -143,6 +171,7 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
         intent,
         budget_seconds,
         config,
+        quiet,
     } = args;
     let tty = io::IsTerminal::is_terminal(&io::stdout());
     let stdout_format = pretty::stdout_format(format.as_deref(), tty);
@@ -157,6 +186,7 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
             std::env::var("CLICOLOR").ok().as_deref(),
         ),
         width: pretty::term_width(),
+        tty,
     };
     let path = path.unwrap_or_else(|| PathBuf::from("."));
     let repo = display_repo(&path);
@@ -203,6 +233,7 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
     let mut loaded = match load_config_file(config_path.as_deref()) {
         Ok(config) => config,
         Err(err) => {
+            let _ = writeln!(io::stderr(), "sc: {err}");
             let card = early_card(&repo, "config.invalid", "config", &err);
             return emit(
                 &mut stdout,
@@ -218,6 +249,7 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
         match normalize_gates(&[list]) {
             Ok(gates) => loaded.gates.fail_on = gates,
             Err(err) => {
+                let _ = writeln!(io::stderr(), "sc: {err}");
                 let card = early_card(&repo, "config.invalid", "config", &err);
                 return emit(
                     &mut stdout,
@@ -261,6 +293,15 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
         None => Vec::new(),
     };
     let generated_paths = generated_output_paths(&root, out.as_deref(), &file_format);
+    // The spinner animates on stderr only; stdout stays byte-identical.
+    // It starts just before the long analysis run and is cleared before
+    // the report prints.
+    let stderr_tty = io::IsTerminal::is_terminal(&io::stderr());
+    let spinner = if progress::should_show_from_env(stderr_tty, quiet) {
+        Some(progress::Spinner::start("Detecting pack"))
+    } else {
+        None
+    };
     let output = analyze_with_generated_paths(
         AnalyzeRequest {
             root,
@@ -275,9 +316,13 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
             mutation_override: mutation,
             llm_override: llm.map(|value| value == "on"),
             intent,
+            progress: spinner.as_ref().map(progress::Spinner::updater),
         },
         &generated_paths,
     );
+    if let Some(spinner) = spinner {
+        spinner.finish();
+    }
     emit(
         &mut stdout,
         &view,
@@ -320,7 +365,24 @@ fn emit(
             code = 2;
         }
     }
-    let body = match view.stdout_format {
+    if code == 0 {
+        let failed_enforced: Vec<_> = card
+            .measures
+            .gates
+            .iter()
+            .filter(|gate| gate.enforced && !gate.pass)
+            .map(|gate| gate.id.as_str())
+            .collect();
+        if !failed_enforced.is_empty() {
+            let _ = writeln!(
+                io::stderr(),
+                "sc: exit 0 although enforced gates failed: {} (not in --fail-on)",
+                failed_enforced.join(", ")
+            );
+        }
+    }
+    note_unresolved_diff_base(card, status);
+    let body = match stdout_body_format(view.stdout_format, out.is_some(), view.tty) {
         "md" => md,
         "sarif" => sarif,
         // HTML to a terminal is noise; `all` keeps JSON+Markdown on stdout
@@ -332,6 +394,21 @@ fn emit(
     };
     let _ = writeln!(stdout, "{body}");
     code
+}
+
+fn note_unresolved_diff_base(card: &Scorecard, status: RunStatus) {
+    if status != RunStatus::AnalyzerError {
+        return;
+    }
+    let Some(finding) = card.sections.findings.iter().find(|finding| {
+        finding.rule == "engine.unavailable"
+            && (finding.message.contains("fetch-depth")
+                || finding.message.contains("ref not found"))
+    }) else {
+        return;
+    };
+    let line = finding.message.replace(['\n', '\r'], " ");
+    let _ = writeln!(io::stderr(), "{line}");
 }
 
 fn write_reports(
@@ -459,7 +536,7 @@ fn display_repo(path: &Path) -> String {
 
 fn early_card(repo: &str, rule: &str, engine: &str, message: &str) -> Scorecard {
     let mut card = Scorecard::skeleton(repo, 30);
-    card.version = SCORECARD_VERSION.to_string();
+    card.identity.version = SCORECARD_VERSION.to_string();
     let severity = if rule == "engine.unavailable" {
         "warning"
     } else {
@@ -470,7 +547,7 @@ fn early_card(repo: &str, rule: &str, engine: &str, message: &str) -> Scorecard 
     } else {
         format!("{engine}:{rule}")
     };
-    card.findings.push(Finding {
+    card.sections.findings.push(Finding {
         id,
         rule: rule.to_string(),
         engine: engine.to_string(),
@@ -483,7 +560,7 @@ fn early_card(repo: &str, rule: &str, engine: &str, message: &str) -> Scorecard 
         suggested_action: Some("Fix the analyzer invocation and re-run".into()),
         disposition: String::new(),
     });
-    card.gates = vec![
+    card.measures.gates = vec![
         Gate {
             id: "types".into(),
             pass: false,
@@ -503,8 +580,60 @@ fn early_card(repo: &str, rule: &str, engine: &str, message: &str) -> Scorecard 
             reason: Some("not run".into()),
         },
     ];
-    card.scores = compute_scores(&card.findings);
+    card.measures.scores = compute_scores(&card.sections.findings);
     card.verdict = "fail".into();
-    apply_disposition(&mut card.findings);
+    apply_disposition(&mut card.sections.findings);
     card
+}
+
+#[cfg(test)]
+mod skill_command_docs_test {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn every_top_level_command_is_named_in_the_embedded_skill() {
+        let skill = include_str!("../../../skills/scorecard/SKILL.md");
+        for command in Cli::command().get_subcommands() {
+            let name = command.get_name();
+            assert!(
+                skill.contains(&format!("`sc {name}")),
+                "top-level command `sc {name}` is missing from skills/scorecard/SKILL.md"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod stdout_body_format_tests {
+    use super::*;
+
+    #[test]
+    fn out_on_a_terminal_prints_the_summary_otherwise_the_full_report() {
+        // (stdout_format, has_out, tty) -> body format
+        let cases = [
+            ("html", true, true, "pretty"),
+            ("md", true, true, "pretty"),
+            ("sarif", true, true, "pretty"),
+            ("json", true, true, "pretty"),
+            ("all", true, true, "pretty"),
+            ("pretty", true, true, "pretty"),
+            ("html", true, false, "pretty"),
+            ("md", true, false, "pretty"),
+            ("sarif", true, false, "pretty"),
+            ("json", true, false, "pretty"),
+            ("all", true, false, "pretty"),
+            ("html", false, true, "html"),
+            ("json", false, true, "json"),
+            ("json", false, false, "json"),
+            ("pretty", false, true, "pretty"),
+        ];
+        for (format, has_out, tty, expected) in cases {
+            assert_eq!(
+                stdout_body_format(format, has_out, tty),
+                expected,
+                "format={format} has_out={has_out} tty={tty}"
+            );
+        }
+    }
 }

@@ -252,18 +252,50 @@ pub struct FileDelta {
 
 pub fn resolve_base(root: &Path, requested: &str) -> Result<String, String> {
     if requested != "AUTO" {
-        return Ok(requested.to_string());
-    }
-    for candidate in ["HEAD~1", "main", "master", "HEAD"] {
-        if git_ok(root, &["rev-parse", "--verify", "--quiet", candidate]) {
-            return Ok(candidate.to_string());
+        if git_ok(root, &["rev-parse", "--verify", "--quiet", requested]) {
+            return Ok(requested.to_string());
         }
+        return Err(format!(
+            "--diff {requested}: ref not found in this checkout. \
+             In GitHub Actions set fetch-depth: 0 on actions/checkout, \
+             or run git fetch origin main."
+        ));
     }
-    Err("cannot resolve a diff base; pass --diff BASE".into())
+    let head = git(root, &["rev-parse", "HEAD"])
+        .map(|sha| sha.trim().to_string())
+        .unwrap_or_default();
+    for candidate in ["HEAD~1", "main", "master"] {
+        let Ok(sha) = git(root, &["rev-parse", "--verify", "--quiet", candidate]) else {
+            continue;
+        };
+        // A branch name that is HEAD (depth-1 clone of main or master, or the
+        // only commit on that branch) diffs the commit against itself.
+        if sha.trim() == head {
+            continue;
+        }
+        return Ok(candidate.to_string());
+    }
+    // No history to diff against: HEAD would score zero paths and let the
+    // gates pass silently, so fail loudly instead. Explicit --diff HEAD
+    // still works for pre-commit flows.
+    let shallow = git(root, &["rev-parse", "--is-shallow-repository"])
+        .map(|output| output.trim() == "true")
+        .unwrap_or(false);
+    let mut message = String::from(
+        "cannot resolve a diff base automatically (tried HEAD~1, main, master). \
+         Fetch full history (clone with fetch-depth: 0, or git fetch --unshallow) \
+         or pass an explicit base with --diff BASE.",
+    );
+    if shallow {
+        message.push_str(" This looks like a shallow clone.");
+    }
+    Err(message)
 }
 
-pub fn diff_files(root: &Path, base: &str, head: Option<&str>) -> Result<Vec<FileDelta>, String> {
-    let prefix = repo_prefix(root)?;
+/// Every changed path relative to `root`, including untracked files when
+/// `head` is the worktree. Extensions are not filtered; Rust keeps `.rs`
+/// in `diff_files`.
+pub fn changed_rels(root: &Path, base: &str, head: Option<&str>) -> Result<Vec<String>, String> {
     let names = git_diff_names(root, base, head)?;
     let untracked = if head.is_none() {
         git(root, &["ls-files", "--others", "--exclude-standard"]).unwrap_or_default()
@@ -273,12 +305,62 @@ pub fn diff_files(root: &Path, base: &str, head: Option<&str>) -> Result<Vec<Fil
     let mut rels = BTreeSet::new();
     for line in names.lines().chain(untracked.lines()) {
         let rel = line.trim().replace('\\', "/");
-        if rel.ends_with(".rs") {
+        if !rel.is_empty() {
             rels.insert(rel);
         }
     }
+    Ok(rels.into_iter().collect())
+}
+
+/// Added lines in `rels` between `base` and `head` (or the worktree).
+/// Untracked paths count every line in the file.
+pub fn added_lines(root: &Path, base: &str, head: Option<&str>, rels: &BTreeSet<String>) -> u64 {
+    let mut args = vec!["diff", "--numstat", "--relative", base];
+    if let Some(head) = head {
+        args.push(head);
+    }
+    let text = git(root, &args).unwrap_or_default();
+    let mut total = 0u64;
+    let mut seen = BTreeSet::new();
+    for line in text.lines() {
+        let mut parts = line.split('\t');
+        let Some(added) = parts.next() else {
+            continue;
+        };
+        let _deleted = parts.next();
+        let Some(path) = parts.next() else {
+            continue;
+        };
+        let path = path.trim().replace('\\', "/");
+        if !rels.contains(&path) {
+            continue;
+        }
+        seen.insert(path);
+        if added == "-" {
+            continue;
+        }
+        total += added.parse::<u64>().unwrap_or(0);
+    }
+    for rel in rels {
+        if seen.contains(rel) {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(root.join(rel)) else {
+            continue;
+        };
+        total += text.lines().count() as u64;
+    }
+    total
+}
+
+pub fn diff_files(root: &Path, base: &str, head: Option<&str>) -> Result<Vec<FileDelta>, String> {
+    let prefix = repo_prefix(root)?;
+    let rels = changed_rels(root, base, head)?;
     let mut out = Vec::new();
     for rel in rels {
+        if !rel.ends_with(".rs") {
+            continue;
+        }
         let patch = git_diff_patch(root, base, head, &rel).unwrap_or_default();
         let git_rel = format!("{prefix}{rel}");
         let tracked = git_ok(root, &["cat-file", "-e", &format!("{base}:{git_rel}")]);
@@ -412,6 +494,140 @@ mod tests {
     fn parses_added_hunk_lines() {
         let patch = "@@ -2,0 +3,2 @@\n+a\n+b\n@@ -10 +12,0 @@\n";
         assert_eq!(parse_new_lines(patch), vec![3, 4]);
+    }
+
+    fn git_here(dir: &std::path::Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .env("GIT_AUTHOR_NAME", "sc")
+            .env("GIT_AUTHOR_EMAIL", "sc@example.com")
+            .env("GIT_COMMITTER_NAME", "sc")
+            .env("GIT_COMMITTER_EMAIL", "sc@example.com")
+            .status()
+            .unwrap();
+        assert!(status.success(), "{args:?}");
+    }
+
+    fn single_commit_repo(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("sc-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("src/lib.rs"), "pub fn old() -> i32 { 1 }\n").unwrap();
+        git_here(&dir, &["init"]);
+        git_here(&dir, &["add", "src/lib.rs"]);
+        git_here(&dir, &["commit", "-m", "old"]);
+        // A feature branch like CI's depth-1 checkout: main/master must not
+        // resolve, so AUTO has genuinely nothing to fall back to.
+        git_here(&dir, &["branch", "-m", "feat"]);
+        dir
+    }
+
+    #[test]
+    fn auto_base_errors_in_a_single_commit_checkout() {
+        let dir = single_commit_repo("diff-base");
+        let err = resolve_base(&dir, "AUTO")
+            .expect_err("AUTO must not silently fall back to HEAD with no history");
+        assert!(
+            err.contains("--diff BASE"),
+            "message must name the fix: {err}"
+        );
+        assert!(
+            err.contains("fetch-depth: 0"),
+            "message must name the CI fix: {err}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn auto_base_names_shallow_clones() {
+        let src = single_commit_repo("diff-base-src");
+        let dst = std::env::temp_dir().join(format!("sc-diff-base-shallow-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dst);
+        let status = std::process::Command::new("git")
+            .args(["clone", "--depth", "1"])
+            .arg(&src)
+            .arg(&dst)
+            .env("GIT_AUTHOR_NAME", "sc")
+            .env("GIT_AUTHOR_EMAIL", "sc@example.com")
+            .env("GIT_COMMITTER_NAME", "sc")
+            .env("GIT_COMMITTER_EMAIL", "sc@example.com")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let err = resolve_base(&dst, "AUTO")
+            .expect_err("AUTO must not silently fall back to HEAD in a shallow clone");
+        assert!(
+            err.contains("shallow"),
+            "message must name the shallow clone: {err}"
+        );
+        let _ = std::fs::remove_dir_all(&dst);
+        let _ = std::fs::remove_dir_all(&src);
+    }
+
+    #[test]
+    fn explicit_head_base_keeps_working() {
+        let dir = single_commit_repo("diff-base-head");
+        assert_eq!(resolve_base(&dir, "HEAD"), Ok("HEAD".to_string()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn auto_base_rejects_a_default_branch_that_is_head() {
+        for branch in ["main", "master"] {
+            let dir = single_commit_repo(&format!("diff-base-{branch}"));
+            git_here(&dir, &["branch", "-M", branch]);
+            let err = resolve_base(&dir, "AUTO").expect_err(branch);
+            assert!(
+                err.contains("fetch-depth: 0"),
+                "{branch} must name the fetch-depth fix: {err}"
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    #[test]
+    fn explicit_missing_base_names_the_ref_and_the_fix() {
+        let dir = single_commit_repo("diff-base-missing");
+        let err = resolve_base(&dir, "does-not-exist").expect_err("missing ref");
+        assert!(
+            err.contains("--diff does-not-exist:"),
+            "message must name the ref: {err}"
+        );
+        assert!(
+            err.contains("fetch-depth: 0"),
+            "message must name the fix: {err}"
+        );
+        assert!(
+            !err.contains("fatal:"),
+            "message must not be a raw git error: {err}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn changed_rels_keeps_python_files() {
+        let dir = std::env::temp_dir().join(format!("sc-diff-py-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("src/old.py"), "def old():\n    return 1\n").unwrap();
+        std::fs::write(dir.join("src/lib.rs"), "pub fn old() -> i32 { 1 }\n").unwrap();
+        git_here(&dir, &["init"]);
+        git_here(&dir, &["add", "."]);
+        git_here(&dir, &["commit", "-m", "base"]);
+        std::fs::write(dir.join("src/new.py"), "def new():\n    return 2\n").unwrap();
+        std::fs::write(dir.join("src/lib.rs"), "pub fn old() -> i32 { 2 }\n").unwrap();
+        let rels = changed_rels(&dir, "HEAD", None).unwrap();
+        assert!(rels.iter().any(|rel| rel == "src/new.py"), "{rels:?}");
+        assert!(rels.iter().any(|rel| rel == "src/lib.rs"), "{rels:?}");
+        assert!(!rels.iter().any(|rel| rel == "src/old.py"), "{rels:?}");
+        let py: BTreeSet<String> = rels
+            .into_iter()
+            .filter(|rel| rel.ends_with(".py"))
+            .collect();
+        assert_eq!(added_lines(&dir, "HEAD", None, &py), 2, "{py:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

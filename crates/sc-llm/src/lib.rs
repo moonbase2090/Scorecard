@@ -1034,16 +1034,23 @@ mod tests {
     #[test]
     fn review_stops_at_the_tool_round_limit() {
         let dir = test_tree();
-        let outcome = review_with(request(&dir, "spec", "http://127.0.0.1:1/v1"), |_, _, _| {
-            Ok(tool_response(
-                json!([{"id": "c1", "function": {"name": "nope", "arguments": "{}"}}]),
-            ))
-        });
+        let outcome = review_with(
+            LlmRequest {
+                max_tool_rounds: 0,
+                ..request(&dir, "spec", "http://127.0.0.1:1/v1")
+            },
+            |_, _, _| {
+                Ok(tool_response(
+                    json!([{"id": "c1", "function": {"name": "nope", "arguments": "{}"}}]),
+                ))
+            },
+        );
         assert_eq!(
             outcome.skipped.as_deref(),
             Some("llm response was not spec-gap json")
         );
-        assert!(outcome.rounds > 4);
+        // The default allows 36 tool rounds, then the forced verdict and its JSON retry.
+        assert_eq!(outcome.rounds, 38);
         std::fs::remove_dir_all(&dir).ok();
     }
 

@@ -5,6 +5,8 @@ sc analyze [PATH] [OPTIONS]
 sc config path
 sc config init [--force]
 sc setup
+sc skills install [--agent AGENT] [--check] [--force]
+sc help [COMMAND]
 ```
 
 ## sc analyze
@@ -14,10 +16,10 @@ sc setup
 | Flag | Default | Meaning |
 |---|---|---|
 | `--format FORMAT` | `pretty` on a terminal, `json` otherwise | `json`, `pretty`, `md`, `sarif`, `html`, or `all`. See [Output](#output). |
-| `--out PATH` | none | Also write the report to `PATH`. |
-| `--fail-on LIST` | `types,tests,crap,secrets,lint` | Comma-separated [gates](gates.md) whose failures set exit 1. Overrides `gates.fail_on`; already enforced failures remain in the report verdict. |
+| `--out PATH` | none | Also write the report to `PATH`. Stdout prints the short summary, including when it is not a terminal. Without this flag, stdout is the chosen `--format`. |
+| `--fail-on LIST` | `types,tests,crap,secrets,lint` | Comma-separated [gates](gates.md) whose failures set exit 1. Use `none` by itself to suppress gate failures from the exit code. Empty or blank lists are invalid. Overrides `gates.fail_on`; already enforced failures remain in the report verdict. |
 | `--pack PACK` | detected | `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, `web`, or `command`. Needed when the tree has two markers. See [packs](../packs.md). |
-| `--diff [BASE]` | off | Score only what changed against git `BASE`. Paths are relative to the project directory, including when that directory sits inside a larger git repository. Without `BASE`: `HEAD~1`, else `main`. Uncommitted changes count. |
+| `--diff [BASE]` | off | Score only what changed against git `BASE`. Paths are relative to the project directory, including when that directory sits inside a larger git repository. Python compiles, lints, and checks imports only in changed `.py` files, runs pytest only on changed `test_*.py` and `*_test.py` files, and drops secret findings on unchanged paths. Without `BASE` (AUTO): `HEAD~1`, else `main`, else `master`, skipping a candidate that is the same commit as `HEAD`. When none remain — a shallow clone, a single commit, or a depth-1 clone of `main` or `master` — the run exits 2 with verdict `fail` and one stderr line; fetch full history (`fetch-depth: 0`) or pass `--diff BASE`. A missing explicit base exits 2 the same way and names the ref. An explicit `--diff HEAD` still works. Uncommitted changes count. |
 | `--diff-head REV` | worktree | With `--diff`, compare `BASE` to commit `REV` instead of the worktree. |
 | `--paths FILE` | off | Score only the source files listed in `FILE`, one per line. Cannot be combined with `--diff`. |
 | `--spec FILE` | off | Check that files and public items named in `FILE` exist (`spec` gate). |
@@ -26,6 +28,9 @@ sc setup
 | `--intent TEXT` | none | What the change is meant to do. Stored on the scorecard. With `--llm on` and no `--spec`, this is enough to run the review. |
 | `--budget-seconds N` | `120` | Wall-clock budget for pack commands, in seconds. One clock for the whole run. A command still running at the deadline is killed, including its child processes, and the report records the timeout. |
 | `--config PATH` | see [config](config.md#where-sc-looks) | Config file to use. |
+| `--quiet` | off | Suppress the progress spinner on stderr. |
+
+While analysis runs, a spinner with the current step and elapsed time animates on stderr when it is a terminal (silent when piped, in CI, with `TERM=dumb`, or from `sc-mcp`); stdout is unchanged, so JSON/SARIF pipes are unaffected. `NO_COLOR` preserves this uncolored progress display, including step and elapsed-time updates during tests and coverage. Use `--quiet` to hide progress.
 
 Command-line flags override the matching config keys.
 
@@ -41,7 +46,23 @@ Print or create `~/.config/sc/analyzer.toml`. See [Configure](../how-to/config.m
 
 ## sc setup
 
-Installs the Scorecard agent skill and registers the `sc-mcp` server for the current user. No flags. See [Agents and MCP](../how-to/agents.md).
+Installs the Scorecard agent skill for the legacy agent locations and registers the `sc-mcp` server for the current user. It leaves existing skill files unchanged. No flags. See [Agents and MCP](../how-to/agents.md).
+
+## sc skills install
+
+Installs the embedded Scorecard skill. Default `--agent all` targets all supported integrations. Run `sc skills install --help` for the supported agent identifiers. `--agent codex` writes both Codex and shared locations. `--agent detected` targets only existing config directories or agents whose CLI is on `PATH`; when Codex is detected, it uses existing Codex/shared directories and creates `~/.codex` only when Codex is detected by its CLI and neither directory exists. This mode is used by the macOS package hook and honors automatic-install opt-outs.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--agent AGENT` | `all` | Agent identifier, `all`, or `detected`. Run `sc skills install --help` for supported values. |
+| `--check` | off | Check selected targets without writing. Exits 1 if a skill is missing or differs from the embedded copy. Cannot be combined with `--force`. |
+| `--force` | off | Replace an existing skill, including a user-edited copy. |
+
+Existing files that differ from the embedded skill are preserved unless `--force` is set. See [Agents and MCP](../how-to/agents.md) for destinations and automatic installation.
+
+## sc help
+
+Print general help with `sc help`, or command help with `sc help analyze`.
 
 ## Output
 
@@ -54,9 +75,13 @@ Installs the Scorecard agent skill and registers the `sc-mcp` server for the cur
 | `html` | Self-contained HTML page | Same HTML to `PATH` |
 | `all` | JSON, then Markdown | `.json`, `.md`, `.sarif`, and `.html` files next to `PATH` |
 
+With `--out`, stdout is the short summary and the third column is what is written to the file. Without `--out`, stdout is the second column.
+
 Every run also writes `.sc/last-scorecard.json`.
 
 SARIF stores the report verdict in `runs[0].properties.scorecardVerdict` and each gate's `pass` and `enforced` flags in `runs[0].properties.scorecardGates`.
+
+JSON includes the selected gates in `fail_on`. SARIF stores the same list in `runs[0].properties.fail_on`. If an enforced gate fails but is not selected, `sc` writes one stderr warning with the failed gate names.
 
 Scorecard excludes its saved report, cache and coverage files under `.sc/`, and report files selected by `--out` from the dirty-tree check. Other changes set `git.dirty` and appear in `git.dirty_paths`.
 
@@ -64,9 +89,9 @@ Scorecard excludes its saved report, cache and coverage files under `.sc/`, and 
 
 | Status | Meaning |
 |---|---|
-| 0 | No selected gate failed. The report verdict can still be `fail` if another enforced gate failed. |
+| 0 | No selected gate failed. `--fail-on none` deliberately selects no gates. If an enforced gate failed, `sc` names it in one stderr warning and the report verdict remains `fail`. |
 | 1 | A selected gate failed |
-| 2 | `sc` could not run: missing path, invalid config, a required toolchain missing, or compile or tests timed out |
+| 2 | `sc` could not run: missing path, invalid config (including an empty `--fail-on` or `gates.fail_on`), a required toolchain missing, or compile or tests timed out |
 
 A skipped coverage, mutation, or LLM engine never causes exit 2.
 

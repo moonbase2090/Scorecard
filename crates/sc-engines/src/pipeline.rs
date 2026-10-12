@@ -4,17 +4,19 @@
 //! Engines return structured findings. Nothing in this crate writes user-facing
 //! diagnostics; the CLI formats the scorecard.
 
+use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
 use sc_core::{
     apply_disposition, compute_scores, CrapSection, Finding, Gate, GitInfo, LlmSection, Metrics,
-    MutationSection, RunRecord, Scope, Scorecard, SpecSection, SCORECARD_VERSION,
+    MutationSection, RunRecord, Scope, Scorecard, SpecSection, TestValueSection, SCORECARD_VERSION,
 };
 use sc_graph::FunctionInfo;
 
 use crate::cargo_test::{targeted_test_names, test_findings};
+use crate::clippy::{clippy_workspace, first_clippy_diagnostic};
 use crate::command::{run_cargo, run_cmd, CommandError};
 use crate::compile::{generic_compile_failure, parse_compiler_messages};
 use crate::coverage::parse_coverage_json;
@@ -23,8 +25,15 @@ use crate::crap::{evaluate, unmatched_functions};
 use crate::mutation::run_mutation;
 use crate::scope::{empty_selection, Selection};
 use crate::spec_check::{check_spec, gap_value};
+use crate::weakening::run_weakening;
 
-#[derive(Debug, Clone)]
+/// Progress updates for a long analysis run (e.g. a CLI spinner).
+///
+/// Called with the current step label as each gate/pack command starts.
+/// Callbacks must be cheap and non-blocking; they never affect the result.
+pub type ProgressCallback = std::sync::Arc<dyn Fn(&str) + Send + Sync>;
+
+#[derive(Clone)]
 pub struct AnalyzeRequest {
     pub root: PathBuf,
     pub repo: String,
@@ -38,6 +47,34 @@ pub struct AnalyzeRequest {
     pub mutation_override: Option<String>,
     pub llm_override: Option<bool>,
     pub intent: Option<String>,
+    pub progress: Option<ProgressCallback>,
+}
+
+impl std::fmt::Debug for AnalyzeRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AnalyzeRequest")
+            .field("root", &self.root)
+            .field("repo", &self.repo)
+            .field("fail_on", &self.fail_on)
+            .field("budget", &self.budget)
+            .field("config", &self.config)
+            .field("diff_base", &self.diff_base)
+            .field("diff_head", &self.diff_head)
+            .field("path_list", &self.path_list)
+            .field("spec_path", &self.spec_path)
+            .field("mutation_override", &self.mutation_override)
+            .field("llm_override", &self.llm_override)
+            .field("intent", &self.intent)
+            .field("progress", &self.progress.as_ref().map(|_| "..."))
+            .finish()
+    }
+}
+
+/// Report the current analysis step to the request's progress callback, if any.
+fn report(request: &AnalyzeRequest, step: &str) {
+    if let Some(progress) = &request.progress {
+        progress(step);
+    }
 }
 
 const MAX_UNMATCHED_FUNCTION_EVIDENCE: usize = 20;
@@ -72,6 +109,7 @@ pub fn analyze_with_generated_paths(
 ) -> AnalyzeOutput {
     // Snapshot Git state before any engine runs and exclude Scorecard's saved
     // report and requested output files from earlier runs.
+    report(&request, "Detecting pack");
     let git = git_info(&request.root, generated_paths);
     match crate::pack::detect_with_generated(
         &request.root,
@@ -131,6 +169,7 @@ fn analyze_blocked(
         },
         gate("lint", false, message),
     ];
+    report(&request, "Writing report");
     finish(Draft {
         root: request.root.clone(),
         repo: request.repo,
@@ -160,6 +199,7 @@ fn analyze_blocked(
         threshold: request.config.gates.crap_threshold,
         worst: Vec::new(),
         mutation: MutationSection::skipped(),
+        test_value: None,
         spec: SpecSection::empty(),
         intent: request.intent.clone(),
         llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),
@@ -170,6 +210,7 @@ fn analyze_blocked(
 }
 
 fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
+    report(&request, "Checking markup");
     let mut findings = Vec::new();
     let source_scan = crate::poly_cc::scan_for_pack(
         &request.root,
@@ -208,6 +249,7 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
             ));
         }
     }
+    report(&request, "Checking secrets");
     let secrets = crate::pack::text_secrets_with_generated(
         &request.root,
         &request.config.scope.exclude,
@@ -218,6 +260,7 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         .filter(|finding| finding.severity == "error")
         .count();
     findings.extend(secrets);
+    report(&request, "Scoring complexity (crap)");
     let html_errors = findings
         .iter()
         .filter(|finding| finding.engine == "html" && finding.severity == "error")
@@ -250,14 +293,16 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         .filter(|finding| finding.engine == "a11y")
         .count();
     let mut fail_on = request.fail_on.clone();
-    if html_enforced && !fail_on.iter().any(|gate| gate == "html") {
-        fail_on.push("html".into());
-    }
-    if links_enforced && !fail_on.iter().any(|gate| gate == "links") {
-        fail_on.push("links".into());
-    }
-    if a11y_enforced && !fail_on.iter().any(|gate| gate == "a11y") {
-        fail_on.push("a11y".into());
+    if !fail_on.is_empty() {
+        if html_enforced && !fail_on.iter().any(|gate| gate == "html") {
+            fail_on.push("html".into());
+        }
+        if links_enforced && !fail_on.iter().any(|gate| gate == "links") {
+            fail_on.push("links".into());
+        }
+        if a11y_enforced && !fail_on.iter().any(|gate| gate == "a11y") {
+            fail_on.push("a11y".into());
+        }
     }
     let gates = vec![
         mode_gate(
@@ -306,6 +351,7 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
             },
         ),
     ];
+    report(&request, "Writing report");
     finish(Draft {
         root: request.root.clone(),
         repo: request.repo,
@@ -359,6 +405,7 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         threshold: request.config.gates.crap_threshold,
         worst: crap.worst,
         mutation: MutationSection::skipped(),
+        test_value: None,
         spec: SpecSection::empty(),
         intent: request.intent.clone(),
         llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),
@@ -476,6 +523,7 @@ fn analyze_unsupported(
     };
     let started = crate::pack_cov::run_start();
     crate::pack_cov::clear(&request.root);
+    report(&request, "Running tests");
     let tools = crate::toolchain::run_with_generated(
         pack,
         &request.root,
@@ -486,10 +534,15 @@ fn analyze_unsupported(
         &request.config.scope.include_generated,
     );
     let mut findings = tools.findings;
-    findings.push(unavailable(
-        "sca",
-        "dependency check is not implemented for this pack",
-    ));
+    // Command packs have no dependency manifest to check. Recording that as a
+    // warning made every `--pack command` run look broken.
+    if pack != crate::pack::PackId::Command {
+        findings.push(unavailable(
+            "sca",
+            "dependency check is not implemented for this pack",
+        ));
+    }
+    report(&request, "Checking secrets");
     let secrets = crate::pack::text_secrets_with_generated(
         &request.root,
         &request.config.scope.exclude,
@@ -528,7 +581,7 @@ fn analyze_unsupported(
     let mut gates = tools.gates;
     if !jsx_files.is_empty() {
         let enforced = request.config.a11y.enforce || fail_on.iter().any(|gate| gate == "a11y");
-        if enforced && !fail_on.iter().any(|gate| gate == "a11y") {
+        if !fail_on.is_empty() && enforced && !fail_on.iter().any(|gate| gate == "a11y") {
             fail_on.push("a11y".into());
         }
         gates.push(mode_gate(
@@ -566,6 +619,7 @@ fn analyze_unsupported(
     } else {
         crate::pack_cov::load(pack.as_str(), &request.root, &functions, started)
     };
+    report(&request, "Scoring complexity (crap)");
     let crap = crate::crap::evaluate(
         &functions,
         coverage.as_ref(),
@@ -633,6 +687,7 @@ fn analyze_unsupported(
             format!("{secret_errors} secrets")
         },
     ));
+    report(&request, "Writing report");
     finish(Draft {
         root: request.root.clone(),
         repo: request.repo,
@@ -657,6 +712,9 @@ fn analyze_unsupported(
             if coverage.is_none() {
                 skipped.push("coverage".into());
             }
+            if pack == crate::pack::PackId::Command {
+                skipped.push("sca".into());
+            }
             skipped.push("complexity".into());
             skipped.push("llm".into());
             skipped.push("mutation".into());
@@ -675,6 +733,7 @@ fn analyze_unsupported(
         threshold: request.config.gates.crap_threshold,
         worst: crap.worst,
         mutation: MutationSection::skipped(),
+        test_value: None,
         spec: SpecSection::empty(),
         intent: request.intent.clone(),
         llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),
@@ -690,10 +749,59 @@ fn analyze_unsupported(
     })
 }
 
+struct PythonScope {
+    py: Option<BTreeSet<String>>,
+    files: Option<BTreeSet<String>>,
+    base: Option<String>,
+    other_paths: Option<u64>,
+    loc: u64,
+    files_changed: u64,
+}
+
+fn python_scope(request: &AnalyzeRequest) -> Result<PythonScope, String> {
+    let Some(requested) = request.diff_base.as_deref() else {
+        return Ok(PythonScope {
+            py: None,
+            files: None,
+            base: None,
+            other_paths: None,
+            loc: 0,
+            files_changed: 0,
+        });
+    };
+    if !request.path_list.is_empty() {
+        return Err("pass either --diff or --paths, not both".into());
+    }
+    let base = crate::scope::resolve_base(&request.root, requested)?;
+    let rels = crate::scope::changed_rels(&request.root, &base, request.diff_head.as_deref())?;
+    let files: BTreeSet<String> = rels.iter().cloned().collect();
+    let py: BTreeSet<String> = rels
+        .into_iter()
+        .filter(|rel| rel.ends_with(".py"))
+        .collect();
+    let tree = crate::python::python_rels(&request.root);
+    let other = tree.iter().filter(|rel| !py.contains(*rel)).count() as u64;
+    let loc = crate::scope::added_lines(&request.root, &base, request.diff_head.as_deref(), &py);
+    let files_changed = py.len() as u64;
+    Ok(PythonScope {
+        py: Some(py),
+        files: Some(files),
+        base: Some(base),
+        other_paths: Some(other),
+        loc,
+        files_changed,
+    })
+}
+
 fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
+    let scoped = match python_scope(&request) {
+        Ok(scoped) => scoped,
+        Err(err) => return python_scope_error(request, git, err),
+    };
     let deadline = Instant::now() + request.budget;
     let started = crate::pack_cov::run_start();
     crate::pack_cov::clear(&request.root);
+    report(&request, "Running tests");
     let outcome = crate::python::run_with_generated(
         &request.root,
         deadline,
@@ -705,71 +813,85 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
             include_generated: &request.config.scope.include_generated,
         },
         request.config.engines.coverage,
+        scoped.py.as_ref(),
+        scoped.files.as_ref(),
     );
     let gates = vec![
-        if outcome.types_pass {
+        if outcome.checks.types.pass {
             gate("types", true, "")
         } else {
-            gate("types", false, &outcome.types_reason)
+            gate("types", false, &outcome.checks.types.reason)
         },
         tests_gate(
-            outcome.tests_enforced,
-            outcome.tests_pass,
-            &outcome.tests_reason,
+            outcome.checks.tests.enforced,
+            outcome.checks.tests.pass,
+            &outcome.checks.tests.reason,
         ),
         crap_gate(
-            outcome.crap_coverage_complete,
-            outcome.crap_over,
-            outcome.crap_untested,
+            outcome.crap.coverage_complete,
+            outcome.crap.over,
+            outcome.crap.untested,
             request.config.gates.new_fn_untested_cc,
         ),
         advisory_detail(
             "sca",
-            outcome.sca.total(),
+            outcome.checks.sca.total(),
             &sca_detail(
-                outcome.sca.undeclared,
-                outcome.sca.hallucinated,
-                outcome.sca.unresolved,
+                outcome.checks.sca.undeclared,
+                outcome.checks.sca.hallucinated,
+                outcome.checks.sca.unresolved,
             ),
         ),
-        gate("lint", outcome.lint_pass, &outcome.lint_reason),
+        gate(
+            "lint",
+            outcome.checks.lint.pass,
+            &outcome.checks.lint.reason,
+        ),
         gate(
             "secrets",
-            outcome.secret_errors == 0,
-            &if outcome.secret_errors == 0 {
+            outcome.checks.secret_errors == 0,
+            &if outcome.checks.secret_errors == 0 {
                 String::new()
             } else {
-                format!("{} secrets", outcome.secret_errors)
+                format!("{} secrets", outcome.checks.secret_errors)
             },
         ),
     ];
+    report(&request, "Writing report");
+    let diff = scoped.py.is_some();
+    let paths: Vec<String> = scoped.py.unwrap_or_default().into_iter().collect();
     finish(Draft {
         root: request.root.clone(),
         repo: request.repo,
         pack: "python".into(),
-        test_selection: "full-suite".into(),
+        test_selection: if diff {
+            "diff-tests".into()
+        } else {
+            "full-suite".into()
+        },
         git,
-        mode: "tree".into(),
-        paths: Vec::new(),
-        base: None,
-        other_paths: None,
+        mode: if diff { "diff".into() } else { "tree".into() },
+        paths,
+        base: scoped.base,
+        other_paths: scoped.other_paths,
         fail_on: request.fail_on,
         findings: outcome.findings,
         ran: outcome.ran,
         skipped: outcome.skipped,
         gates,
         metrics: sc_core::Metrics {
-            loc_changed: 0,
-            files_changed: 0,
+            loc_changed: scoped.loc,
+            files_changed: scoped.files_changed,
             coverage_changed: 0.0,
-            crap_max: outcome.crap_max,
-            crap_over_threshold: outcome.crap_over,
-            hallucinated_imports: outcome.sca.hallucinated,
-            undeclared_dependencies: outcome.sca.undeclared,
+            crap_max: outcome.crap.crap_max,
+            crap_over_threshold: outcome.crap.over,
+            hallucinated_imports: outcome.checks.sca.hallucinated,
+            undeclared_dependencies: outcome.checks.sca.undeclared,
         },
         threshold: request.config.gates.crap_threshold,
-        worst: outcome.crap_worst,
+        worst: outcome.crap.worst,
         mutation: MutationSection::skipped(),
+        test_value: None,
         spec: SpecSection::empty(),
         intent: request.intent.clone(),
         llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),
@@ -782,6 +904,57 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         ),
         runs: outcome.runs,
         analyzer_error: false,
+    })
+}
+
+fn python_scope_error(request: AnalyzeRequest, git: GitInfo, err: String) -> AnalyzeOutput {
+    let findings = vec![unavailable("scope", &err)];
+    let gates = vec![
+        gate("types", false, &err),
+        tests_gate(true, false, &err),
+        gate("crap", false, &err),
+        advisory_detail("sca", 0, ""),
+        gate("lint", false, &err),
+        gate("secrets", false, &err),
+    ];
+    report(&request, "Writing report");
+    finish(Draft {
+        root: request.root.clone(),
+        repo: request.repo,
+        pack: "python".into(),
+        test_selection: "diff-tests".into(),
+        git,
+        mode: "diff".into(),
+        paths: Vec::new(),
+        base: None,
+        other_paths: None,
+        fail_on: request.fail_on,
+        findings,
+        ran: Vec::new(),
+        skipped: vec![
+            "compile".into(),
+            "tests".into(),
+            "coverage".into(),
+            "complexity".into(),
+            "crap".into(),
+            "sca".into(),
+            "lint".into(),
+            "secrets".into(),
+            "llm".into(),
+            "mutation".into(),
+        ],
+        gates,
+        metrics: sc_core::Metrics::zeros(),
+        threshold: request.config.gates.crap_threshold,
+        worst: Vec::new(),
+        mutation: MutationSection::skipped(),
+        test_value: None,
+        spec: SpecSection::empty(),
+        intent: request.intent.clone(),
+        llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),
+        generated_files_warning: None,
+        runs: Vec::new(),
+        analyzer_error: true,
     })
 }
 
@@ -820,9 +993,12 @@ fn analyze_rust(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
     if !manifest.is_file() {
         missing_manifest(&mut state);
     } else {
+        report(&request, "Checking types (cargo check)");
         compile_phase(root, &manifest, deadline, &mut state);
 
+        report(&request, "Running tests (cargo test)");
         test_phase(root, &selection, &manifest, deadline, &mut state);
+        report(&request, "Measuring coverage");
         coverage_phase(
             root,
             &selection,
@@ -1213,6 +1389,7 @@ fn assemble_rust_report(
     git: GitInfo,
 ) -> AnalyzeOutput {
     let root = &request.root;
+    report(request, "Running lint (cargo clippy)");
     let report_lint = run_lint_engine(
         root,
         &request.config.commands.lint,
@@ -1229,6 +1406,7 @@ fn assemble_rust_report(
     );
 
     let untested_cc = request.config.gates.new_fn_untested_cc;
+    report(request, "Scoring complexity (crap)");
     let new_symbols = selection.new_symbols.clone();
     let narrow_untested = selection.narrow_untested;
     let crap = evaluate(
@@ -1261,6 +1439,7 @@ fn assemble_rust_report(
     );
     state.findings.extend(crap.findings);
 
+    report(request, "Checking dependencies");
     let undeclared = import_findings(
         root,
         selection,
@@ -1269,6 +1448,7 @@ fn assemble_rust_report(
         &mut state.skipped,
         &mut state.findings,
     );
+    report(request, "Checking secrets");
     secret_and_perf(
         selection,
         root,
@@ -1277,6 +1457,7 @@ fn assemble_rust_report(
         &mut state.ran,
         &mut state.findings,
     );
+    report(request, "Checking spec");
     let mut spec = spec_engine(
         request,
         selection,
@@ -1284,12 +1465,21 @@ fn assemble_rust_report(
         &mut state.skipped,
         &mut state.findings,
     );
+    report(request, "Running mutation");
     let mutation = mutation_engine(
         request,
         &mut state.ran,
         &mut state.skipped,
         &mut state.findings,
     );
+    report(request, "Checking test weakening");
+    let weakening = weakening_engine(
+        request,
+        &mut state.ran,
+        &mut state.skipped,
+        &mut state.findings,
+    );
+    let test_value = TestValueSection::assemble(&mutation.section, &weakening.section);
     let llm = llm_engine(
         request,
         &mut spec,
@@ -1329,6 +1519,7 @@ fn assemble_rust_report(
         report_lint,
     );
 
+    report(request, "Writing report");
     finish(Draft {
         root: root.to_path_buf(),
         repo: request.repo.clone(),
@@ -1352,6 +1543,7 @@ fn assemble_rust_report(
         threshold,
         worst: crap.worst,
         mutation: mutation.section,
+        test_value,
         spec: spec.section,
         intent: request.intent.clone(),
         llm,
@@ -1386,6 +1578,7 @@ struct Draft {
     threshold: u32,
     worst: Vec<sc_core::CrapFunction>,
     mutation: MutationSection,
+    test_value: Option<sc_core::TestValueSection>,
     spec: SpecSection,
     intent: Option<String>,
     llm: Option<LlmSection>,
@@ -1403,34 +1596,51 @@ fn finish(mut draft: Draft) -> AnalyzeOutput {
     let exit_failed = sc_core::exit_code_fails(&draft.gates, &draft.fail_on);
     let scores = compute_scores(&draft.findings);
     let scorecard = Scorecard {
-        version: SCORECARD_VERSION.to_string(),
-        id: sc_core::new_scorecard_id(),
-        repo: draft.repo,
-        pack: draft.pack,
-        test_selection: draft.test_selection,
-        git: draft.git,
-        scope: Scope {
-            mode: draft.mode,
-            paths: draft.paths,
-            base: draft.base,
-            other_paths: draft.other_paths,
+        identity: sc_core::ScorecardIdentity {
+            version: SCORECARD_VERSION.to_string(),
+            id: sc_core::new_scorecard_id(),
+            repo: draft.repo,
+            pack: draft.pack,
+            test_selection: draft.test_selection,
         },
-        intent: draft.intent,
-        verdict: if verdict_failed { "fail" } else { "pass" }.to_string(),
-        engines_run: draft.ran,
-        engines_skipped: draft.skipped,
-        scores,
-        gates: draft.gates,
-        metrics: draft.metrics,
-        crap: CrapSection {
-            threshold: draft.threshold,
-            worst: draft.worst,
+        context: sc_core::ScorecardContext {
+            git: draft.git,
+            intent: draft.intent,
+            scope: Scope {
+                mode: draft.mode,
+                paths: draft.paths,
+                base: draft.base,
+                other_paths: draft.other_paths,
+            },
         },
-        mutation: draft.mutation,
-        findings: draft.findings,
-        generated_files_warning: draft.generated_files_warning,
-        spec: draft.spec,
-        llm: draft.llm,
+        verdict: if draft.analyzer_error || verdict_failed {
+            "fail"
+        } else {
+            "pass"
+        }
+        .to_string(),
+        fail_on: draft.fail_on,
+        engines: sc_core::ScorecardEngines {
+            engines_run: draft.ran,
+            engines_skipped: draft.skipped,
+        },
+        measures: sc_core::ScorecardMeasures {
+            scores,
+            gates: draft.gates,
+            metrics: draft.metrics,
+        },
+        sections: sc_core::ScorecardSections {
+            crap: CrapSection {
+                threshold: draft.threshold,
+                worst: draft.worst,
+            },
+            mutation: draft.mutation,
+            test_value: draft.test_value,
+            findings: draft.findings,
+            generated_files_warning: draft.generated_files_warning,
+            spec: draft.spec,
+            llm: draft.llm,
+        },
         runs: draft.runs,
     };
     write_last_scorecard(&draft.root, &scorecard);
@@ -1589,296 +1799,6 @@ fn cargo_gate_command(action: &str, workspace_root: bool, suffix: &str) -> Strin
     format!("cargo {action}{workspace}{suffix}")
 }
 
-/// Include every Rust workspace member only when the analyzed directory is the root.
-fn clippy_workspace(script: &str, workspace_root: bool) -> String {
-    let tokens = shell_tokens(script);
-    let mut edits = Vec::new();
-    let mut command = Vec::new();
-    for token in &tokens {
-        if token.separator {
-            edit_clippy_command(&command, workspace_root, &mut edits);
-            command.clear();
-        } else {
-            command.push(token);
-        }
-    }
-    edit_clippy_command(&command, workspace_root, &mut edits);
-    edits.sort_by_key(|(start, _, _)| std::cmp::Reverse(*start));
-    let mut rewritten = script.to_string();
-    for (start, end, replacement) in edits {
-        rewritten.replace_range(start..end, &replacement);
-    }
-    rewritten
-}
-
-struct ShellToken {
-    value: String,
-    end: usize,
-    separator: bool,
-}
-
-impl ShellToken {
-    fn separator() -> Self {
-        Self {
-            value: String::new(),
-            end: 0,
-            separator: true,
-        }
-    }
-}
-
-fn shell_tokens(script: &str) -> Vec<ShellToken> {
-    let mut tokens = Vec::new();
-    let mut cursor = 0;
-    while cursor < script.len() {
-        let ch = script[cursor..].chars().next().unwrap();
-        if ch.is_whitespace() {
-            if ch == '\n' || ch == '\r' {
-                tokens.push(ShellToken::separator());
-            }
-            cursor += ch.len_utf8();
-            continue;
-        }
-        if ch == '#' {
-            while cursor < script.len() && !script[cursor..].starts_with('\n') {
-                cursor += script[cursor..].chars().next().unwrap().len_utf8();
-            }
-            continue;
-        }
-        if matches!(ch, ';' | '|' | '&' | '(' | ')' | '{' | '}') {
-            let next = script[cursor + ch.len_utf8()..].chars().next();
-            cursor += ch.len_utf8();
-            if matches!((ch, next), ('&', Some('&')) | ('|', Some('|'))) {
-                cursor += 1;
-            }
-            tokens.push(ShellToken::separator());
-            continue;
-        }
-
-        let mut value = String::new();
-        let mut quote = None;
-        while cursor < script.len() {
-            let ch = script[cursor..].chars().next().unwrap();
-            if let Some(active_quote) = quote {
-                if ch == active_quote {
-                    quote = None;
-                    cursor += ch.len_utf8();
-                } else if ch == '\\' && active_quote == '"' {
-                    cursor += ch.len_utf8();
-                    if cursor < script.len() {
-                        let escaped = script[cursor..].chars().next().unwrap();
-                        value.push(escaped);
-                        cursor += escaped.len_utf8();
-                    }
-                } else {
-                    value.push(ch);
-                    cursor += ch.len_utf8();
-                }
-                continue;
-            }
-            if ch.is_whitespace() || matches!(ch, ';' | '|' | '&' | '(' | ')' | '{' | '}') {
-                break;
-            }
-            if ch == '\'' || ch == '"' {
-                quote = Some(ch);
-                cursor += ch.len_utf8();
-            } else if ch == '\\' {
-                cursor += ch.len_utf8();
-                if cursor < script.len() {
-                    let escaped = script[cursor..].chars().next().unwrap();
-                    if escaped != '\n' {
-                        value.push(escaped);
-                    }
-                    cursor += escaped.len_utf8();
-                }
-            } else {
-                value.push(ch);
-                cursor += ch.len_utf8();
-            }
-        }
-        tokens.push(ShellToken {
-            value,
-            end: cursor,
-            separator: false,
-        });
-    }
-    tokens
-}
-
-fn edit_clippy_command(
-    command: &[&ShellToken],
-    workspace_root: bool,
-    edits: &mut Vec<(usize, usize, String)>,
-) {
-    let mut index = 0;
-    while command.get(index).is_some_and(|token| {
-        matches!(
-            token.value.as_str(),
-            "if" | "then" | "elif" | "else" | "while" | "until" | "do" | "!"
-        )
-    }) {
-        index += 1;
-    }
-    while command
-        .get(index)
-        .is_some_and(|token| is_env_assignment(&token.value))
-    {
-        index += 1;
-    }
-    if command.get(index).is_some_and(|token| token.value == "env") {
-        index += 1;
-        while command
-            .get(index)
-            .is_some_and(|token| is_env_assignment(&token.value))
-        {
-            index += 1;
-        }
-    }
-    if !command
-        .get(index)
-        .is_some_and(|token| token.value == "cargo")
-    {
-        return;
-    }
-    index += 1;
-    if command
-        .get(index)
-        .is_some_and(|token| token.value.starts_with('+'))
-    {
-        index += 1;
-    }
-    let Some(clippy) = command.get(index).filter(|token| token.value == "clippy") else {
-        return;
-    };
-    let args = &command[index + 1..];
-    let before_rustc_args = args
-        .iter()
-        .position(|token| token.value == "--")
-        .unwrap_or(args.len());
-    let workspace_args = &args[..before_rustc_args];
-    if workspace_root {
-        if !workspace_args
-            .iter()
-            .any(|token| token.value == "--workspace")
-        {
-            edits.push((clippy.end, clippy.end, " --workspace".into()));
-        }
-    } else {
-        for (offset, token) in workspace_args.iter().enumerate() {
-            if token.value == "--workspace" {
-                let previous_end = if offset == 0 {
-                    clippy.end
-                } else {
-                    workspace_args[offset - 1].end
-                };
-                edits.push((previous_end, token.end, String::new()));
-            }
-        }
-    }
-}
-
-fn is_env_assignment(value: &str) -> bool {
-    value.split_once('=').is_some_and(|(name, _)| {
-        let mut chars = name.chars();
-        chars
-            .next()
-            .is_some_and(|ch| ch == '_' || ch.is_ascii_alphabetic())
-            && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
-    })
-}
-
-struct ClippyDiagnostic {
-    file: String,
-    line: u32,
-    column: u32,
-    lint: String,
-    message: String,
-}
-
-fn first_clippy_diagnostic(root: &Path, output: &str) -> Option<ClippyDiagnostic> {
-    let lines: Vec<_> = output.lines().collect();
-    let mut first_warning = None;
-    for (index, line) in lines.iter().enumerate() {
-        let Some(message) = lint_diagnostic_message(line) else {
-            continue;
-        };
-        let is_error = line.trim_start().starts_with("error: ");
-        let mut location = None;
-        let mut lint = None;
-        for line in lines.iter().skip(index + 1) {
-            if lint_diagnostic_message(line).is_some() {
-                break;
-            }
-            if location.is_none() {
-                location = diagnostic_location(line);
-            }
-            if lint.is_none() {
-                lint = clippy_lint_name(line);
-            }
-        }
-        if let (Some((file, line, column)), Some(lint)) = (location, lint) {
-            let diagnostic = ClippyDiagnostic {
-                file: crate::compile::normalize_file(root, &file),
-                line,
-                column,
-                lint,
-                message: message.to_string(),
-            };
-            if is_error {
-                return Some(diagnostic);
-            }
-            if first_warning.is_none() {
-                first_warning = Some(diagnostic);
-            }
-        }
-    }
-    first_warning
-}
-
-fn lint_diagnostic_message(line: &str) -> Option<&str> {
-    let line = line.trim_start();
-    line.strip_prefix("error: ")
-        .or_else(|| line.strip_prefix("warning: "))
-}
-
-fn diagnostic_location(line: &str) -> Option<(String, u32, u32)> {
-    let line = line.trim_start();
-    let location = line
-        .strip_prefix("-->")
-        .or_else(|| line.strip_prefix(":::"))?
-        .trim();
-    let mut parts = location.rsplitn(3, ':');
-    let column = parts.next()?.parse().ok()?;
-    let line_number = parts.next()?.parse().ok()?;
-    let file = parts.next()?.trim();
-    (!file.is_empty()).then(|| (file.to_string(), line_number, column))
-}
-
-fn clippy_lint_name(line: &str) -> Option<String> {
-    let (name, is_clippy) = if let Some((_, name)) = line.split_once("index.html#") {
-        (name, true)
-    } else if let Some((_, name)) = line.split_once("clippy::") {
-        (name, true)
-    } else {
-        let name = ["#[warn(", "#[deny(", "#[allow("]
-            .into_iter()
-            .find_map(|marker| line.split_once(marker).map(|(_, name)| name))?;
-        (name, false)
-    };
-    let name: String = name
-        .chars()
-        .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
-        .collect();
-    if name.is_empty() {
-        return None;
-    }
-    if is_clippy {
-        Some(format!("clippy::{name}"))
-    } else {
-        Some(name)
-    }
-}
-
 fn run_lint_engine(
     root: &Path,
     lint: &str,
@@ -2033,6 +1953,29 @@ fn run_tests(
     run_cargo(root, &args, deadline, toolchain_pin)
 }
 
+/// Remove coverage profiles without deleting the instrumented build.
+///
+/// `cargo llvm-cov --no-clean` skips its usual `cargo clean`, which is what
+/// makes a second analyze rebuild the workspace. It also skips deleting
+/// profiles. Those profiles have to go: the report merges every top-level
+/// `.profraw` still in `target/llvm-cov-target`. Doctest and trybuild leftovers
+/// are removed for the same reason the stock clean removes them.
+fn clear_stale_llvm_cov_profiles(root: &Path) {
+    let cov_target = root.join("target").join("llvm-cov-target");
+    if let Ok(entries) = std::fs::read_dir(&cov_target) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.ends_with(".profraw") || name.ends_with(".profdata") {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(cov_target.join("doctestbins"));
+    let _ = std::fs::remove_dir_all(root.join("target").join("tests").join("trybuild"));
+    let _ = std::fs::remove_dir_all(root.join("target").join("ui"));
+}
+
 fn run_coverage(
     root: &Path,
     manifest: &Path,
@@ -2047,6 +1990,10 @@ fn run_coverage(
     }
     let manifest_s = manifest.to_string_lossy().to_string();
     let out_s = out_path.to_string_lossy().to_string();
+    // Keep the instrumented objects in target/llvm-cov-target, but drop the
+    // previous run's profiles first. cargo-llvm-cov merges every top-level
+    // .profraw, so leaving them in place unions old counters into this report.
+    clear_stale_llvm_cov_profiles(root);
     let started = Instant::now();
     let budget = deadline.saturating_duration_since(started);
     let mut args = vec!["llvm-cov"];
@@ -2057,6 +2004,7 @@ fn run_coverage(
         &out_s,
         "--manifest-path",
         &manifest_s,
+        "--no-clean",
     ]);
     let captured = run_cargo(root, &args, deadline, toolchain_pin);
     match &captured {
@@ -2548,6 +2496,10 @@ struct MutationRun {
     reason: String,
 }
 
+struct WeakeningRun {
+    section: sc_core::TestValueWeakening,
+}
+
 fn mutation_engine(
     request: &AnalyzeRequest,
     ran: &mut Vec<String>,
@@ -2592,11 +2544,38 @@ fn mutation_engine(
     } else {
         String::new()
     };
+    let section = outcome.section;
     MutationRun {
-        section: outcome.section,
+        section,
         add_gate: true,
         pass,
         reason,
+    }
+}
+
+fn weakening_engine(
+    request: &AnalyzeRequest,
+    ran: &mut Vec<String>,
+    skipped: &mut Vec<String>,
+    findings: &mut Vec<Finding>,
+) -> WeakeningRun {
+    if request.diff_base.is_none() {
+        skipped.push("test_value.weakening".into());
+        return WeakeningRun {
+            section: sc_core::TestValueWeakening::skipped_with_reason(Some("needs --diff".into())),
+        };
+    }
+    let base = request.diff_base.clone().unwrap_or_else(|| "AUTO".into());
+    let resolved = crate::scope::resolve_base(&request.root, &base).ok();
+    let outcome = run_weakening(&request.root, resolved.as_deref());
+    if outcome.ran {
+        ran.push("test_value.weakening".into());
+    } else {
+        skipped.push("test_value.weakening".into());
+    }
+    findings.extend(outcome.findings);
+    WeakeningRun {
+        section: outcome.section,
     }
 }
 
@@ -3081,6 +3060,89 @@ mod tests {
         )));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn warm_coverage_matches_this_run_and_keeps_the_library_build() {
+        use std::os::unix::fs::MetadataExt;
+
+        let root = std::env::temp_dir().join(format!("sc-cov-warm-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("tests")).unwrap();
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"covdemo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/lib.rs"),
+            "pub fn covered() -> i32 {\n    1\n}\npub fn missed() -> i32 {\n    2\n}\n",
+        )
+        .unwrap();
+        let call_covered = "#[test]\nfn calls() {\n    assert_eq!(covdemo::covered(), 1);\n}\n";
+        let call_missed = "#[test]\nfn calls() {\n    assert_eq!(covdemo::missed(), 2);\n}\n";
+        std::fs::write(root.join("tests/call.rs"), call_covered).unwrap();
+
+        let manifest = root.join("Cargo.toml");
+        let deadline = Instant::now() + Duration::from_secs(180);
+        let mut runs = Vec::new();
+        let first = run_coverage(&root, &manifest, deadline, true, "", &mut runs)
+            .expect("first coverage run");
+        assert_eq!(coverage_rate(&first, "covered"), 1.0, "{first:?}");
+        assert_eq!(coverage_rate(&first, "missed"), 0.0, "{first:?}");
+        let rlib = library_rlib(&root);
+        let inode = std::fs::metadata(&rlib).unwrap().ino();
+
+        std::fs::write(root.join("tests/call.rs"), call_missed).unwrap();
+        let second = run_coverage(&root, &manifest, deadline, true, "", &mut runs)
+            .expect("warm coverage run");
+        let warm_rlib = library_rlib(&root);
+        assert_eq!(
+            warm_rlib, rlib,
+            "instrumented library artifact was replaced"
+        );
+        assert_eq!(
+            std::fs::metadata(&warm_rlib).unwrap().ino(),
+            inode,
+            "instrumented library was rebuilt; coverage clean ran"
+        );
+        assert_eq!(
+            coverage_rate(&second, "covered"),
+            0.0,
+            "stale profile still counts covered(): {second:?}"
+        );
+        assert_eq!(coverage_rate(&second, "missed"), 1.0, "{second:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    fn coverage_rate(data: &crate::coverage::CoverageData, function: &str) -> f64 {
+        let suffix = format!("::{function}");
+        data.functions
+            .iter()
+            .filter(|item| item.demangled == function || item.demangled.ends_with(&suffix))
+            .map(|item| item.coverage)
+            .max_by(|left, right| left.partial_cmp(right).unwrap())
+            .unwrap_or_else(|| panic!("no coverage row for {function}"))
+    }
+
+    #[cfg(unix)]
+    fn library_rlib(root: &Path) -> PathBuf {
+        let deps = root.join("target/llvm-cov-target/debug/deps");
+        let mut found = Vec::new();
+        for entry in std::fs::read_dir(&deps).unwrap() {
+            let path = entry.unwrap().path();
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if name.starts_with("libcovdemo-") && name.ends_with(".rlib") {
+                found.push(path);
+            }
+        }
+        assert_eq!(found.len(), 1, "expected one covdemo rlib, found {found:?}");
+        found.remove(0)
+    }
+
     #[test]
     fn record_coverage_tool_missing_skips_and_names_the_fix() {
         let mut state = RustState::new(false, String::new());
@@ -3150,6 +3212,7 @@ mod tests {
             mutation_override: None,
             llm_override: Some(true),
             intent: Some("keep the header contrast".into()),
+            progress: None,
         };
         let spec = SpecRun {
             section: sc_core::SpecSection::empty(),
@@ -3359,120 +3422,6 @@ mod tests {
     }
 
     #[test]
-    fn clippy_workspace_flag_tracks_shell_commands_and_scope() {
-        assert_eq!(
-            clippy_workspace("cargo clippy", true),
-            "cargo clippy --workspace"
-        );
-        assert_eq!(
-            clippy_workspace("cargo clippy -- -D warnings", true),
-            "cargo clippy --workspace -- -D warnings"
-        );
-        assert_eq!(
-            clippy_workspace("cargo clippy --workspace", true),
-            "cargo clippy --workspace"
-        );
-        assert_eq!(
-            clippy_workspace("cargo fmt --check && cargo clippy -- -D warnings", true),
-            "cargo fmt --check && cargo clippy --workspace -- -D warnings"
-        );
-        assert_eq!(
-            clippy_workspace("cargo +stable clippy -- -D warnings", true),
-            "cargo +stable clippy --workspace -- -D warnings"
-        );
-        assert_eq!(
-            clippy_workspace("ENV=x cargo clippy -- -D warnings", true),
-            "ENV=x cargo clippy --workspace -- -D warnings"
-        );
-        assert_eq!(
-            clippy_workspace("if test -n \"$X\"; then cargo clippy; fi", true),
-            "if test -n \"$X\"; then cargo clippy --workspace; fi"
-        );
-        assert_eq!(
-            clippy_workspace("if cargo clippy --workspace; then echo ok; fi", false),
-            "if cargo clippy; then echo ok; fi"
-        );
-        assert_eq!(
-            clippy_workspace("{ cargo clippy; }", true),
-            "{ cargo clippy --workspace; }"
-        );
-        assert_eq!(
-            clippy_workspace("{ cargo clippy --workspace; }", false),
-            "{ cargo clippy; }"
-        );
-        assert_eq!(
-            clippy_workspace("cargo clippy --workspace -- -D warnings", false),
-            "cargo clippy -- -D warnings"
-        );
-        assert_eq!(
-            clippy_workspace("cargo clippy --workspace", false),
-            "cargo clippy"
-        );
-        assert_eq!(clippy_workspace("cargo clippy", false), "cargo clippy");
-        assert_eq!(clippy_workspace("npm test", true), "npm test");
-    }
-
-    fn token_values(script: &str) -> Vec<String> {
-        shell_tokens(script)
-            .iter()
-            .filter(|token| !token.separator)
-            .map(|token| token.value.clone())
-            .collect()
-    }
-
-    #[test]
-    fn shell_tokens_skips_comments_and_blank_separators() {
-        assert!(shell_tokens("").is_empty());
-        assert!(shell_tokens("   ").is_empty());
-        assert!(shell_tokens("# only a comment").is_empty());
-        assert_eq!(token_values("cargo # trailing comment"), ["cargo"]);
-        assert_eq!(token_values("cargo\tclippy"), ["cargo", "clippy"]);
-        let newline = shell_tokens("cargo\nclippy");
-        assert_eq!(newline.len(), 3);
-        assert!(newline[1].separator);
-        assert_eq!(newline[0].value, "cargo");
-        assert_eq!(newline[2].value, "clippy");
-        let carriage = shell_tokens("cargo\rclippy");
-        assert_eq!(carriage.len(), 3);
-        assert!(carriage[1].separator);
-    }
-
-    #[test]
-    fn shell_tokens_splits_operators_and_double_operators() {
-        let separators = shell_tokens("a;b|c&d(e)f{g}h");
-        assert!(separators.iter().any(|token| token.separator));
-        assert_eq!(token_values("a&&b||c"), ["a", "b", "c"]);
-        assert_eq!(
-            shell_tokens("a&&b").iter().filter(|t| t.separator).count(),
-            1
-        );
-    }
-
-    #[test]
-    fn shell_tokens_handles_quotes_and_escapes() {
-        assert_eq!(token_values("echo 'a b'"), ["echo", "a b"]);
-        assert_eq!(token_values("echo \"a b\""), ["echo", "a b"]);
-        assert_eq!(token_values("echo \"a\\\"b\""), ["echo", "a\"b"]);
-        assert_eq!(token_values("echo 'a\\b'"), ["echo", "a\\b"]);
-        assert_eq!(token_values("echo a\\ b"), ["echo", "a b"]);
-        assert_eq!(token_values("echo a\\\nb"), ["echo", "ab"]);
-        assert_eq!(token_values("echo a\\"), ["echo", "a"]);
-        assert_eq!(
-            token_values("echo \"unterminated"),
-            ["echo", "unterminated"]
-        );
-        assert_eq!(
-            token_values("echo 'un\\terminated"),
-            ["echo", "un\\terminated"]
-        );
-        assert_eq!(token_values("echo \"ab\\"), ["echo", "ab"]);
-        assert_eq!(
-            clippy_workspace("VAR='a b' cargo clippy", true),
-            "VAR='a b' cargo clippy --workspace"
-        );
-    }
-
-    #[test]
     fn workspace_root_checks_every_member_but_member_analysis_stays_in_scope() {
         let root = std::env::temp_dir().join(format!("sc-ws-broken-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -3515,14 +3464,16 @@ mod tests {
             mutation_override: Some("off".into()),
             llm_override: Some(false),
             intent: None,
+            progress: None,
         });
         let types = output
             .scorecard
+            .measures
             .gates
             .iter()
             .find(|gate| gate.id == "types")
             .unwrap();
-        assert!(!types.pass, "{:?}", output.scorecard.findings);
+        assert!(!types.pass, "{:?}", output.scorecard.sections.findings);
         assert!(types.enforced);
         assert!(output.scorecard.runs.iter().any(|run| {
             run.command.contains("cargo check") && run.command.contains("--workspace")
@@ -3545,6 +3496,7 @@ mod tests {
                     mutation_override: Some("off".into()),
                     llm_override: Some(false),
                     intent: None,
+                    progress: None,
                 },
                 crate::pack::PackId::Command,
                 GitInfo {
@@ -3563,6 +3515,7 @@ mod tests {
         assert!(
             !command_root
                 .scorecard
+                .measures
                 .gates
                 .iter()
                 .find(|gate| gate.id == "lint")
@@ -3582,6 +3535,7 @@ mod tests {
         assert!(
             command_member
                 .scorecard
+                .measures
                 .gates
                 .iter()
                 .find(|gate| gate.id == "lint")
@@ -3605,21 +3559,24 @@ mod tests {
             mutation_override: Some("off".into()),
             llm_override: Some(false),
             intent: None,
+            progress: None,
         });
         let types = output
             .scorecard
+            .measures
             .gates
             .iter()
             .find(|gate| gate.id == "types")
             .unwrap();
-        assert!(types.pass, "{:?}", output.scorecard.findings);
+        assert!(types.pass, "{:?}", output.scorecard.sections.findings);
         let tests = output
             .scorecard
+            .measures
             .gates
             .iter()
             .find(|gate| gate.id == "tests")
             .unwrap();
-        assert!(tests.pass, "{:?}", output.scorecard.findings);
+        assert!(tests.pass, "{:?}", output.scorecard.sections.findings);
         assert!(output.scorecard.runs.iter().any(|run| {
             run.engine == "compile"
                 && run.command == "cargo check --message-format=json"
@@ -3628,7 +3585,7 @@ mod tests {
         assert!(output.scorecard.runs.iter().any(|run| {
             run.engine == "tests" && run.command == "cargo test" && run.exit_code == Some(0)
         }));
-        assert_eq!(output.scorecard.scope.paths, vec!["src/lib.rs"]);
+        assert_eq!(output.scorecard.context.scope.paths, vec!["src/lib.rs"]);
         assert!(!output
             .scorecard
             .runs
@@ -3665,21 +3622,24 @@ mod tests {
             mutation_override: Some("off".into()),
             llm_override: Some(false),
             intent: None,
+            progress: None,
         });
         let types = output
             .scorecard
+            .measures
             .gates
             .iter()
             .find(|gate| gate.id == "types")
             .unwrap();
-        assert!(types.pass, "{:?}", output.scorecard.findings);
+        assert!(types.pass, "{:?}", output.scorecard.sections.findings);
         let tests = output
             .scorecard
+            .measures
             .gates
             .iter()
             .find(|gate| gate.id == "tests")
             .unwrap();
-        assert!(tests.pass, "{:?}", output.scorecard.findings);
+        assert!(tests.pass, "{:?}", output.scorecard.sections.findings);
         assert!(output.scorecard.runs.iter().any(|run| {
             run.command.contains("cargo check") && run.command.contains("--workspace")
         }));
@@ -3704,14 +3664,66 @@ mod tests {
             mutation_override: None,
             llm_override: None,
             intent: None,
+            progress: None,
         });
         assert_eq!(output.status, RunStatus::AnalyzerError);
         assert_eq!(output.scorecard.verdict, "fail");
-        assert!(output.scorecard.findings.iter().any(|finding| {
+        assert!(output.scorecard.sections.findings.iter().any(|finding| {
             finding.rule == "engine.unavailable"
                 && finding.message.contains("--pack")
                 && finding.message.contains("analyzer.toml")
         }));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn command_pack_skips_the_unimplemented_dependency_check() {
+        let dir = std::env::temp_dir().join(format!("sc-command-skip-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("notes.txt"), "hello\n").unwrap();
+        let mut config = Config {
+            pack: "command".into(),
+            ..Config::default()
+        };
+        config.engines.coverage = false;
+        let output = analyze(AnalyzeRequest {
+            root: dir.clone(),
+            repo: "command".into(),
+            fail_on: vec!["secrets".into()],
+            budget: Duration::from_secs(30),
+            config,
+            diff_base: None,
+            diff_head: None,
+            path_list: Vec::new(),
+            spec_path: None,
+            mutation_override: Some("off".into()),
+            llm_override: Some(false),
+            intent: None,
+            progress: None,
+        });
+        assert!(
+            output
+                .scorecard
+                .sections
+                .findings
+                .iter()
+                .all(|finding| !finding
+                    .message
+                    .contains("dependency check is not implemented")),
+            "command pack must not warn that sca is unimplemented: {:?}",
+            output.scorecard.sections.findings
+        );
+        assert!(
+            output
+                .scorecard
+                .engines
+                .engines_skipped
+                .iter()
+                .any(|engine| engine == "sca"),
+            "sca belongs in engines_skipped: {:?}",
+            output.scorecard.engines.engines_skipped
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -3731,6 +3743,140 @@ mod tests {
         assert_eq!(
             crate::pack::detect(&dir, "").unwrap(),
             crate::pack::Detected::Pack(crate::pack::PackId::Python)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn python_diff_scopes_findings_to_changed_py_files() {
+        let dir = std::env::temp_dir().join(format!("sc-py-diff-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::create_dir_all(dir.join("tests")).unwrap();
+        let key = format!("AKIA{}{}", "0Z3VS5J4", "AB3KQM9Z");
+        std::fs::write(dir.join("pyproject.toml"), "[project]\nname = \"demo\"\n").unwrap();
+        std::fs::write(
+            dir.join("src/old.py"),
+            format!("KEY = \"{key}\"\ndef broken(\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join("src/new.py"), "def ok():\n    return 1\n").unwrap();
+        std::fs::write(
+            dir.join("tests/test_old.py"),
+            "def test_old():\n    assert False\n",
+        )
+        .unwrap();
+        let git = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(args)
+                .env("GIT_AUTHOR_NAME", "sc")
+                .env("GIT_AUTHOR_EMAIL", "sc@example.com")
+                .env("GIT_COMMITTER_NAME", "sc")
+                .env("GIT_COMMITTER_EMAIL", "sc@example.com")
+                .status()
+                .unwrap();
+            assert!(status.success(), "{args:?}");
+        };
+        git(&["init"]);
+        git(&["add", "."]);
+        git(&["commit", "-m", "base"]);
+        std::fs::write(dir.join("src/new.py"), "def ok():\n    return 2\n").unwrap();
+        let mut config = Config::default();
+        config.engines.coverage = false;
+        let request = |diff: Option<&str>| AnalyzeRequest {
+            root: dir.clone(),
+            repo: "demo".into(),
+            fail_on: config.gates.fail_on.clone(),
+            budget: Duration::from_secs(25),
+            config: config.clone(),
+            diff_base: diff.map(str::to_string),
+            diff_head: None,
+            path_list: Vec::new(),
+            spec_path: None,
+            mutation_override: None,
+            llm_override: None,
+            intent: None,
+            progress: None,
+        };
+        let scoped = analyze(request(Some("HEAD")));
+        assert_eq!(scoped.scorecard.context.scope.mode, "diff");
+        assert_eq!(scoped.scorecard.context.scope.paths, vec!["src/new.py"]);
+        assert_eq!(scoped.scorecard.context.scope.base.as_deref(), Some("HEAD"));
+        assert_eq!(scoped.scorecard.context.scope.other_paths, Some(2));
+        assert_eq!(scoped.scorecard.identity.test_selection, "diff-tests");
+        assert_eq!(scoped.scorecard.measures.metrics.files_changed, 1);
+        assert_eq!(scoped.scorecard.measures.metrics.loc_changed, 1);
+        let types = scoped
+            .scorecard
+            .measures
+            .gates
+            .iter()
+            .find(|gate| gate.id == "types")
+            .unwrap();
+        assert!(types.pass, "{:?}", scoped.scorecard.sections.findings);
+        let tests = scoped
+            .scorecard
+            .measures
+            .gates
+            .iter()
+            .find(|gate| gate.id == "tests")
+            .unwrap();
+        assert!(!tests.enforced, "{tests:?}");
+        assert!(
+            tests
+                .reason
+                .as_deref()
+                .unwrap_or("")
+                .contains("no Python tests"),
+            "{tests:?}"
+        );
+        let secrets = scoped
+            .scorecard
+            .measures
+            .gates
+            .iter()
+            .find(|gate| gate.id == "secrets")
+            .unwrap();
+        assert!(secrets.pass, "{:?}", scoped.scorecard.sections.findings);
+        assert!(
+            !scoped
+                .scorecard
+                .sections
+                .findings
+                .iter()
+                .any(|finding| finding.file.contains("old.py")),
+            "{:?}",
+            scoped.scorecard.sections.findings
+        );
+        let lint = scoped
+            .scorecard
+            .runs
+            .iter()
+            .find(|run| run.engine == "lint")
+            .expect("lint command");
+        assert!(lint.command.contains("src/new.py"), "{}", lint.command);
+        assert!(!lint.command.contains("check ."), "{}", lint.command);
+        assert!(!lint.command.contains("old.py"), "{}", lint.command);
+
+        let tree = analyze(request(None));
+        assert_eq!(tree.scorecard.context.scope.mode, "tree");
+        assert_eq!(tree.scorecard.identity.test_selection, "full-suite");
+        let tree_types = tree
+            .scorecard
+            .measures
+            .gates
+            .iter()
+            .find(|gate| gate.id == "types")
+            .unwrap();
+        assert!(!tree_types.pass, "tree compile must see src/old.py");
+        assert!(
+            tree.scorecard.sections.findings.iter().any(|finding| {
+                finding.rule == "secrets.aws_access_key" && finding.file == "src/old.py"
+            }),
+            "{:?}",
+            tree.scorecard.sections.findings
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -3825,6 +3971,53 @@ mod tests {
     }
 
     #[test]
+    fn progress_callback_sees_steps_without_changing_the_scorecard() {
+        use std::sync::{Arc, Mutex};
+        // A clean repo with no detectable pack takes the fast blocked path.
+        let dir = git_repo("sc-git-progress");
+        let base = AnalyzeRequest {
+            root: dir.clone(),
+            repo: "blocked".into(),
+            fail_on: Vec::new(),
+            budget: Duration::from_secs(30),
+            config: Config::default(),
+            diff_base: None,
+            diff_head: None,
+            path_list: Vec::new(),
+            spec_path: None,
+            mutation_override: None,
+            llm_override: None,
+            intent: None,
+            progress: None,
+        };
+        let plain = analyze(base.clone());
+        let steps: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::clone(&steps);
+        let mut with_progress = base.clone();
+        with_progress.progress = Some(Arc::new(move |step: &str| {
+            seen.lock().unwrap().push(step.to_string());
+        }));
+        let reported = analyze(with_progress);
+        let steps = steps.lock().unwrap();
+        assert!(
+            steps.first().is_some_and(|step| step == "Detecting pack"),
+            "first step should name pack detection, got {steps:?}"
+        );
+        assert!(
+            steps.last().is_some_and(|step| step == "Writing report"),
+            "last step should name the report, got {steps:?}"
+        );
+        let mut plain_json = serde_json::to_value(&plain.scorecard).unwrap();
+        let mut reported_json = serde_json::to_value(&reported.scorecard).unwrap();
+        // Scorecard ids are unique per run; everything else must match.
+        plain_json["id"] = serde_json::Value::Null;
+        reported_json["id"] = serde_json::Value::Null;
+        assert_eq!(plain_json, reported_json);
+        assert_eq!(plain.status, reported.status);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn blocked_analysis_reports_pre_analysis_git_state() {
         // analyze() snapshots git before any engine runs: a clean repo with
         // no detectable pack reports clean with the committed head.
@@ -3842,9 +4035,13 @@ mod tests {
             mutation_override: None,
             llm_override: None,
             intent: None,
+            progress: None,
         });
-        assert!(!output.scorecard.git.dirty);
-        assert_eq!(output.scorecard.git.head.as_ref().unwrap().len(), 40);
+        assert!(!output.scorecard.context.git.dirty);
+        assert_eq!(
+            output.scorecard.context.git.head.as_ref().unwrap().len(),
+            40
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

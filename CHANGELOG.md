@@ -4,6 +4,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-10-11
+
+### Added
+
+- `scripts/check-release-text.sh` and `RELEASING.md`: block release publish when changelog, release metadata, docs, or built assets match private-infrastructure patterns (generic rules in git; optional `RELEASE_DENYLIST` / local denylist for site-specific terms). Unpacks release `.tar.gz`, `.pkg` (`bsdtar`), and `.dmg` (`p7zip` / `hdiutil`) archives for inspection; invalid denylist regexes or unpack failures fail closed.
+- Add a Windows support plan at `docs/planning/windows.md`. Windows is not a supported platform. The README, the quickstart, and the release assets are unchanged.
+- Diff-scoped **test weakening** for Rust (`test_value.weakening`): report-only heuristics when `--diff` is set and product `.rs` changes, including assertion loosening, new `#[ignore]` / `#[should_panic]`, and removed tests. Runs even when `mutation.mode` is `off`. Terminal and HTML reports show weakening counts; see `docs/design/test-value.md`.
+- Release `.tar.gz` archives use a nested `sc-vX.Y.Z-<target>/` directory. `scripts/check-archive-layout.py` enforces the layout in release builds and CI. The GitHub Action still installs flat v0.1.6 archives.
+- The Scorecard action accepts `budget-seconds` and passes it to `sc analyze`.
+- Add `sc skills install` and once-per-version automatic skill installation for detected agents (#183).
+- Add contributor and review guidance against tautological tests (#195).
+
+### Changed
+
+- Rust coverage reuses the instrumented build. Before `cargo llvm-cov`, stale `target/llvm-cov-target` profiles (`.profraw`, `.profdata`) are removed and the command passes `--no-clean`, so a warm run does not rebuild the workspace. The report still counts only the current test run. The recorded command string is unchanged.
+- README quickstart and [CI](docs/how-to/ci.md) install examples keep `sc` on `PATH` after download (no longer run from a temp dir that `trap` deletes). Generic CI docs install from `$RUNNER_TEMP`, not the checkout.
+- Show analysis progress steps in interactive sessions (#187).
+- Print a short summary for `--out` on terminals while preserving full report output for pipes (#188).
+- Raise the Rust MSRV to 1.88 and update the `ignore` dependency (#182, #190).
+- Extract internal clippy, Makefile, HTML report, and scorecard data handling into focused modules without changing the JSON contract (#192, #197–#199).
+
+### Fixed
+
+- Validate installation links against the published release so preparing the next version does not require unpublished downloads.
+
+- Harden secrets scan file selection while preserving configured path exclusions.
+- Report `secrets.empty_scope` and fail the secrets gate when the scan selects no files, instead of reporting a perfect pass (#239).
+- Install Rust coverage and Python lint tools for macOS core tests in CI.
+
+- `NO_COLOR` no longer hides analysis progress on interactive stderr. The uncolored spinner continues showing the current step and elapsed time; `--quiet` still suppresses it.
+
+- The Python pack honors `--diff`. Compile, Ruff, import, and CRAP findings are limited to changed `.py` files. Pytest runs only changed `test_*.py` and `*_test.py` files, so a pre-existing failure outside the diff does not fail the gate. Secret findings on unchanged paths are dropped. Tree mode is unchanged.
+- Tree-scope Rust analysis reuses its already-discovered source paths and text while checking out-of-line test modules, avoiding a second workspace walk and redundant reads without changing findings.
+- CI install examples use a fresh `mktemp -d` staging directory per download so a leftover flat `sc` binary cannot shadow a nested release bundle.
+- The `scorecard` GitHub Actions workflow installs the same fixture tooling as `check-ubuntu` and runs strict default gates with a 600-second analyze budget on pull requests (REVIEW_POLICY §6.13).
+- `test.failed` findings no longer use absolute panic paths outside the project (`/rustc/...`, the cargo registry, or other off-tree locations). The report points at the failing test's source file when it can be found, keeps the external location in the message and evidence, and never emits an absolute `file` in JSON or SARIF (#207).
+- Skip CDK-generated `cdk.out` directories during source discovery (#189).
+- Split the Python import/static-analysis helpers and non-Rust toolchain plan builders into focused engine modules. Runtime behavior and report output are unchanged.
+- `--out` prints the short summary on stdout even when stdout is not a terminal. The raw report is written to the file, and to stdout only when `--out` is omitted (#208).
+- `--pack command` no longer reports `engine.unavailable` because the dependency check is not implemented. That pack lists `sca` in `engines_skipped` (#208).
+- Empty or blank `--fail-on` and `gates.fail_on` selections now fail with a configuration error. Use `none` by itself to return exit 0 for every gate. JSON and SARIF record the selected gates, and stderr names enforced failures omitted from the selection.
+- A bare `--diff` (AUTO base) no longer falls back to `HEAD` in checkouts with no resolvable history. Shallow or single-commit checkouts now exit 2 with a message naming the fix (`fetch-depth: 0` or `--diff BASE`) instead of silently scoring zero paths. An explicit `--diff HEAD` keeps working.
+- `--diff` skips an AUTO candidate (`HEAD~1`, `main`, or `master`) that is the same commit as `HEAD`, so a depth-1 clone of `main` or `master` exits 2 instead of scoring zero paths. A missing explicit base exits 2 with verdict `fail` and one stderr line that names the ref and `fetch-depth: 0`, instead of a raw git error and verdict `pass` (#203, #205).
+- The secrets scan uses `git ls-files` in a work tree so tracked files under `vendor/`, `dist/`, `build/`, and other walker-skipped directories are still checked. Ignored paths and `[scope] exclude` behave as before (#202).
+- The secrets scan skips files that begin with ELF, Mach-O, PE, WebAssembly, or `ar` archive magics instead of lossy-scanning release binaries (for example `sc` and `sc-mcp`), including when the file is over the 64 MiB text scan cap. Reports `secrets.skipped_object` (info). NUL-only prefixes still do not skip (#155).
+
 ## [0.1.6] - 2026-09-30
 
 ### Fixed

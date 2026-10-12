@@ -75,39 +75,42 @@ fn generated_reports_do_not_mark_a_checkout_dirty_and_real_changes_are_named() {
             .output()
             .expect("run sc")
     };
-    let read_card = |stdout: &[u8]| {
-        serde_json::Deserializer::from_slice(stdout)
-            .into_iter::<serde_json::Value>()
-            .next()
-            .expect("stdout begins with a scorecard JSON value")
-            .expect("scorecard JSON parses")
+    let read_card = || {
+        serde_json::from_str::<serde_json::Value>(
+            &std::fs::read_to_string(root.join("scorecard.json")).expect("scorecard.json written"),
+        )
+        .expect("scorecard JSON parses")
     };
 
     let first = run();
-    let first_card = read_card(&first.stdout);
+    assert_short_summary(&String::from_utf8_lossy(&first.stdout), "scorecard.html");
+    let first_card = read_card();
     assert_eq!(first_card["git"]["dirty"], false);
     assert!(first_card["git"]["dirty_paths"].is_null());
 
     let second = run();
-    let second_card = read_card(&second.stdout);
-    assert_eq!(
-        second_card["git"]["dirty"],
-        false,
-        "{}",
-        String::from_utf8_lossy(&second.stdout)
-    );
+    let second_stdout = String::from_utf8_lossy(&second.stdout).to_string();
+    assert_short_summary(&second_stdout, "scorecard.html");
+    let second_card = read_card();
+    assert_eq!(second_card["git"]["dirty"], false, "{second_stdout}");
     assert!(second_card["git"]["dirty_paths"].is_null());
 
     std::fs::write(root.join("README.md"), "a real source change\n").unwrap();
     let dirty = run();
-    let dirty_card = read_card(&dirty.stdout);
+    let stdout = String::from_utf8_lossy(&dirty.stdout).to_string();
+    assert_short_summary(&stdout, "scorecard.html");
+    let dirty_card = read_card();
     assert_eq!(dirty_card["git"]["dirty"], true);
     assert_eq!(
         dirty_card["git"]["dirty_paths"],
         serde_json::json!(["README.md"])
     );
-    let stdout = String::from_utf8_lossy(&dirty.stdout);
-    assert!(stdout.contains("**Changed paths:** README.md"), "{stdout}");
+    assert!(stdout.contains("changed paths: README.md"), "{stdout}");
+    let markdown = std::fs::read_to_string(root.join("scorecard.md")).unwrap();
+    assert!(
+        markdown.contains("**Changed paths:** README.md"),
+        "{markdown}"
+    );
     let html = std::fs::read_to_string(root.join("scorecard.html")).unwrap();
     assert!(html.contains("changed: README.md"), "{html}");
 
@@ -184,30 +187,28 @@ fn generated_reports_do_not_mark_a_subdirectory_checkout_dirty() {
             .output()
             .expect("run sc")
     };
-    let read_card = |stdout: &[u8]| {
-        serde_json::Deserializer::from_slice(stdout)
-            .into_iter::<serde_json::Value>()
-            .next()
-            .expect("stdout begins with a scorecard JSON value")
-            .expect("scorecard JSON parses")
+    let read_card = || {
+        serde_json::from_str::<serde_json::Value>(
+            &std::fs::read_to_string(project.join("rep.json")).expect("rep.json written"),
+        )
+        .expect("scorecard JSON parses")
     };
 
     let first = run();
-    assert_eq!(read_card(&first.stdout)["git"]["dirty"], false);
+    assert_short_summary(&String::from_utf8_lossy(&first.stdout), "rep.json");
+    assert_eq!(read_card()["git"]["dirty"], false);
 
     let second = run();
-    let second_card = read_card(&second.stdout);
-    assert_eq!(
-        second_card["git"]["dirty"],
-        false,
-        "{}",
-        String::from_utf8_lossy(&second.stdout)
-    );
+    let second_stdout = String::from_utf8_lossy(&second.stdout).to_string();
+    assert_short_summary(&second_stdout, "rep.json");
+    let second_card = read_card();
+    assert_eq!(second_card["git"]["dirty"], false, "{second_stdout}");
     assert!(second_card["git"]["dirty_paths"].is_null());
 
     std::fs::write(project.join("README.md"), "a real source change\n").unwrap();
     let dirty = run();
-    let dirty_card = read_card(&dirty.stdout);
+    assert_short_summary(&String::from_utf8_lossy(&dirty.stdout), "rep.json");
+    let dirty_card = read_card();
     assert_eq!(dirty_card["git"]["dirty"], true);
     assert_eq!(
         dirty_card["git"]["dirty_paths"],
@@ -247,6 +248,103 @@ fn failing_test_fixture_exits_1_with_a_test_finding() {
         .unwrap()
         .iter()
         .any(|gate| gate["id"] == "types" && gate["pass"] == true));
+}
+
+fn analyze_in(dir: &std::path::Path, args: &[&str]) -> (i32, String, String) {
+    let _guard = FIXTURE_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+    let output = Command::new(env!("CARGO_BIN_EXE_sc"))
+        .current_dir(dir)
+        .arg("analyze")
+        .args(args)
+        .output()
+        .expect("spawn sc");
+    let code = output.status.code().unwrap_or(101);
+    (
+        code,
+        String::from_utf8_lossy(&output.stdout).to_string(),
+        String::from_utf8_lossy(&output.stderr).to_string(),
+    )
+}
+
+fn git_here(dir: &std::path::Path, args: &[&str]) {
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .env("GIT_AUTHOR_NAME", "sc")
+        .env("GIT_AUTHOR_EMAIL", "sc@example.com")
+        .env("GIT_COMMITTER_NAME", "sc")
+        .env("GIT_COMMITTER_EMAIL", "sc@example.com")
+        .status()
+        .expect("spawn git");
+    assert!(status.success(), "{args:?}");
+}
+
+const SINGLE_COMMIT_LIB: &str = "// SPDX-License-Identifier: MPL-2.0\npub fn classify(n: i32, flag: bool, mode: u8) -> &'static str {\n    if n < 0 {\n        return \"neg\";\n    }\n    if n == 0 {\n        return \"zero\";\n    }\n    if flag && n > 100 {\n        return \"bigflag\";\n    }\n    if flag || n > 50 {\n        return \"mid\";\n    }\n    match mode {\n        0 => \"a\",\n        1 => \"b\",\n        2 => \"c\",\n        _ => \"d\",\n    }\n}\n";
+
+fn single_commit_crate(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("sc-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(
+        dir.join("Cargo.toml"),
+        "[workspace]\n\n[package]\nname = \"single_commit\"\nversion = \"0.1.0\"\nedition = \"2021\"\npublish = false\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("src/lib.rs"), SINGLE_COMMIT_LIB).unwrap();
+    git_here(&dir, &["init"]);
+    git_here(&dir, &["add", "Cargo.toml", "src/lib.rs"]);
+    git_here(&dir, &["commit", "-m", "single"]);
+    // A feature branch like CI's depth-1 checkout, so main/master do not
+    // resolve and AUTO has genuinely nothing to fall back to.
+    git_here(&dir, &["branch", "-m", "feat"]);
+    dir
+}
+
+#[test]
+fn diff_without_base_exits_2_in_a_single_commit_checkout() {
+    let dir = single_commit_crate("diff-base-e2e");
+    let (code, stdout, stderr) = analyze_in(&dir, &[".", "--diff", "--budget-seconds", "300"]);
+    let combined = format!("{stdout}\n{stderr}");
+    assert_eq!(code, 2, "single-commit --diff must fail loudly\n{combined}");
+    assert!(
+        combined.contains("--diff BASE"),
+        "the error must name the fix\n{combined}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn explicit_diff_head_still_scores_uncommitted_changes() {
+    let dir = std::env::temp_dir().join(format!("sc-diff-head-guard-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(
+        dir.join("Cargo.toml"),
+        "[workspace]\n\n[package]\nname = \"diff_head_guard\"\nversion = \"0.1.0\"\nedition = \"2021\"\npublish = false\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("src/lib.rs"), "pub fn old() -> i32 { 1 }\n").unwrap();
+    git_here(&dir, &["init"]);
+    git_here(&dir, &["add", "Cargo.toml", "src/lib.rs"]);
+    git_here(&dir, &["commit", "-m", "old"]);
+    std::fs::write(
+        dir.join("src/lib.rs"),
+        "pub fn old() -> i32 { 1 }\npub fn added() -> i32 { 2 }\n",
+    )
+    .unwrap();
+    let (code, stdout, stderr) =
+        analyze_in(&dir, &[".", "--diff", "HEAD", "--budget-seconds", "300"]);
+    let combined = format!("{stdout}\n{stderr}");
+    assert_eq!(
+        code, 0,
+        "explicit --diff HEAD must keep scoring\n{combined}"
+    );
+    assert!(
+        !combined.contains("cannot resolve a diff base"),
+        "explicit HEAD must not hit the AUTO error\n{combined}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -320,13 +418,17 @@ fn workspace_src_is_scored_from_member_crates() {
 fn good_crate_passes_and_has_the_scorecard_shape() {
     let out = std::env::temp_dir().join(format!("sc-good-{}.json", std::process::id()));
     let out_s = out.to_string_lossy().to_string();
-    let (code, card, stdout, stderr) = analyze(&[
+    let (code, stdout, stderr) = analyze_raw(&[
         "testdata/good_crate",
         "--budget-seconds",
         "120",
         "--out",
         &out_s,
     ]);
+    let written = std::fs::read_to_string(&out).unwrap();
+    let card: serde_json::Value = serde_json::from_str(&written).unwrap_or_else(|err| {
+        panic!("written report was not JSON ({err})\n{written}\nstdout:\n{stdout}");
+    });
     assert_eq!(code, 0, "stderr={stderr}\ncard={card}");
     assert_eq!(card["verdict"], "pass");
     assert_eq!(card["version"], "0.1");
@@ -368,8 +470,9 @@ fn good_crate_passes_and_has_the_scorecard_shape() {
     assert!(rules(&card)
         .iter()
         .all(|rule| *rule != "compile.error" && *rule != "test.failed"));
-    let written = std::fs::read_to_string(&out).unwrap();
-    assert_eq!(written.trim(), stdout.trim());
+    assert!(written.trim_start().starts_with('{'));
+    assert_short_summary(&stdout, &out_s);
+    assert_ne!(written.trim(), stdout.trim());
     let _ = std::fs::remove_file(&out);
 }
 
@@ -733,7 +836,7 @@ fn a11y_stays_advisory_until_fail_on_names_it() {
         !rules(&card).iter().any(|rule| rule.starts_with("a11y.")),
         "{card}"
     );
-    let (code, card, _, stderr) = analyze(&["testdata/a11y_page_bad", "--fail-on", ""]);
+    let (code, card, _, stderr) = analyze(&["testdata/a11y_page_bad", "--fail-on", "none"]);
     assert_eq!(code, 0, "stderr={stderr}\ncard={card}");
     assert!(rules(&card).contains(&"a11y.img-alt"), "{card}");
     let (code, card, _, stderr) = analyze(&["testdata/a11y_page_bad", "--fail-on", "a11y"]);
@@ -743,6 +846,118 @@ fn a11y_stays_advisory_until_fail_on_names_it() {
         .unwrap()
         .iter()
         .any(|gate| { gate["id"] == "a11y" && gate["pass"] == false && gate["enforced"] == true }));
+}
+
+#[test]
+fn empty_fail_on_values_are_rejected() {
+    let mut failures = Vec::new();
+    for value in ["", ",", " "] {
+        let (code, _stdout, stderr) = analyze_raw(&[
+            "testdata/failing_test",
+            "--format",
+            "json",
+            "--fail-on",
+            value,
+        ]);
+        if code != 2 || !stderr.contains("--fail-on") {
+            failures.push(format!(
+                "--fail-on {value:?}: expected exit 2 and a --fail-on error, got exit {code}, stderr={stderr:?}"
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn narrowed_fail_on_reports_failed_enforced_gates() {
+    let (code, stdout, stderr) = analyze_raw(&[
+        "testdata/failing_test",
+        "--format",
+        "json",
+        "--fail-on",
+        "lint",
+    ]);
+    assert_eq!(code, 0, "stderr={stderr}");
+    assert!(stderr.contains("tests"), "stderr={stderr:?}");
+    let card: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(card["fail_on"], serde_json::json!(["lint"]), "{card}");
+
+    let (code, stdout, stderr) = analyze_raw(&[
+        "testdata/failing_test",
+        "--format",
+        "sarif",
+        "--fail-on",
+        "lint",
+    ]);
+    assert_eq!(code, 0, "stderr={stderr}");
+    assert!(stderr.contains("tests"), "stderr={stderr:?}");
+    let sarif: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(
+        sarif["runs"][0]["properties"]["fail_on"],
+        serde_json::json!(["lint"])
+    );
+}
+
+#[test]
+fn none_fail_on_reports_failed_enforced_gates() {
+    let (code, stdout, stderr) = analyze_raw(&[
+        "testdata/failing_test",
+        "--format",
+        "json",
+        "--fail-on",
+        "none",
+    ]);
+    assert_eq!(code, 0, "stderr={stderr}");
+    assert!(stderr.contains("tests"), "stderr={stderr:?}");
+    let card: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(card["fail_on"], serde_json::json!([]), "{card}");
+}
+
+#[test]
+fn none_does_not_reenable_configured_web_gates() {
+    let config = std::env::temp_dir().join(format!("sc-none-web-{}.toml", std::process::id()));
+    std::fs::write(
+        &config,
+        "pack = \"web\"\n\n[gates]\nfail_on = [\"none\"]\n\n[links]\nenforce = true\n",
+    )
+    .unwrap();
+    let config_s = config.to_string_lossy().to_string();
+    let (code, stdout, stderr) = analyze_raw(&[
+        "testdata/web_site_bad",
+        "--format",
+        "json",
+        "--config",
+        &config_s,
+    ]);
+    let _ = std::fs::remove_file(config);
+    assert_eq!(code, 0, "stderr={stderr}");
+    assert!(stderr.contains("links"), "stderr={stderr:?}");
+    let card: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(card["fail_on"], serde_json::json!([]), "{card}");
+    assert!(card["gates"].as_array().unwrap().iter().any(|gate| {
+        gate["id"] == "links" && gate["pass"] == false && gate["enforced"] == true
+    }));
+}
+
+#[test]
+fn excluded_enforced_failures_warn_in_every_output_format() {
+    let mut failures = Vec::new();
+    for format in ["json", "md", "sarif", "html", "all", "pretty"] {
+        let (code, _stdout, stderr) = analyze_raw(&[
+            "testdata/failing_test",
+            "--format",
+            format,
+            "--fail-on",
+            "lint",
+        ]);
+        let warning_lines = stderr.lines().filter(|line| line.contains("tests")).count();
+        if code != 0 || warning_lines != 1 {
+            failures.push(format!(
+                "--format {format}: expected exit 0 and one warning naming tests, got exit {code}, stderr={stderr:?}"
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 #[test]
@@ -839,6 +1054,22 @@ fn scrub_pretty(text: &str) -> String {
     out
 }
 
+/// `--out` prints the short summary on stdout and writes the raw report to the file.
+fn assert_short_summary(stdout: &str, report: &str) {
+    assert!(
+        stdout.lines().any(|line| line.starts_with("sc ")),
+        "stdout should be the short summary:\n{stdout}"
+    );
+    assert!(
+        stdout.contains(&format!("report: {report}")),
+        "stdout should name the written report:\n{stdout}"
+    );
+    assert!(
+        !stdout.trim_start().starts_with('{') && !stdout.contains("<!DOCTYPE html>"),
+        "stdout should not be the raw report:\n{stdout}"
+    );
+}
+
 fn analyze_raw(args: &[&str]) -> (i32, String, String) {
     let _guard = FIXTURE_LOCK.lock().unwrap_or_else(|err| err.into_inner());
     let output = Command::new(env!("CARGO_BIN_EXE_sc"))
@@ -862,14 +1093,16 @@ fn html_format_writes_a_self_contained_report() {
     let (code, stdout, stderr) =
         analyze_raw(&["testdata/good_crate", "--format", "html", "--out", &out_s]);
     assert_eq!(code, 0, "stderr={stderr}\n{stdout}");
-    assert!(
-        stdout.trim_start().starts_with("<!DOCTYPE html>"),
-        "stdout is not html"
-    );
-    assert!(stdout.contains("PASS"), "missing verdict");
-    assert!(stdout.contains("worst crap"), "missing crap section");
     let written = std::fs::read_to_string(&out).unwrap();
-    assert_eq!(written.trim(), stdout.trim());
+    assert!(
+        written.trim_start().starts_with("<!DOCTYPE html>"),
+        "file is not html"
+    );
+    assert!(written.contains("PASS"), "missing verdict");
+    assert!(written.contains("worst crap"), "missing crap section");
+    assert_short_summary(&stdout, &out_s);
+    assert!(stdout.contains("PASS"), "summary missing verdict");
+    assert_ne!(written.trim(), stdout.trim());
     for marker in ["unpkg", "cdn.", "http://", "https://"] {
         assert!(!written.contains(marker), "report fetches {marker}");
     }
@@ -883,9 +1116,8 @@ fn all_format_writes_an_html_sibling() {
     let (code, stdout, stderr) =
         analyze_raw(&["testdata/good_crate", "--format", "all", "--out", &out_s]);
     assert_eq!(code, 0, "stderr={stderr}");
-    // stdout stays JSON+Markdown, never HTML.
-    assert!(stdout.trim_start().starts_with('{'));
-    assert!(!stdout.contains("<!DOCTYPE html>"));
+    // `--out` prints the short summary. The raw formats land in sibling files.
+    assert_short_summary(&stdout, &out_s);
     let html = std::fs::read_to_string(out.with_extension("html")).unwrap();
     assert!(html.contains("<!DOCTYPE html>"));
     for ext in ["json", "md", "sarif", "html"] {
@@ -904,12 +1136,15 @@ fn fail_on_changes_exit_code_without_hiding_enforced_failures_in_any_report() {
         "--out",
         &out_s,
         "--fail-on",
-        "",
+        "none",
     ]);
     assert_eq!(code, 0, "stderr={stderr}\n{stdout}");
+    assert_short_summary(&stdout, &out_s);
 
-    let markdown_start = stdout.find("\n# scorecard\n").expect("markdown output");
-    let card: serde_json::Value = serde_json::from_str(&stdout[..markdown_start]).unwrap();
+    let card: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(out.with_extension("json")).expect("json sibling written"),
+    )
+    .expect("json sibling parses");
     assert_eq!(card["verdict"], "fail", "{card}");
     let secrets_gate = card["gates"]
         .as_array()
@@ -1038,6 +1273,140 @@ fn node_not_found_output_fails_the_tests_gate() {
         !gate_reason.contains("no test script"),
         "reason should not say no test script: {card}"
     );
+}
+
+fn runtime_github_token() -> String {
+    let parts = ["Ab", "3k", "Qm", "9Z", "nR", "4p", "Lx", "7w"];
+    let tail: String = parts.iter().cycle().take(18).copied().collect();
+    format!("ghp_{tail}")
+}
+
+#[test]
+fn tracked_vendor_dist_and_build_fail_the_secrets_gate() {
+    let token = runtime_github_token();
+    let root = std::env::temp_dir().join(format!("sc-secrets-tracked-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("vendor/dep")).unwrap();
+    std::fs::create_dir_all(root.join("dist")).unwrap();
+    std::fs::create_dir_all(root.join("build")).unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("src/lib.rs"), "pub fn ok() {}\n").unwrap();
+    std::fs::write(
+        root.join("vendor/dep/lib.js"),
+        format!("const V = \"{token}\";\n"),
+    )
+    .unwrap();
+    std::fs::write(root.join("dist/app.js"), format!("var k=\"{token}\";\n")).unwrap();
+    std::fs::write(root.join("build/c.txt"), format!("k={token}\n")).unwrap();
+    let git = |args: &[&str]| {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args(args)
+            .output()
+            .expect("git");
+        assert!(output.status.success(), "git {args:?}: {output:?}");
+    };
+    git(&["init", "-q"]);
+    git(&["add", "-A"]);
+    git(&[
+        "-c",
+        "user.name=Scorecard test",
+        "-c",
+        "user.email=sc-test@example.com",
+        "commit",
+        "-q",
+        "-m",
+        "v",
+    ]);
+    let root_str = root.to_str().expect("utf-8 temp path");
+    let (code, card, _, stderr) = analyze(&[root_str, "--format", "json"]);
+    assert_eq!(code, 1, "stderr={stderr}\ncard={card}");
+    let secrets_gate = card["gates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|gate| gate["id"] == "secrets")
+        .expect("secrets gate");
+    assert!(
+        !secrets_gate["pass"].as_bool().unwrap(),
+        "secrets gate should fail: {card}"
+    );
+    let secret_files: Vec<&str> = card["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|finding| {
+            finding["severity"].as_str() == Some("error")
+                && finding["rule"]
+                    .as_str()
+                    .is_some_and(|rule| rule.starts_with("secrets."))
+        })
+        .filter_map(|finding| finding["file"].as_str())
+        .collect();
+    for file in ["vendor/dep/lib.js", "dist/app.js", "build/c.txt"] {
+        assert!(
+            secret_files.contains(&file),
+            "missing {file} in {secret_files:?} card={card}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn committed_sc_binary_does_not_flag_secrets_on_sc() {
+    let root = std::env::temp_dir().join(format!("sc-secrets-binary-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("src/lib.rs"), "pub fn ok() {}\n").unwrap();
+    std::fs::copy(env!("CARGO_BIN_EXE_sc"), root.join("sc")).expect("copy sc binary");
+    let git = |args: &[&str]| {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args(args)
+            .output()
+            .expect("git");
+        assert!(output.status.success(), "git {args:?}: {output:?}");
+    };
+    git(&["init", "-q"]);
+    git(&["add", "-A"]);
+    git(&[
+        "-c",
+        "user.name=Scorecard test",
+        "-c",
+        "user.email=sc-test@example.com",
+        "commit",
+        "-q",
+        "-m",
+        "init",
+    ]);
+    let root_str = root.to_str().expect("utf-8 temp path");
+    let (_code, card, _, stderr) = analyze(&[root_str, "--format", "json"]);
+    let bad_on_sc = card["findings"]
+        .as_array()
+        .unwrap_or_else(|| panic!("findings array: {card} stderr={stderr}"))
+        .iter()
+        .filter(|finding| {
+            finding["file"].as_str() == Some("sc")
+                && finding["severity"].as_str() == Some("error")
+                && finding["rule"]
+                    .as_str()
+                    .is_some_and(|rule| rule.starts_with("secrets."))
+        })
+        .collect::<Vec<_>>();
+    assert!(bad_on_sc.is_empty(), "{bad_on_sc:?} card={card}");
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 fn sc_with_home(home: &std::path::Path, args: &[&str]) -> (i32, String, String) {

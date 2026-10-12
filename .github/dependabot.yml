@@ -14,7 +14,8 @@ updates:
         update-types:
           - minor
           - patch
-    # Majors pinned for MSRV 1.85 / pending deliberate migration.
+    # Majors pinned for MSRV 1.88 / pending deliberate migration.
+    # uuid 1.27 and later need rustc 1.89. Ignore them until the MSRV moves.
     ignore:
       - dependency-name: toml
         update-types: ["version-update:semver-major"]
@@ -24,6 +25,8 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: criterion
         update-types: ["version-update:semver-major"]
+      - dependency-name: uuid
+        versions: [">= 1.27.0"]
   - package-ecosystem: github-actions
     directory: /
     schedule:

@@ -13,6 +13,7 @@ pub const GENERATED_SKIP_DIRS: &[&str] = &[
     "dist",
     "build",
     "out",
+    "cdk.out",
     "coverage",
     "generated",
     "vendor",
@@ -68,6 +69,7 @@ pub enum WalkItem {
 pub struct Walk {
     root: PathBuf,
     includes: Vec<String>,
+    include_generated_files: bool,
     inner: IgnoreWalk,
 }
 
@@ -78,6 +80,8 @@ pub struct WalkOptions {
     pub include_hidden_directories: bool,
     /// Match `directory/**` exclusions from the project root only.
     pub root_directory_excludes: bool,
+    /// Read generated files while preserving directory and path exclusions.
+    pub include_generated_files: bool,
 }
 
 /// Walk a project subtree with the shared defaults, nested `.gitignore`
@@ -144,8 +148,103 @@ pub fn walk_with_options(
     Walk {
         root,
         includes,
+        include_generated_files: options.include_generated_files,
         inner: builder.build(),
     }
+}
+
+/// When `root` is a git work tree, paths to scan for secrets and which are tracked.
+pub struct GitSecretsPaths {
+    pub paths: Vec<String>,
+    pub tracked: std::collections::HashSet<String>,
+}
+
+/// Paths from `git ls-files` when `root` is a git work tree. Outside git, returns `None`.
+pub fn git_secrets_paths(root: &Path) -> Option<Result<GitSecretsPaths, String>> {
+    use std::process::Command;
+    let inside = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output();
+    let Ok(output) = inside else {
+        return None;
+    };
+    if !output.status.success() || String::from_utf8_lossy(&output.stdout).trim() != "true" {
+        return None;
+    }
+    let listing = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args([
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output();
+    let Ok(listing) = listing else {
+        return None;
+    };
+    if !listing.status.success() {
+        return Some(Err(String::from_utf8_lossy(&listing.stderr)
+            .trim()
+            .to_string()));
+    }
+    let paths = listing
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|chunk| !chunk.is_empty())
+        .map(git_ls_path_chunk)
+        .collect();
+    let tracked_listing = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["ls-files", "-z", "--cached"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output();
+    let Ok(tracked_listing) = tracked_listing else {
+        return None;
+    };
+    if !tracked_listing.status.success() {
+        return Some(Err(String::from_utf8_lossy(&tracked_listing.stderr)
+            .trim()
+            .to_string()));
+    }
+    let tracked = tracked_listing
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|chunk| !chunk.is_empty())
+        .map(git_ls_path_chunk)
+        .collect();
+    Some(Ok(GitSecretsPaths { paths, tracked }))
+}
+
+fn git_ls_path_chunk(chunk: &[u8]) -> String {
+    String::from_utf8_lossy(chunk).into_owned()
+}
+
+/// Whether a directory-oriented source walk would skip this relative path.
+pub fn source_walk_skips_path(
+    rel: &str,
+    include_generated: &[String],
+    include_hidden_directories: bool,
+) -> bool {
+    skip_directory(rel, include_generated, include_hidden_directories)
+}
+
+/// Whether the configured scope includes a git-listed path for secrets scanning.
+pub fn secrets_scan_includes_path(rel: &str, exclude: &[String]) -> bool {
+    !rel.is_empty() && !is_excluded(rel, exclude, true)
 }
 
 /// Return regular files from a shared project walk.
@@ -232,7 +331,10 @@ impl Iterator for Walk {
                     let kind = if file_type.is_dir() {
                         WalkKind::Directory
                     } else if file_type.is_file() {
-                        if !included_path(&rel, &self.includes) && is_generated_file(&path) {
+                        if !self.include_generated_files
+                            && !included_path(&rel, &self.includes)
+                            && is_generated_file(&path)
+                        {
                             continue;
                         }
                         WalkKind::File
@@ -425,6 +527,30 @@ mod tests {
         fs::write(root.join("src/target/source.rs"), "fn source() {}\n").unwrap();
 
         assert_eq!(paths(&root, &[]), ["src/target/source.rs"]);
+    }
+
+    #[test]
+    fn skips_cdk_out_and_gitignored_generated_dirs() {
+        let root = temp("cdk-out");
+        fs::create_dir_all(root.join("aws/infra/cdk.out/asset.123")).unwrap();
+        fs::create_dir_all(root.join("synth-out")).unwrap();
+        fs::create_dir_all(root.join("app")).unwrap();
+        fs::write(
+            root.join("aws/infra/cdk.out/asset.123/synth.py"),
+            "def handler(event):\n    return event\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("synth-out/bundle.py"),
+            "def bundle():\n    return 1\n",
+        )
+        .unwrap();
+        fs::write(root.join("app/main.py"), "def main():\n    return 0\n").unwrap();
+        // cdk.out is skipped by name; synth-out is skipped because it is
+        // git-ignored, even though the name is not a well-known build dir.
+        fs::write(root.join(".gitignore"), "synth-out/\n").unwrap();
+
+        assert_eq!(paths(&root, &[]), [".gitignore", "app/main.py"]);
     }
 
     #[test]

@@ -73,11 +73,19 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
         run: cargo test --workspace --locked
+      - name: archive layout
+        run: bash scripts/test-archive-layout.sh
+      - name: release text check
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libarchive-tools p7zip-full
+          bash scripts/test-check-release-text.sh
+      - name: release install staging
+        run: bash scripts/test-release-install-staging.sh
 
   # macOS coverage runs on pushes to develop and manual dispatch, not PRs.
-  # No fixture tooling here (setup-php hung 10+ min): build plus fmt,
-  # clippy, and the fixture-free lib unit tests only. Ubuntu covers
-  # the full fixture matrix.
+  # Library tests exercise Rust coverage and Python linting. Ubuntu covers
+  # the full multi-language fixture matrix.
   check-macos:
     if: github.event_name != 'pull_request'
     runs-on: macos-14
@@ -86,14 +94,23 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
-          components: rustfmt, clippy
+          components: rustfmt, clippy, llvm-tools-preview
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - name: Install core test tools
+        run: |
+          cargo install cargo-llvm-cov --locked
+          python3 -m venv "$RUNNER_TEMP/sc-core-tools"
+          "$RUNNER_TEMP/sc-core-tools/bin/python" -m pip install ruff
+          echo "$RUNNER_TEMP/sc-core-tools/bin" >> "$GITHUB_PATH"
       - name: fmt
         run: cargo fmt --check
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test core
-        run: cargo test --workspace --locked --lib
+        run: |
+          cargo llvm-cov --version
+          ruff --version
+          cargo test --workspace --locked --lib
 
   # Supply chain and MSRV stay Ubuntu-only and cached, like everything else.
   deny:
@@ -113,14 +130,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # Install 1.85 via rustup instead of a second dtolnay pin: two pins
+      # Install 1.88 via rustup instead of a second dtolnay pin: two pins
       # from the same action at different refs confuse Dependabot.
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-      - name: Install Rust 1.85
-        run: rustup toolchain install 1.85 --profile minimal
+      - name: Install Rust 1.88
+        run: rustup toolchain install 1.88 --profile minimal
       - name: Check MSRV
-        run: cargo +1.85 check --workspace --locked --all-targets
+        run: cargo +1.88 check --workspace --locked --all-targets
 
   # Workspace line coverage via cargo-llvm-cov, with the report as an
   # artifact. Push-only like dogfood: PRs already run the suite without
@@ -171,7 +188,7 @@ jobs:
         run: cargo llvm-cov --workspace --locked --lcov --output-path coverage.lcov --fail-under-lines 70
       - name: Upload report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-report
           path: coverage.lcov
@@ -229,7 +246,7 @@ jobs:
         run: ./target/release/sc analyze . --format all --out sc-report --budget-seconds 600
       - name: Upload reports
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: scorecard-dogfood
           path: |

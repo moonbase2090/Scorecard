@@ -12,9 +12,11 @@ pub const KNOWN_GATES: &[&str] = &[
     "types", "tests", "crap", "secrets", "sca", "spec", "mutation", "lint", "html", "links", "a11y",
 ];
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct Config {
+    /// Install or update the Scorecard agent skill during automatic install hooks.
+    pub install_agent_skills: bool,
     pub gates: GatesConfig,
     pub scope: ScopeConfig,
     pub mutation: MutationConfig,
@@ -29,6 +31,25 @@ pub struct Config {
     /// Rustup channel for check, test, coverage, and lint. Empty uses
     /// `rust-toolchain.toml` / `rust-toolchain` in the project root.
     pub toolchain: String,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            install_agent_skills: true,
+            gates: GatesConfig::default(),
+            scope: ScopeConfig::default(),
+            mutation: MutationConfig::default(),
+            llm: LlmConfig::default(),
+            engines: EnginesConfig::default(),
+            commands: CommandsConfig::default(),
+            html: HtmlConfig::default(),
+            links: LinksConfig::default(),
+            a11y: A11yConfig::default(),
+            pack: String::new(),
+            toolchain: String::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -185,20 +206,36 @@ impl Default for EnginesConfig {
 }
 
 pub fn normalize_gates(list: &[String]) -> Result<Vec<String>, String> {
-    let mut out = Vec::new();
-    for item in list {
-        for part in item.split(',') {
-            let gate = part.trim().to_ascii_lowercase();
-            if gate.is_empty() {
-                continue;
-            }
-            if !KNOWN_GATES.contains(&gate.as_str()) {
-                return Err(format!("unknown gate `{gate}`"));
-            }
-            if !out.contains(&gate) {
-                out.push(gate);
-            }
+    let parts: Vec<_> = list.iter().flat_map(|item| item.split(',')).collect();
+    if parts
+        .iter()
+        .any(|part| part.trim().eq_ignore_ascii_case("none"))
+    {
+        if parts.len() == 1 && parts[0].trim().eq_ignore_ascii_case("none") {
+            return Ok(Vec::new());
         }
+        return Err(
+            "`none` must be the only fail-on value. Pass --fail-on none by itself or set gates.fail_on = [\"none\"].".into(),
+        );
+    }
+
+    let mut out = Vec::new();
+    for part in parts {
+        let gate = part.trim().to_ascii_lowercase();
+        if gate.is_empty() {
+            continue;
+        }
+        if !KNOWN_GATES.contains(&gate.as_str()) {
+            return Err(format!("unknown gate `{gate}`"));
+        }
+        if !out.contains(&gate) {
+            out.push(gate);
+        }
+    }
+    if out.is_empty() {
+        return Err(
+            "No gate can fail this run because the fail-on selection is empty. Omit the --fail-on option or the gates.fail_on setting to use the default gates, name one or more gates, or pass --fail-on none for report-only output.".into(),
+        );
     }
     Ok(out)
 }
@@ -255,6 +292,7 @@ mod tests {
     #[test]
     fn defaults_match_m1() {
         let config = Config::default();
+        assert!(config.install_agent_skills);
         assert_eq!(
             config.gates.fail_on,
             vec!["types", "tests", "crap", "secrets", "lint"]
@@ -269,6 +307,12 @@ mod tests {
         assert_eq!(config.mutation.mode, "off");
         assert_eq!(config.commands.lint, "cargo clippy --workspace");
         assert!(!config.commands.lint.contains("-D warnings"));
+    }
+
+    #[test]
+    fn agent_skill_installation_can_be_disabled_in_config() {
+        let config: Config = toml::from_str("install_agent_skills = false\n").unwrap();
+        assert!(!config.install_agent_skills);
     }
 
     #[test]
@@ -298,5 +342,20 @@ mod tests {
     fn rejects_unknown_gates() {
         let err = normalize_gates(&["types,nope".into()]).unwrap_err();
         assert!(err.contains("nope"));
+    }
+
+    #[test]
+    fn rejects_empty_gate_lists() {
+        assert!(normalize_gates(&["".into()]).is_err());
+        assert!(normalize_gates(&[" , ".into()]).is_err());
+    }
+
+    #[test]
+    fn none_must_be_the_only_gate_value() {
+        for value in ["none,", ",none", "none,lint"] {
+            let err = normalize_gates(&[value.into()]).unwrap_err();
+            assert!(err.contains("`none` must be the only"), "{err}");
+        }
+        assert!(normalize_gates(&[" none ".into()]).unwrap().is_empty());
     }
 }

@@ -3,6 +3,7 @@
 
 mod a11y;
 mod cargo_test;
+mod clippy;
 mod command;
 mod compile;
 mod coverage;
@@ -17,12 +18,16 @@ mod pack_cov;
 mod pipeline;
 mod poly_cc;
 mod python;
+mod python_imports;
 mod rust_toolchain;
 mod scope;
 mod secrets;
 mod spec_check;
 mod toolchain;
+mod toolchain_plans;
+mod weakening;
 
 pub use pipeline::{
-    analyze, analyze_with_generated_paths, AnalyzeOutput, AnalyzeRequest, RunStatus,
+    analyze, analyze_with_generated_paths, AnalyzeOutput, AnalyzeRequest, ProgressCallback,
+    RunStatus,
 };

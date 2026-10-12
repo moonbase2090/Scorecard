@@ -584,9 +584,9 @@ dependencies = [
 
 [[package]]
 name = "ignore"
-version = "0.4.26"
+version = "0.4.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b915661dd01db3f05050265b2477bcc6527b3792388e2749b41623cc592be67d"
+checksum = "00b69833ed729dc5aa7d19541d96d6cf8e9137194207a04916d658e43168402f"
 dependencies = [
  "crossbeam-deque",
  "globset",
@@ -642,9 +642,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.189"
+version = "0.2.190"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
+checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
 
 [[package]]
 name = "litemap"
@@ -931,7 +931,7 @@ dependencies = [
 
 [[package]]
 name = "sc-cli"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anstyle",
  "clap",
@@ -944,7 +944,7 @@ dependencies = [
 
 [[package]]
 name = "sc-core"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "criterion",
  "serde",
@@ -955,7 +955,7 @@ dependencies = [
 
 [[package]]
 name = "sc-engines"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "html5ever",
  "rustc-demangle",
@@ -971,7 +971,7 @@ dependencies = [
 
 [[package]]
 name = "sc-graph"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "ignore",
  "proc-macro2",
@@ -982,7 +982,7 @@ dependencies = [
 
 [[package]]
 name = "sc-llm"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "serde",
  "serde_json",
@@ -991,7 +991,7 @@ dependencies = [
 
 [[package]]
 name = "sc-mcp"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "sc-core",
  "sc-engines",
@@ -1000,11 +1000,11 @@ dependencies = [
 
 [[package]]
 name = "sc-mutation"
-version = "0.1.6"
+version = "0.1.7"
 
 [[package]]
 name = "sc-sarif"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "sc-core",
  "serde_json",
