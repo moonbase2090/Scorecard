@@ -15,7 +15,7 @@ sc setup
 
 ## Install the skill
 
-`sc skills install` installs the embedded skill without changing MCP settings. By default it targets Codex (`~/.codex/skills/scorecard` and `~/.agents/skills/scorecard`), Claude Code (`~/.claude/skills/scorecard`), Cursor (`~/.cursor/skills/scorecard`), Kiro (`~/.kiro/skills/scorecard`), and Muse through `muse skills install`. `--agent codex` writes both Codex and shared locations.
+`sc skills install` installs the embedded skill without changing MCP settings. By default it targets all supported integrations. Run `sc skills install --help` to list agent identifiers. File-based integrations use the `skills/scorecard` directory under the agent configuration directory; other integrations use their own installer command. `--agent codex` writes both Codex and shared locations.
 
 ```bash
 sc skills install --agent codex

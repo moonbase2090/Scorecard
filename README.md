@@ -52,7 +52,7 @@ While analysis runs, an interactive terminal shows the current step and elapsed 
 In a terminal the report looks like this (from `testdata/good_crate`):
 
 ```text
-sc 0.1.6  testdata/good_crate  rust  5ac851c clean  scope tree
+sc 0.1.7  testdata/good_crate  rust  5ac851c clean  scope tree
 
 PASS
 
@@ -134,7 +134,7 @@ The secrets scan also finds PEM private keys split across source string literals
 
 ## Install
 
-Release [v0.1.6](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.6). Each `.tar.gz` holds a top-level directory `sc-v<version>-<target>/` with `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md` (v0.1.6 archives use a flat layout; the GitHub Action accepts both).
+Published release [v0.1.6](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.6). Each `.tar.gz` holds a top-level directory `sc-v<version>-<target>/` with `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md` (v0.1.6 archives use a flat layout; the GitHub Action accepts both).
 
 | Platform | Asset |
 |---|---|

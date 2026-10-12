@@ -29,4 +29,7 @@ jobs:
       - name: Build sc
         run: cargo build --locked -p sc-cli
       - name: Check docs against the CLI
-        run: python3 scripts/check-docs.py --sc target/debug/sc --network
+        run: |
+          python3 scripts/test-check-docs.py
+          python3 scripts/check-version-stamps.py
+          python3 scripts/check-docs.py --sc target/debug/sc --network

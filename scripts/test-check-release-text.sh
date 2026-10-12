@@ -134,4 +134,39 @@ if [ "$bad_status" -ne 2 ]; then
 fi
 echo "corrupt pkg rejected ok"
 
+mpl_dist="$work/dist-mpl"
+mkdir -p "$mpl_dist/bundle"
+cp "$root/LICENSE" "$mpl_dist/bundle/LICENSE"
+printf 'ok\n' >"$mpl_dist/bundle/README.md"
+sh "$root/scripts/tar-release.sh" "$mpl_dist/mpl.tar.gz" "$mpl_dist" bundle
+rm -rf "$mpl_dist/bundle"
+# A word from the official license, chosen at runtime so this script does not
+# carry an optional deny term.
+license_term=$(sed -n '241p' "$root/LICENSE" | awk '{ print $4 }')
+export RELEASE_DENYLIST="$license_term"
+if run_mini --dist "$mpl_dist"; then
+  :
+else
+  echo "expected unmodified license text in an archive to pass optional rules" >&2
+  exit 1
+fi
+export RELEASE_DENYLIST=''
+account=$(id -un)
+if tar -tzvf "$mpl_dist/mpl.tar.gz" | grep -q -F -e "$account"; then
+  echo "expected archive listing to omit the builder account" >&2
+  exit 1
+fi
+echo "unmodified license and neutral owner ok"
+
+edited="$work/edited-license"
+cp "$root/LICENSE" "$edited"
+printf '\nPRIVATE-NODE-TEST\n' >>"$edited"
+export RELEASE_DENYLIST='PRIVATE-NODE-TEST'
+if run_mini "$edited"; then
+  echo "expected a changed license file to stay under optional rules" >&2
+  exit 1
+fi
+export RELEASE_DENYLIST=''
+echo "changed license still scanned ok"
+
 echo "check-release-text self-test ok"
