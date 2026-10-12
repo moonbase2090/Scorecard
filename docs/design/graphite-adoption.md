@@ -14,20 +14,20 @@ The human report in `crates/sc-cli/src/pretty.rs` paints with ANSI named colors 
 2. An opt-in Graphite theme, off by default, paints truecolor from `tokens(ThemeVariant::Dark)` or `tokens(ThemeVariant::Light)`.
 3. Depend on `graphite-core` by a full git revision. The crate sets `publish = false`, so there is no crates.io version to require.
 4. Accept Graphite's MPL-2.0 license, the same license as Scorecard. Link the crate. Do not vendor or rewrite it. A separate helper, if one were ever required, may be MIT. None is required for this work.
-5. Keep today's `NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`, and TTY rules. The theme runs only when color is already on.
+5. Keep today's `NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`, and TTY rules for report color. The theme runs only when color is already on. `NO_COLOR` leaves the uncolored spinner visible.
 6. Call `ellipsize` only after the pinned revision treats extended grapheme clusters as atomic. The default branch still walks scalars.
 7. Keep the ASCII `~` cut when color is off. `ellipsize` always appends U+2026.
-8. JSON, SARIF, HTML, Markdown, and MCP output stay unchanged.
+8. JSON, SARIF, HTML, Markdown, and MCP file and pipe output stay unchanged. With `--out`, stdout is the pretty report and follows the color and truncation rules below.
 
 ## Surfaces
 
 ### Progress animation
 
-The spinner stays on stderr, braille frames, 80 ms tick, and the line rewrite `\r` plus clear-to-end. It has no color.
+The spinner stays on stderr, braille frames, 80 ms tick, and the line rewrite `\r` plus clear-entire-line (`\x1b[2K`). It has no color. `NO_COLOR` leaves this uncolored spinner visible.
 
 When the spinner is shown, cut the step label with `ellipsize` so the frame, label, separator, and elapsed time fit the terminal width. The budget is the column count minus the frame, the spaces, ` · `, and the elapsed field (`M:SS` or `H:MM:SS`).
 
-`should_show` stays as it is. `NO_COLOR`, `TERM=dumb`, `--quiet`, a non-TTY stderr, CI (`CI`, `CONTINUOUS_INTEGRATION`, `GITHUB_ACTIONS`, `GITLAB_CI`, `JENKINS_URL`, `TEAMCITY_VERSION`, `TF_BUILD`), and `SC_MCP` keep the spinner hidden. `NO_COLOR` does not become a monochrome spinner.
+`should_show` does not read `NO_COLOR`. The spinner stays hidden when stderr is not a TTY, when `--quiet` is set, when `TERM=dumb`, in CI (`CI`, `CONTINUOUS_INTEGRATION`, `GITHUB_ACTIONS`, `GITLAB_CI`, `JENKINS_URL`, `TEAMCITY_VERSION`, `TF_BUILD`), and when `SC_MCP` is set. Do not color the spinner.
 
 ### Report tables
 
@@ -121,7 +121,9 @@ Width is `COLUMNS` when it parses to at least 40, otherwise the Unix column coun
 
 `use_color` does not read `TERM`. `TERM=dumb` hides the spinner and leaves report color to the list above. This design does not add `TERM=dumb` to the color decision.
 
-Non-TTY stdout with no explicit format is JSON. There is no pretty color and no `fit`. Explicit pretty on a non-TTY is uncolored unless `CLICOLOR_FORCE` is set, and the cut uses `~`.
+Without `--out`, non-TTY stdout with no explicit format is JSON. That stream has no pretty color and no `fit`. Explicit pretty on a non-TTY is uncolored unless `CLICOLOR_FORCE` is set, and the cut uses `~`.
+
+With `--out`, stdout is the pretty report in every environment. That includes a redirected stdout and a file written as JSON, SARIF, HTML, Markdown, or `all`. The file still receives the chosen format. Color on that stdout follows `use_color`. A redirected summary is uncolored unless `CLICOLOR_FORCE` is set, and the cut uses `~`.
 
 The Graphite theme does not override `NO_COLOR`.
 
@@ -133,9 +135,11 @@ The Graphite theme does not override `NO_COLOR`.
 | 2 | Pin `graphite-core`. Private `sc-cli` adapter and unit test. No pretty or spinner call. No CLI change. | small | trunk, because `Cargo.toml` and `Cargo.lock` change |
 | 3 | Ellipsis path uses `ellipsize` after the grapheme-safe revision is pinned. The `~` path stays. | small | trunk if the pin moves, otherwise leaf (`pretty.rs` and its tests) |
 | 4 | Opt-in theme, off by default, with the CLI reference updated in the same pull request | small to medium | trunk, public CLI or config |
-| 5 | Ellipsize the spinner step when the spinner is shown. Show and color gates stay. | small | leaf (`progress.rs`) |
+| 5 | Ellipsize the spinner step when the spinner is shown. `NO_COLOR` still shows the uncolored spinner. Other show gates stay. | small | leaf (`progress.rs`) |
 
 Phase 1 does not edit `CHANGELOG.md`. A later phase that changes what a person sees does. No phase bumps the version. New theme behavior ships off by default.
+
+Phases 3 and 4 include a redirected `--out` summary in their proof: pretty text on a non-TTY stdout, a `~` cut when color is off, and the theme still off unless color is already on.
 
 ## Risks
 
@@ -148,6 +152,6 @@ Phase 1 does not edit `CHANGELOG.md`. A later phase that changes what a person s
 - The crate is unpublished. A rewritten history can drop the pinned revision. Pin a full commit, not a branch.
 - The lockfile will record the git dependency and its checksum.
 - `fit`'s third argument is the color flag. The truncation pull request keeps that pairing.
-- `NO_COLOR` hides the spinner. Leaving the spinner up in a monochrome form would change CI and pipe behavior.
+- `NO_COLOR` leaves the uncolored spinner visible. Hiding it, or painting it, would change current behavior.
 - The one-cell metric can count a ZWJ sequence as wider than a terminal cell.
 - `ellipsize` can return an empty string. The adapter maps that to a single marker at width 1.
