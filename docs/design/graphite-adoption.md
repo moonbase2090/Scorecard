@@ -110,9 +110,9 @@ Every Scorecard crate sets `publish = false`. A git dependency is fine while tha
 
 `use_color` in `pretty.rs`:
 
-1. `NO_COLOR` present (including an empty value) turns color off, before `CLICOLOR_FORCE`.
-2. `CLICOLOR_FORCE` other than `0` forces color.
-3. `CLICOLOR=0` turns color off.
+1. `NO_COLOR` present (including an empty value) turns color off. This wins over `CLICOLOR_FORCE`.
+2. When `CLICOLOR_FORCE` is set, that value decides color. `CLICOLOR` and the TTY are not consulted. `0` turns color off, including on a TTY. Any other value, including empty, turns color on, including when stdout is not a TTY.
+3. When `CLICOLOR_FORCE` is unset, `CLICOLOR=0` turns color off.
 4. Otherwise color follows whether stdout is a TTY.
 
 `stdout_format`: an explicit `pretty`, `md`, `sarif`, `html`, `all`, or `json` wins. With no format, a TTY stdout uses pretty and any other stdout uses JSON.
@@ -121,11 +121,11 @@ Width is `COLUMNS` when it parses to at least 40, otherwise the Unix column coun
 
 `use_color` does not read `TERM`. `TERM=dumb` hides the spinner and leaves report color to the list above. This design does not add `TERM=dumb` to the color decision.
 
-Without `--out`, non-TTY stdout with no explicit format is JSON. That stream has no pretty color and no `fit`. Explicit pretty on a non-TTY is uncolored unless `CLICOLOR_FORCE` is set, and the cut uses `~`.
+Without `--out`, non-TTY stdout with no explicit format is JSON. That stream has no pretty color and no `fit`. Explicit pretty on a non-TTY is uncolored unless `CLICOLOR_FORCE` is a value other than `0`, and the cut uses `~`.
 
-With `--out`, stdout is the pretty report in every environment. That includes a redirected stdout and a file written as JSON, SARIF, HTML, Markdown, or `all`. The file still receives the chosen format. Color on that stdout follows `use_color`. A redirected summary is uncolored unless `CLICOLOR_FORCE` is set, and the cut uses `~`.
+With `--out`, stdout is the pretty report in every environment. That includes a redirected stdout and a file written as JSON, SARIF, HTML, Markdown, or `all`. The file still receives the chosen format. Color on that stdout follows `use_color`. A redirected summary is uncolored unless `CLICOLOR_FORCE` is a value other than `0`, and the cut uses `~`.
 
-The Graphite theme does not override `NO_COLOR`.
+The Graphite theme runs only when `use_color` is already true. `NO_COLOR` and `CLICOLOR_FORCE=0` both keep it off.
 
 ## Phased pull requests
 
