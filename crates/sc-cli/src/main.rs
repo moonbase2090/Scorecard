@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 fn main() {
     std::process::exit(sc_cli::run());
 }

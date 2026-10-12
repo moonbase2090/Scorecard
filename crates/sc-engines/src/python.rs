@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! Python pack: compile, pytest, Ruff, and imports checked against pyproject.toml.
 //!
 //! A local module is not a finding. An installed or published import missing from

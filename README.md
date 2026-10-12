@@ -166,4 +166,4 @@ For a Cargo workspace, analyze the root to check every member. Analyze a member 
 
 ## License
 
-Scorecard is licensed under the [Mozilla Public License 2.0](LICENSE). You can use it in commercial products. If you distribute modified MPL-covered files, you must make their source available under MPL-2.0.
+Scorecard is licensed under the [Mozilla Public License 2.0](LICENSE). You can use it in commercial products. If you distribute modified MPL-covered files, you must make their source available under MIT.

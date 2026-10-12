@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! Deterministic engines. They return findings and never print diagnostics.
 
 mod a11y;

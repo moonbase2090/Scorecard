@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 /// The import is cfg-off so `cargo check` still passes.
 /// `sc` still sees `missing_crate` and reports `sca.undeclared_dependency`.
 #[cfg(any())]

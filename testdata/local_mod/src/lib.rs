@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! A `pub use` of a local module must not read as an external crate.
 //! Mirrors the `mod score;` + `pub use score::...` shape in sc-core.
 

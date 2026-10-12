@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! Optional spec-gap review over an OpenAI-compatible chat endpoint.
 //!
 //! The built-in default endpoint is local Ollama. When `XAI_API_KEY` is set

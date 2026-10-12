@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! User-level `~/.config/sc/analyzer.toml`.
 
 use std::fs;

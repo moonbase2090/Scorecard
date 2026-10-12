@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! Assemble a scorecard from the deterministic engines.
 //!
 //! Engines return structured findings. Nothing in this crate writes user-facing
