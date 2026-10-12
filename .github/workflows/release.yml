@@ -29,9 +29,8 @@ jobs:
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
       - name: Build arm64 and x86_64
-        env:
-          RUSTFLAGS: --remap-path-prefix=/Users/=/src/ --remap-path-prefix=/home/=/src/
         run: |
+          export RUSTFLAGS="--remap-path-prefix=$HOME=/src --remap-path-prefix=$GITHUB_WORKSPACE=/src/scorecard"
           cargo build --release --locked -p sc-cli -p sc-mcp --target aarch64-apple-darwin
           cargo build --release --locked -p sc-cli -p sc-mcp --target x86_64-apple-darwin
       - name: Package universal disk image
@@ -80,8 +79,9 @@ jobs:
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-          RUSTFLAGS: --remap-path-prefix=/Users/=/src/ --remap-path-prefix=/home/=/src/
-        run: cargo build --release --locked -p sc-cli -p sc-mcp --target ${{ matrix.target }}
+        run: |
+          export RUSTFLAGS="--remap-path-prefix=$HOME=/src --remap-path-prefix=$GITHUB_WORKSPACE=/src/scorecard"
+          cargo build --release --locked -p sc-cli -p sc-mcp --target ${{ matrix.target }}
       - name: Package
         run: |
           set -eu
