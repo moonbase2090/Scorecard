@@ -1,7 +1,7 @@
 # Scorecard
 
 [![CI](https://github.com/moonbase2090/Scorecard/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/moonbase2090/Scorecard/actions/workflows/ci.yml?query=branch%3Amain)
-[![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![MSRV 1.88](https://img.shields.io/badge/MSRV-1.88-blue.svg)](https://github.com/moonbase2090/Scorecard/blob/main/Cargo.toml)
 
 `sc` is a local code-quality gate. In one run it checks that a project builds, its tests pass, complex code is covered by tests ([CRAP](docs/crap.md)), no secrets are committed, the linter is clean, and every import is a declared dependency. It prints a verdict for people and a JSON scorecard for agents and CI. Ten language packs are built in. Project site: [scorecardcli.com](https://scorecardcli.com).
@@ -166,4 +166,4 @@ For a Cargo workspace, analyze the root to check every member. Analyze a member 
 
 ## License
 
-Scorecard is licensed under the [Mozilla Public License 2.0](LICENSE). You can use it in commercial products. If you distribute modified MPL-covered files, you must make their source available under MIT.
+Scorecard is licensed under the [MIT License](LICENSE).

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
