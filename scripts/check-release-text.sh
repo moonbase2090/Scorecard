@@ -13,7 +13,12 @@ release_body=""
 tag_message=""
 hits=$(mktemp)
 patterns=$(mktemp)
-trap 'rm -f "$hits" "$patterns"' EXIT
+builtin=$(mktemp)
+trap 'rm -f "$hits" "$patterns" "$builtin"' EXIT
+
+# Unmodified Mozilla Public License 2.0. Optional deny rules collide with
+# that required text, so only the built-in rules apply when the digest matches.
+MPL2_SHA256=66a3107d5ad6a058aab753eaac2047ccb2ed0e39465dd0fe5844da3e300d5172
 
 usage() {
   echo "usage: $0 [--root DIR] [--dist DIR] [--release-title FILE] [--release-body FILE] [--tag-message FILE] [FILE ...]" >&2
@@ -71,7 +76,16 @@ cd "$root"
     '-----BEGIN [A-Z ]*PRIVATE KEY-----' \
     '(ghp|gho|ghs|ghu|github_pat)_[A-Za-z0-9_]{20,}' \
     '\b(10\.[0-9]+\.[0-9]+\.[0-9]+|192\.168\.[0-9]+\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+)\b'
-} >>"$patterns"
+} >>"$builtin"
+cp "$builtin" "$patterns"
+
+file_sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk 'NR==1 { print $1 }'
+  else
+    shasum -a 256 "$1" | awk 'NR==1 { print $1 }'
+  fi
+}
 
 if [ -f "${HOME:-}/.config/moonbase/release-denylist.txt" ]; then
   while IFS= read -r line || [ -n "$line" ]; do
@@ -138,10 +152,15 @@ scan_text_file() {
   hit_label="$1"
   text_path="$2"
   [ -f "$text_path" ] || return 0
+  pattern_file="$patterns"
+  digest=$(file_sha256 "$text_path" || true)
+  if [ "$digest" = "$MPL2_SHA256" ]; then
+    pattern_file="$builtin"
+  fi
   grep_out=$(mktemp)
   grep_err=$(mktemp)
   set +e
-  grep -Ein -f "$patterns" "$text_path" >"$grep_out" 2>"$grep_err"
+  grep -Ein -f "$pattern_file" "$text_path" >"$grep_out" 2>"$grep_err"
   grep_status=$?
   set -e
   if [ "$grep_status" -eq 2 ]; then

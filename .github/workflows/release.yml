@@ -29,6 +29,8 @@ jobs:
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
       - name: Build arm64 and x86_64
+        env:
+          RUSTFLAGS: --remap-path-prefix=/Users/=/src/ --remap-path-prefix=/home/=/src/
         run: |
           cargo build --release --locked -p sc-cli -p sc-mcp --target aarch64-apple-darwin
           cargo build --release --locked -p sc-cli -p sc-mcp --target x86_64-apple-darwin
@@ -78,6 +80,7 @@ jobs:
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          RUSTFLAGS: --remap-path-prefix=/Users/=/src/ --remap-path-prefix=/home/=/src/
         run: cargo build --release --locked -p sc-cli -p sc-mcp --target ${{ matrix.target }}
       - name: Package
         run: |
@@ -102,7 +105,7 @@ jobs:
           mkdir -p "$tmp/$bundle"
           cp "$src/sc" "$src/sc-mcp" LICENSE README.md "$tmp/$bundle/"
           mkdir -p dist
-          tar -C "$tmp" -czf "dist/${bundle}.tar.gz" "$bundle"
+          sh scripts/tar-release.sh "dist/${bundle}.tar.gz" "$tmp" "$bundle"
           python3 scripts/check-archive-layout.py "dist/${bundle}.tar.gz"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
