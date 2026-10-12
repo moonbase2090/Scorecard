@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! `analyzer.toml` loading.
 //!
 //! Search order: `--config`, then `./analyzer.toml` in the project, then

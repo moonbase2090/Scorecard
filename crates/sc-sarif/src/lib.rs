@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! SARIF 2.1.0 export of a scorecard.
 
 use sc_core::{Finding, Scorecard};

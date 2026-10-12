@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! Diff-scoped heuristics for tests made easier to pass alongside product changes.
 
 use std::path::Path;

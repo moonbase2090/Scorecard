@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};

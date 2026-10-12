@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! Plan construction for the non-Rust, non-Python packs.
 
 use std::path::Path;

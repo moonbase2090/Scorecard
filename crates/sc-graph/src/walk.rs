@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};

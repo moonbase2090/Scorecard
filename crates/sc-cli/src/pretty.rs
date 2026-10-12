@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! Human-readable scorecard for a terminal.
 //!
 //! Color follows `NO_COLOR`, `CLICOLOR_FORCE`, and whether stdout is a TTY.

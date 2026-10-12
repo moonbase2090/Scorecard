@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! HTML document parse for the web pack.
 //!
 //! `html5ever` builds the tree and reports parse errors with the current

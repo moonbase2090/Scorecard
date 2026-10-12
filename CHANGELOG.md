@@ -169,7 +169,7 @@ Workspace version `0.1.0`. Not tagged. Not published to crates.io.
 - `--mutation diff` or `--mutation full` runs `cargo-mutants` from `sc-engines`. Mutation stays off unless you ask.
 - `--llm on` calls an OpenAI-compatible endpoint. The default is `http://127.0.0.1:11434/v1`. If that endpoint is unchanged and `XAI_API_KEY` is set, the call uses SpaceXAI at `https://api.x.ai/v1` with model `grok-4.5`.
 - Docs for packs, config, MCP, and CRAP. The readme sample is `sc analyze testdata/good_crate --format md`.
-- License is MPL-2.0. MSRV is Rust 1.85.
+- License is MIT. MSRV is Rust 1.85.
 
 ### Fixed
 

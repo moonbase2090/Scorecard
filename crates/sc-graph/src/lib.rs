@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! Source discovery and cyclomatic complexity.
 //!
 //! Complexity is McCabe cyclomatic complexity, not cognitive complexity.
