@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 // Keep these cfg-off imports compile-clean while still triggering SCA findings.
 #[cfg(any())]
 use missing_one::Thing;

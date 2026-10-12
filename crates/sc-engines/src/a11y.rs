@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! Static accessibility checks mapped to WCAG 2.2 success criteria.
 //!
 //! HTML comes from the web pack. JSX and TSX come from the node pack.

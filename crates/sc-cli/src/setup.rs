@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! Install the agent skill and register the `sc-mcp` server.
 
 use std::fs;

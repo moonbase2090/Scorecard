@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! Language pack detection.
 //!
 //! One marker selects a pack. Several markers stay ambiguous unless only one

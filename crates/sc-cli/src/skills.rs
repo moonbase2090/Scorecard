@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! Install the embedded Scorecard skill for coding agents.
 
 use std::fs;

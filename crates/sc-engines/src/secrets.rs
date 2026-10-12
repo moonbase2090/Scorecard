@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 use sc_core::{Finding, Span};
 
 /// Documented AWS example secret. It is not a live credential.

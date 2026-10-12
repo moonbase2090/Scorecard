@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! Function line coverage from `cargo llvm-cov --workspace --json`.
 //!
 //! Names are demangled and crate disambiguator hashes are stripped, then matched

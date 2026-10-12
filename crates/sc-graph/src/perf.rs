@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! Performance hints.
 //!
 //! Off by default (`engines.perf = false`). When enabled, a nested loop and a
