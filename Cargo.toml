@@ -32,4 +32,5 @@ sha2 = "0.10"
 syn = { version = "2", features = ["full", "visit"] }
 toml = "0.8"
 ureq = { version = "2", default-features = false, features = ["tls", "json"] }
-uuid = { version = "1", features = ["v4"] }
+# 1.27 and later need rustc 1.89. Stay on 1.26 while the workspace MSRV is 1.88.
+uuid = { version = "1.26", features = ["v4"] }
