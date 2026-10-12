@@ -6,7 +6,7 @@ Audience: contributors changing the human terminal report.
 
 ## Problem
 
-The human report in `crates/sc-cli/src/pretty.rs` paints with ANSI named colors and cuts overflow one Unicode scalar at a time. The progress line in `crates/sc-cli/src/progress.rs` is uncolored and does not cut a long step label. Graphite (`graphite-core`) already publishes sRGB theme tokens, a WCAG contrast ratio, and `ellipsize`. The terminal report can use those three. It does not use Graphite pane, tab, legend, or layout APIs.
+The human report in `crates/sc-cli/src/pretty.rs` paints with ANSI named colors and cuts overflow one Unicode scalar at a time. The progress line in `crates/sc-cli/src/progress.rs` is uncolored and does not cut a long step label. Graphite (`graphite-core`) already provides sRGB theme tokens, a WCAG contrast ratio, and `ellipsize`. The terminal report can use those three. It does not use Graphite pane, tab, legend, or layout APIs.
 
 ## Decisions
 
