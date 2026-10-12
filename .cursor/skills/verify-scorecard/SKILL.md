@@ -9,9 +9,10 @@ Read [the feature index](features/README.md), then drive the entries affected by
 
 ## Launch
 
-Use an isolated checkout and a Bash shell from its root. Build the checkout's binaries; an installed `sc` may be an older release.
+Use an isolated checkout and a dedicated Bash shell from its root. Build the checkout's binaries; an installed `sc` may be an older release.
 
 ```bash
+set -e
 cargo build --locked -p sc-cli -p sc-mcp
 sc_repo=$(pwd -P)
 sc_binary="$sc_repo/target/debug/sc"
@@ -20,6 +21,13 @@ sc_tmp=${TMPDIR:-/tmp}
 sc_evidence=$(mktemp -d "${sc_tmp%/}/sc-proof.XXXXXX")
 sc_scratch=$(mktemp -d "${sc_tmp%/}/sc-drive.XXXXXX")
 export sc_repo sc_binary sc_mcp sc_evidence sc_scratch
+sc_cleanup() {
+  rm -rf -- "$sc_scratch"
+  test ! -e "$sc_scratch"
+  test -d "$sc_evidence"
+  printf 'scratch removed; evidence preserved\n' > "$sc_evidence/cleanup.txt"
+}
+trap 'sc_status=$?; sc_cleanup || sc_status=1; exit "$sc_status"' EXIT
 cp -R testdata/web_site "$sc_scratch/site"
 printf 'pack = "web"\n[html]\nenforce = "on"\n' > "$sc_scratch/analyzer.toml"
 sc_config="$sc_scratch/analyzer.toml"
@@ -86,11 +94,11 @@ Exercise the real CLI and observe `.sc/last-scorecard.json` and requested output
 
 ## Cleanup
 
-Run after successful and failed attempts. Only the scratch directory created by Launch is removed; saved evidence remains. All commands above run in the foreground, so there is no process to kill. If an additional drive starts a process, record its PID and stop that specific process during teardown.
+Launch installs an EXIT trap for failed attempts. Run the block below after successful attempts before leaving the shell. Only the scratch directory created by Launch is removed; saved evidence remains. All commands above run in the foreground, so there is no process to kill. If an additional drive starts a process, record its PID and stop that specific process during teardown.
 
 ```bash
-rm -rf -- "$sc_scratch"
-test ! -e "$sc_scratch"
+sc_cleanup
+trap - EXIT
 test -s "$sc_evidence/revision.txt"
 test -s "$sc_evidence/sc-version.txt"
 find "$sc_evidence" -type f -print
@@ -98,6 +106,6 @@ find "$sc_evidence" -type f -print
 
 ## Helpers and maintenance
 
-`sc_doctor` and `sc_run` above are shell helpers, not installed commands. They use Bash, Python 3.11 or newer, Git, and the built binaries. The web recipes need no language-pack services or credentials. The scope recipe uses Rust and needs `cargo-llvm-cov` plus `llvm-tools-preview`; see the pack prerequisites before that drive.
+`sc_cleanup`, `sc_doctor`, and `sc_run` above are shell helpers, not installed commands. They use Bash, Python 3.11 or newer, Git, and the built binaries. The web recipes need no language-pack services or credentials. The scope recipe uses Rust and needs `cargo-llvm-cov` plus `llvm-tools-preview`; see the pack prerequisites before that drive.
 
 Run `/maintain-verification-skill` when a PR changes build commands, runtime behavior, test prerequisites, or a mapped entry point. Its source review and live pass cover every feature file. Add a feature recipe when a change introduces another user-facing path.
