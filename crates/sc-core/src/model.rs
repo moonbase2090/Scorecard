@@ -407,6 +407,8 @@ pub struct RunRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GeneratedFilesWarning {
     pub files: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped_files: Vec<String>,
     pub suggested_action: String,
 }
 
@@ -417,6 +419,7 @@ impl GeneratedFilesWarning {
         }
         Some(Self {
             files,
+            skipped_files: Vec::new(),
             suggested_action: "Add these paths to scope.exclude in analyzer.toml to skip them."
                 .into(),
         })
