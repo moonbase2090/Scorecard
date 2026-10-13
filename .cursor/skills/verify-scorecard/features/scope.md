@@ -60,7 +60,8 @@ Run the issue #237 CLI regression drive from the repository root:
 cargo test -p sc-cli --test generated_headers
 cargo test -p sc-graph walk::tests::generated_markers_must_be_leading_comment_headers
 cargo test -p sc-graph walk::tests::self_analysis_includes_the_generated_header_detector
+cargo test -p sc-graph walk::tests::directives_and_attributes_end_the_generated_header
 cargo test -p sc-cli generated_files_warning_appears_in_every_report_format
 ```
 
-The CLI drive copies the existing token fixture into disposable projects inside and outside Git. It checks both prose mentions, a marker after 16 KiB, real generator headers, and an explicit generated-file include. Each token must fail the secrets gate; real headers must list the source path as skipped. The detector drive checks source discovery, and the format drive checks skipped names in JSON, Markdown, HTML, terminal output, and SARIF.
+The CLI drive copies the existing token fixture into disposable projects inside and outside Git. It checks both prose mentions, a marker after 16 KiB, real generator headers, directive-prefixed C/C++ and Rust sources, and an explicit generated-file include. Each token must fail the secrets gate; real headers must list the source path as skipped. The detector drive checks source discovery, and the format drive checks skipped names in JSON, Markdown, HTML, terminal output, and SARIF.
