@@ -409,12 +409,10 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         spec: SpecSection::empty(),
         intent: request.intent.clone(),
         llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),
-        generated_files_warning: sc_core::GeneratedFilesWarning::from_paths(
-            generated_files_warning(
-                &request.root,
-                &request.config.scope.exclude,
-                &request.config.scope.include_generated,
-            ),
+        generated_files_warning: generated_files_warning(
+            &request.root,
+            &request.config.scope.exclude,
+            &request.config.scope.include_generated,
         ),
         runs: Vec::new(),
         analyzer_error: false,
@@ -451,16 +449,51 @@ fn generated_files_warning(
     root: &Path,
     exclude: &[String],
     include_generated: &[String],
-) -> Vec<String> {
-    let paths: Vec<String> = sc_graph::walk_files(root, root, exclude, include_generated, None)
-        .into_iter()
-        .filter_map(|path| {
-            path.strip_prefix(root)
-                .ok()
-                .map(|rel| rel.to_string_lossy().replace('\\', "/"))
-        })
-        .collect();
-    sc_graph::analyzed_generated_files(root, &paths, include_generated)
+) -> Option<sc_core::GeneratedFilesWarning> {
+    let scanned: std::collections::HashSet<_> =
+        sc_graph::walk_files(root, root, exclude, include_generated, None)
+            .into_iter()
+            .collect();
+    let paths: Vec<String> = sc_graph::walk_with_options(
+        root,
+        root,
+        exclude,
+        include_generated,
+        None,
+        sc_graph::WalkOptions {
+            include_generated_files: true,
+            ..Default::default()
+        },
+    )
+    .filter_map(|item| match item {
+        sc_graph::WalkItem::Entry(entry) if entry.kind == sc_graph::WalkKind::File => entry
+            .path
+            .strip_prefix(root)
+            .ok()
+            .map(|rel| rel.to_string_lossy().replace('\\', "/")),
+        _ => None,
+    })
+    .collect();
+    let (files, skipped_files): (Vec<_>, Vec<_>) =
+        sc_graph::analyzed_generated_files(root, &paths, include_generated)
+            .into_iter()
+            .partition(|rel| scanned.contains(&root.join(rel)));
+    if files.is_empty() && skipped_files.is_empty() {
+        return None;
+    }
+    let suggested_action = if skipped_files.is_empty() {
+        "Add these paths to scope.exclude in analyzer.toml to skip them.".into()
+    } else {
+        format!(
+            "Source analysis skipped files with generated headers. Add scope.include_generated = {} under [scope] in analyzer.toml to analyze them. Secrets scanning still includes these files. Add analyzed generated paths to scope.exclude to skip them.",
+            serde_json::to_string(&skipped_files).expect("file paths serialize as strings")
+        )
+    };
+    Some(sc_core::GeneratedFilesWarning {
+        files,
+        skipped_files,
+        suggested_action,
+    })
 }
 
 fn html_files(root: &Path, exclude: &[String], include_generated: &[String]) -> Vec<String> {
@@ -737,12 +770,10 @@ fn analyze_unsupported(
         spec: SpecSection::empty(),
         intent: request.intent.clone(),
         llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),
-        generated_files_warning: sc_core::GeneratedFilesWarning::from_paths(
-            generated_files_warning(
-                &request.root,
-                &request.config.scope.exclude,
-                &request.config.scope.include_generated,
-            ),
+        generated_files_warning: generated_files_warning(
+            &request.root,
+            &request.config.scope.exclude,
+            &request.config.scope.include_generated,
         ),
         runs,
         analyzer_error: false,
@@ -895,12 +926,10 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         spec: SpecSection::empty(),
         intent: request.intent.clone(),
         llm: other_pack_llm(request.llm_override.unwrap_or(request.config.llm.enabled)),
-        generated_files_warning: sc_core::GeneratedFilesWarning::from_paths(
-            generated_files_warning(
-                &request.root,
-                &request.config.scope.exclude,
-                &request.config.scope.include_generated,
-            ),
+        generated_files_warning: generated_files_warning(
+            &request.root,
+            &request.config.scope.exclude,
+            &request.config.scope.include_generated,
         ),
         runs: outcome.runs,
         analyzer_error: false,
@@ -1547,12 +1576,10 @@ fn assemble_rust_report(
         spec: spec.section,
         intent: request.intent.clone(),
         llm,
-        generated_files_warning: sc_core::GeneratedFilesWarning::from_paths(
-            generated_files_warning(
-                root,
-                &request.config.scope.exclude,
-                &request.config.scope.include_generated,
-            ),
+        generated_files_warning: generated_files_warning(
+            root,
+            &request.config.scope.exclude,
+            &request.config.scope.include_generated,
         ),
         runs: state.runs,
         analyzer_error: state.analyzer_error,
@@ -3018,7 +3045,9 @@ mod tests {
         let exclude = vec!["build/secret.txt".into()];
 
         assert_eq!(
-            generated_files_warning(&root, &exclude, &include),
+            generated_files_warning(&root, &exclude, &include)
+                .unwrap()
+                .files,
             ["build/parser.rs", "src/generated.rs"]
         );
         let _ = std::fs::remove_dir_all(root);

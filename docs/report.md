@@ -126,3 +126,7 @@ ls sc-report.json sc-report.md sc-report.sarif sc-report.html
 | `.sc/coverage/` | Coverage reports written by the test runs |
 
 It is safe to delete. Add `.sc/` to `.gitignore`.
+
+Generated source files appear in `generated_files_warning.skipped_files` when their leading generator header excludes them from source analysis. The Markdown, HTML, and terminal reports list these paths under "Generated files skipped by source analysis" with the `scope.include_generated` setting needed to analyze them. Secrets scanning still checks these files. The existing `files` list identifies generated paths that source analysis included. SARIF carries this section in `runs[0].properties.generated_files_warning`.
+
+![Report naming a generated file skipped by source analysis](images/generated-skipped-report.png)

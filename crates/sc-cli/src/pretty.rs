@@ -118,10 +118,21 @@ fn push_generated_files(out: &mut String, card: &Scorecard, opts: &PrettyOpts, w
     let Some(warning) = card.sections.generated_files_warning.as_ref() else {
         return;
     };
-    out.push_str("generated files analyzed\n");
-    for file in &warning.files {
-        out.push_str(&fit(&format!("  {file}"), width, opts.color));
-        out.push('\n');
+    for (heading, files) in [
+        ("generated files analyzed", &warning.files),
+        (
+            "generated files skipped by source analysis",
+            &warning.skipped_files,
+        ),
+    ] {
+        if !files.is_empty() {
+            out.push_str(heading);
+            out.push('\n');
+            for file in files {
+                out.push_str(&fit(&format!("  {file}"), width, opts.color));
+                out.push('\n');
+            }
+        }
     }
     out.push_str(&fit(
         &format!("  {}", warning.suggested_action),
