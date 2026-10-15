@@ -175,11 +175,15 @@ scan_text_file() {
     done <"$grep_out"
   fi
   rm -f "$grep_out" "$grep_err"
-  line_no=0
-  while IFS= read -r line || [ -n "$line" ]; do
-    line_no=$((line_no + 1))
-    scan_emails_in_line "$hit_label" "$line_no" "$line"
-  done <"$text_path"
+  # One grep pass per file instead of one grep process per line.
+  while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    num=${row%%:*}
+    addr=${row#*:}
+    if email_is_forbidden "$addr"; then
+      record_hit "$hit_label:$num"
+    fi
+  done < <(grep -Eno "$email_ere" "$text_path" 2>/dev/null || true)
 }
 
 looks_like_text() {
