@@ -4,7 +4,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-## [0.1.7] - 2026-10-11
+## [0.1.8] - 2026-10-14
+
+### Fixed
+
+- The release publish job has 45 minutes instead of 15. The v0.1.7 run timed out while the release-text check unpacked the built archives, so v0.1.7 was not published.
+- Generated-header scans can no longer be bypassed (#259).
+
+### Changed
+
+- Scorecard is now MIT licensed.
+
+## [0.1.7] - 2026-10-11 (not published)
 
 ### Added
 
