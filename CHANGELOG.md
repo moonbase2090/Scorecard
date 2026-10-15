@@ -4,7 +4,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-## [0.1.8] - 2026-10-14
+## [0.1.9] - 2026-10-15
+
+### Fixed
+
+- The release-text check scans each file for addresses in one pass instead of starting a process per line. The v0.1.8 publish job timed out in that scan, so v0.1.8 was not published.
+
+## [0.1.8] - 2026-10-14 (not published)
 
 ### Fixed
 
