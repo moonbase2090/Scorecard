@@ -4,7 +4,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-## [0.1.9] - 2026-10-15
+## [0.1.10] - 2026-10-15
+
+### Fixed
+
+- The release-text binary scan ignores known literals that ship in the binaries: the analyzers' token prefixes and Maven command line, author credits in bundled crypto code, a root certificate contact address, and retina image names. The v0.1.9 publish job stopped on these, so v0.1.9 was not published.
+
+## [0.1.9] - 2026-10-15 (not published)
 
 ### Fixed
 
