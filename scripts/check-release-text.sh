@@ -15,15 +15,15 @@ hits=$(mktemp)
 patterns=$(mktemp)
 builtin=$(mktemp)
 binary_allow=$(mktemp)
-trap 'rm -f "$hits" "$patterns" "$builtin" "$binary_allow"' EXIT
+binary_patterns=$(mktemp)
+trap 'rm -f "$hits" "$patterns" "$builtin" "$binary_allow" "$binary_patterns"' EXIT
 
 # Literals that ship inside the sc and sc-mcp binaries and are not private data:
-# - Scorecard's own secret-scanner token prefixes and Maven command line.
+# - Scorecard's own Maven option, only as a whole -D option.
 # - The author credit lines in the bundled assembly crypto code.
 # - A certificate authority contact address in the bundled public root store.
 cat >"$binary_allow" <<'ALLOW'
-s/ghp_gho_ghu_ghs_ghr_//g
-s/maven\.repo\.local=//g
+s/(^|[[:space:]])-Dmaven\.repo\.local=/\1-D/g
 s/ by <[A-Za-z0-9._%+-]+@openssl\.org>//g
 s/[A-Za-z0-9._%+-]+@e-szigno\.hu//g
 ALLOW
@@ -128,6 +128,14 @@ validate_patterns() {
 }
 
 validate_patterns
+
+# Binaries use the exact GitHub token formats instead of the broad text rule.
+# Scorecard's own token-prefix table (ghp_gho_ghu_...) is not a token, and no
+# substring is deleted, so a real token next to it is still found.
+grep -v -F '(ghp|gho|ghs|ghu|github_pat)_' "$patterns" >"$binary_patterns" || true
+printf '%s\n' \
+  '(ghp|gho|ghs|ghu)_[A-Za-z0-9]{36}' \
+  'github_pat_[A-Za-z0-9]{22}_[A-Za-z0-9]{59}' >>"$binary_patterns"
 
 email_ere='[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
 
@@ -236,7 +244,7 @@ scan_binary_payload() {
   sed -E -f "$binary_allow" "$strings_raw" >"$strings_out"
   rm -f "$strings_raw"
   set +e
-  grep -Ein -f "$patterns" "$strings_out" >/dev/null 2>&1
+  grep -Ein -f "$binary_patterns" "$strings_out" >/dev/null 2>&1
   grep_status=$?
   set -e
   if [ "$grep_status" -eq 2 ]; then
