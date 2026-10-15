@@ -117,7 +117,7 @@ jobs:
     needs: [apple, linux]
     if: needs.apple.outputs.signed == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
     permissions:
       contents: write
     steps:
