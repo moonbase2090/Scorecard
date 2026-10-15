@@ -176,6 +176,8 @@ scan_text_file() {
   fi
   rm -f "$grep_out" "$grep_err"
   # One grep pass per file instead of one grep process per line.
+  email_out=$(mktemp)
+  grep -Eno "$email_ere" "$text_path" >"$email_out" 2>/dev/null || true
   while IFS= read -r row; do
     [ -n "$row" ] || continue
     num=${row%%:*}
@@ -183,7 +185,8 @@ scan_text_file() {
     if email_is_forbidden "$addr"; then
       record_hit "$hit_label:$num"
     fi
-  done < <(grep -Eno "$email_ere" "$text_path" 2>/dev/null || true)
+  done <"$email_out"
+  rm -f "$email_out"
 }
 
 looks_like_text() {
