@@ -12,9 +12,9 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.7"
+version = "0.1.8"
 edition = "2021"
-license = "MPL-2.0"
+license = "MIT"
 repository = "https://github.com/moonbase2090/Scorecard"
 homepage = "https://github.com/moonbase2090/Scorecard"
 readme = "README.md"

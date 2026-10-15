@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 use crate::report::Outcome;
 use sc_core::Scorecard;
 
@@ -77,9 +77,19 @@ fn push_markdown_generated_files(out: &mut String, card: &Scorecard) {
     let Some(warning) = card.sections.generated_files_warning.as_ref() else {
         return;
     };
-    out.push_str("## Generated files analyzed\n\n");
-    for file in &warning.files {
-        out.push_str(&format!("- `{}`\n", cell(file)));
+    for (heading, files) in [
+        ("Generated files analyzed", &warning.files),
+        (
+            "Generated files skipped by source analysis",
+            &warning.skipped_files,
+        ),
+    ] {
+        if !files.is_empty() {
+            out.push_str(&format!("## {heading}\n\n"));
+            for file in files {
+                out.push_str(&format!("- `{}`\n", cell(file)));
+            }
+        }
     }
     out.push_str(&format!("\n{}\n\n", warning.suggested_action));
 }
@@ -300,6 +310,11 @@ mod tests {
             .unwrap(),
         );
 
+        card.sections
+            .generated_files_warning
+            .as_mut()
+            .unwrap()
+            .skipped_files = vec!["src/skipped.rs".into()];
         let json: serde_json::Value = serde_json::from_str(&to_json(&card)).unwrap();
         assert_eq!(
             json["generated_files_warning"]["files"][0],
@@ -333,6 +348,21 @@ mod tests {
         assert!(pretty.contains("generated files analyzed"));
         assert!(pretty.contains("build/parser.rs"));
         assert!(pretty.contains("scope.exclude"));
+        assert_eq!(
+            json["generated_files_warning"]["skipped_files"][0],
+            "src/skipped.rs"
+        );
+        let sarif: serde_json::Value = serde_json::from_str(&sc_sarif::to_sarif(&card)).unwrap();
+        assert_eq!(
+            sarif["runs"][0]["properties"]["generated_files_warning"]["skipped_files"][0],
+            "src/skipped.rs"
+        );
+        for report in [&md, &html, &pretty] {
+            assert!(report.contains("src/skipped.rs"));
+            assert!(report
+                .to_ascii_lowercase()
+                .contains("generated files skipped by source analysis"));
+        }
     }
 
     #[test]

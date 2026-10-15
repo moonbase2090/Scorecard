@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 /// Same `classify` body as `testdata/crap_untested`, with branch coverage.
 pub fn classify(n: i32, flag: bool, mode: u8) -> &'static str {
     if n < 0 {

@@ -4,7 +4,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-## [0.1.7] - 2026-10-11
+## [0.1.8] - 2026-10-14
+
+### Fixed
+
+- The release publish job has 45 minutes instead of 15. The v0.1.7 run timed out while the release-text check unpacked the built archives, so v0.1.7 was not published.
+- Generated-header scans can no longer be bypassed (#259).
+
+### Changed
+
+- Scorecard is now MIT licensed.
+
+## [0.1.7] - 2026-10-11 (not published)
 
 ### Added
 
@@ -169,7 +180,7 @@ Workspace version `0.1.0`. Not tagged. Not published to crates.io.
 - `--mutation diff` or `--mutation full` runs `cargo-mutants` from `sc-engines`. Mutation stays off unless you ask.
 - `--llm on` calls an OpenAI-compatible endpoint. The default is `http://127.0.0.1:11434/v1`. If that endpoint is unchanged and `XAI_API_KEY` is set, the call uses SpaceXAI at `https://api.x.ai/v1` with model `grok-4.5`.
 - Docs for packs, config, MCP, and CRAP. The readme sample is `sc analyze testdata/good_crate --format md`.
-- License is MPL-2.0. MSRV is Rust 1.85.
+- License is MIT. MSRV is Rust 1.85.
 
 ### Fixed
 

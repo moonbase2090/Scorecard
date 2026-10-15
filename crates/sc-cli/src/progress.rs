@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! Progress spinner for `sc analyze`.
 //!
 //! The spinner animates on stderr only, so stdout stays byte-identical

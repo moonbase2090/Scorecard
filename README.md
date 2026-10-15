@@ -1,7 +1,7 @@
 # Scorecard
 
 [![CI](https://github.com/moonbase2090/Scorecard/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/moonbase2090/Scorecard/actions/workflows/ci.yml?query=branch%3Amain)
-[![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![MSRV 1.88](https://img.shields.io/badge/MSRV-1.88-blue.svg)](https://github.com/moonbase2090/Scorecard/blob/main/Cargo.toml)
 
 `sc` is a local code-quality gate. In one run it checks that a project builds, its tests pass, complex code is covered by tests ([CRAP](docs/crap.md)), no secrets are committed, the linter is clean, and every import is a declared dependency. It prints a verdict for people and a JSON scorecard for agents and CI. Ten language packs are built in. Project site: [scorecardcli.com](https://scorecardcli.com).
@@ -52,7 +52,7 @@ While analysis runs, an interactive terminal shows the current step and elapsed 
 In a terminal the report looks like this (from `testdata/good_crate`):
 
 ```text
-sc 0.1.7  testdata/good_crate  rust  5ac851c clean  scope tree
+sc 0.1.8  testdata/good_crate  rust  5ac851c clean  scope tree
 
 PASS
 
@@ -91,7 +91,7 @@ A dirty report lists up to three changed paths. JSON includes every path in `git
 
 `sc analyze . --diff BASE` scores only what changed against that git ref. Python compiles, lints, and checks imports only in changed `.py` files, and runs pytest only on changed `test_*.py` and `*_test.py` files. When the project is a subdirectory of a larger repository, the changed paths are still relative to the project (`src/a.rs`). A bare `--diff` picks the base automatically (`HEAD~1`, else `main`, else `master`) and skips a candidate that is the same commit as `HEAD`. A shallow clone, a single-commit branch, a depth-1 clone of `main` or `master`, or a missing explicit base exits 2 with verdict `fail` and one stderr line that names `fetch-depth: 0`. An explicit `--diff HEAD` still works.
 
-Scans honor nested `.gitignore` files and skip common build and vendor directories such as `build/`, `target/`, `dist/`, and `node_modules/` for source discovery. The secrets scan lists every tracked and non-ignored file from git (`git ls-files`) when the project is in a work tree, so a committed token under `vendor/`, `dist/`, or `build/` is still reported. Secret scanning includes generated files within that scope. See [scan scope configuration](docs/reference/config.md#scope) to add exclusions or include generated paths.
+Scans honor nested `.gitignore` files and skip common build and vendor directories such as `build/`, `target/`, `dist/`, and `node_modules/` for source discovery. The secrets scan lists every tracked and non-ignored file from git (`git ls-files`) when the project is in a work tree, so a committed token under `vendor/`, `dist/`, or `build/` is still reported. Secret scanning includes generated files within that scope. Source discovery recognizes generator markers only in leading comment headers. Reports name generated files skipped by source analysis and show how to include them. See [scan scope configuration](docs/reference/config.md#scope) to add exclusions or include generated paths.
 
 `sc analyze . --format sarif` writes SARIF for GitHub code scanning. Only `secrets.*` findings are level `error`, which code scanning counts as a security vulnerability. Every other rule, including a failing test or missing coverage, is level `warning` and still fails its gate ([CI](docs/how-to/ci.md)).
 
@@ -166,4 +166,4 @@ For a Cargo workspace, analyze the root to check every member. Analyze a member 
 
 ## License
 
-Scorecard is licensed under the [Mozilla Public License 2.0](LICENSE). You can use it in commercial products. If you distribute modified MPL-covered files, you must make their source available under MPL-2.0.
+Scorecard is licensed under the [MIT License](LICENSE).

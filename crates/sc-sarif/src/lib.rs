@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! SARIF 2.1.0 export of a scorecard.
 
 use sc_core::{Finding, Scorecard};
@@ -54,6 +54,7 @@ pub fn to_sarif(card: &Scorecard) -> String {
                 "scorecardVerdict": sc_core::report_verdict(card),
                 "scorecardGates": gates,
                 "fail_on": card.fail_on,
+                "generated_files_warning": card.sections.generated_files_warning,
             },
         }]
     });

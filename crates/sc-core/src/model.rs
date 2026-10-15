@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! JSON contract. Field names are part of the stable scorecard schema.
 
 use serde::{Deserialize, Serialize};
@@ -407,6 +407,8 @@ pub struct RunRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GeneratedFilesWarning {
     pub files: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped_files: Vec<String>,
     pub suggested_action: String,
 }
 
@@ -417,6 +419,7 @@ impl GeneratedFilesWarning {
         }
         Some(Self {
             files,
+            skipped_files: Vec::new(),
             suggested_action: "Add these paths to scope.exclude in analyzer.toml to skip them."
                 .into(),
         })

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
@@ -280,7 +280,7 @@ fn git_here(dir: &std::path::Path, args: &[&str]) {
     assert!(status.success(), "{args:?}");
 }
 
-const SINGLE_COMMIT_LIB: &str = "// SPDX-License-Identifier: MPL-2.0\npub fn classify(n: i32, flag: bool, mode: u8) -> &'static str {\n    if n < 0 {\n        return \"neg\";\n    }\n    if n == 0 {\n        return \"zero\";\n    }\n    if flag && n > 100 {\n        return \"bigflag\";\n    }\n    if flag || n > 50 {\n        return \"mid\";\n    }\n    match mode {\n        0 => \"a\",\n        1 => \"b\",\n        2 => \"c\",\n        _ => \"d\",\n    }\n}\n";
+const SINGLE_COMMIT_LIB: &str = "// SPDX-License-Identifier: MIT\npub fn classify(n: i32, flag: bool, mode: u8) -> &'static str {\n    if n < 0 {\n        return \"neg\";\n    }\n    if n == 0 {\n        return \"zero\";\n    }\n    if flag && n > 100 {\n        return \"bigflag\";\n    }\n    if flag || n > 50 {\n        return \"mid\";\n    }\n    match mode {\n        0 => \"a\",\n        1 => \"b\",\n        2 => \"c\",\n        _ => \"d\",\n    }\n}\n";
 
 fn single_commit_crate(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("sc-{name}-{}", std::process::id()));
