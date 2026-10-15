@@ -211,7 +211,10 @@ looks_like_text() {
   esac
   sample=$(mktemp)
   dd if="$file" of="$sample" bs=8192 count=1 2>/dev/null || : >"$sample"
-  if LC_ALL=C grep -q $'\0' "$sample" 2>/dev/null; then
+  # POSIX sh has no $'\0', so compare the size with and without NUL bytes.
+  all_bytes=$(wc -c <"$sample" | tr -d ' ')
+  non_nul=$(LC_ALL=C tr -d '\000' <"$sample" | wc -c | tr -d ' ')
+  if [ "$all_bytes" != "$non_nul" ]; then
     rm -f "$sample"
     return 1
   fi
