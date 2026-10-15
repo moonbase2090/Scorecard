@@ -169,4 +169,48 @@ fi
 export RELEASE_DENYLIST=''
 echo "changed license still scanned ok"
 
+# Known literals inside the shipped binaries do not fail the scan,
+# but a leak next to one still does.
+bindist="$work/bindist"
+mkdir -p "$bindist"
+printf '\000\001makeAKIAASIAghp_gho_ghu_ghs_ghr_evalsk_live_\000!mvn -q -Dmaven.repo.local=.sc/m2\000ChaCha20 for x86_64, CRYPTOGAMS by <appro@openssl.org>\000dmg-background@2x.png\000' >"$bindist/sc"
+if ! run_mini --dist "$bindist"; then
+  echo "expected known binary literals to pass" >&2
+  exit 1
+fi
+printf '\000\001ghp_gho_ghu_ghs_ghr_ someone@corp.test\000' >"$bindist/sc"
+if run_mini --dist "$bindist"; then
+  echo "expected an address beside a known literal to fail" >&2
+  exit 1
+fi
+printf '\000\001host-1.local\000' >"$bindist/sc"
+if run_mini --dist "$bindist"; then
+  echo "expected a .local host name in a binary to fail" >&2
+  exit 1
+fi
+echo "binary known literals ok"
+
+# A real-format token that overlaps the shipped prefix table is still found.
+printf '\000\001makeAKIAASIAghp_gho_ghu_ghs_ghr_eval\000' >"$bindist/sc"
+if ! run_mini --dist "$bindist"; then
+  echo "expected the shipped prefix table alone to pass" >&2
+  exit 1
+fi
+printf '\000\001ghp_gho_ghu_ghs_ghr_ghp_%s\000' "$(printf 'A1b2C3d4E5%.0s' 1 2 3 4)" >"$bindist/sc"
+if run_mini --dist "$bindist"; then
+  echo "expected a token overlapping the prefix table to fail" >&2
+  exit 1
+fi
+printf '\000\001ghp_%s\000' "$(printf 'A1b2C3d4E5%.0s' 1 2 3 4)" >"$bindist/sc"
+if run_mini --dist "$bindist"; then
+  echo "expected a bare token in a binary to fail" >&2
+  exit 1
+fi
+printf '\000\001evilmaven.repo.local\000' >"$bindist/sc"
+if run_mini --dist "$bindist"; then
+  echo "expected a host name containing the Maven literal to fail" >&2
+  exit 1
+fi
+echo "binary exemption overlap ok"
+
 echo "check-release-text self-test ok"

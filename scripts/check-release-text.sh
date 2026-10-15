@@ -14,7 +14,19 @@ tag_message=""
 hits=$(mktemp)
 patterns=$(mktemp)
 builtin=$(mktemp)
-trap 'rm -f "$hits" "$patterns" "$builtin"' EXIT
+binary_allow=$(mktemp)
+binary_patterns=$(mktemp)
+trap 'rm -f "$hits" "$patterns" "$builtin" "$binary_allow" "$binary_patterns"' EXIT
+
+# Literals that ship inside the sc and sc-mcp binaries and are not private data:
+# - Scorecard's own Maven option, only as a whole -D option.
+# - The author credit lines in the bundled assembly crypto code.
+# - A certificate authority contact address in the bundled public root store.
+cat >"$binary_allow" <<'ALLOW'
+s/(^|[[:space:]])-Dmaven\.repo\.local=/\1-D/g
+s/ by <[A-Za-z0-9._%+-]+@openssl\.org>//g
+s/[A-Za-z0-9._%+-]+@e-szigno\.hu//g
+ALLOW
 
 # Unmodified Mozilla Public License 2.0. Optional deny rules collide with
 # that required text, so only the built-in rules apply when the digest matches.
@@ -117,6 +129,14 @@ validate_patterns() {
 
 validate_patterns
 
+# Binaries use the exact GitHub token formats instead of the broad text rule.
+# Scorecard's own token-prefix table (ghp_gho_ghu_...) is not a token, and no
+# substring is deleted, so a real token next to it is still found.
+grep -v -F '(ghp|gho|ghs|ghu|github_pat)_' "$patterns" >"$binary_patterns" || true
+printf '%s\n' \
+  '(ghp|gho|ghs|ghu)_[A-Za-z0-9]{36}' \
+  'github_pat_[A-Za-z0-9]{22}_[A-Za-z0-9]{59}' >>"$binary_patterns"
+
 email_ere='[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
 
 record_hit() {
@@ -133,6 +153,8 @@ email_is_forbidden() {
   [ "$addr" = "$ALLOWED_EMAIL" ] && return 1
   case "$addr" in
     *@example.com | *@example.invalid) return 1 ;;
+    # Retina image names such as dmg-background@2x.png look like addresses.
+    *@[1-9]x.png | *@[1-9]x.tiff) return 1 ;;
   esac
   return 0
 }
@@ -197,7 +219,10 @@ looks_like_text() {
   esac
   sample=$(mktemp)
   dd if="$file" of="$sample" bs=8192 count=1 2>/dev/null || : >"$sample"
-  if LC_ALL=C grep -q $'\0' "$sample" 2>/dev/null; then
+  # POSIX sh has no $'\0', so compare the size with and without NUL bytes.
+  all_bytes=$(wc -c <"$sample" | tr -d ' ')
+  non_nul=$(LC_ALL=C tr -d '\000' <"$sample" | wc -c | tr -d ' ')
+  if [ "$all_bytes" != "$non_nul" ]; then
     rm -f "$sample"
     return 1
   fi
@@ -209,12 +234,17 @@ scan_binary_payload() {
   label="$1"
   file="$2"
   strings_out=$(mktemp)
-  if ! strings -a "$file" >"$strings_out" 2>/dev/null; then
-    rm -f "$strings_out"
+  strings_raw=$(mktemp)
+  if ! strings -a "$file" >"$strings_raw" 2>/dev/null; then
+    rm -f "$strings_out" "$strings_raw"
     fatal_scan "strings failed for $label"
   fi
+  # Remove known literals before matching. Only the literal text is removed,
+  # so anything else on the same string is still scanned.
+  sed -E -f "$binary_allow" "$strings_raw" >"$strings_out"
+  rm -f "$strings_raw"
   set +e
-  grep -Ein -f "$patterns" "$strings_out" >/dev/null 2>&1
+  grep -Ein -f "$binary_patterns" "$strings_out" >/dev/null 2>&1
   grep_status=$?
   set -e
   if [ "$grep_status" -eq 2 ]; then
