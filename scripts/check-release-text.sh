@@ -14,7 +14,19 @@ tag_message=""
 hits=$(mktemp)
 patterns=$(mktemp)
 builtin=$(mktemp)
-trap 'rm -f "$hits" "$patterns" "$builtin"' EXIT
+binary_allow=$(mktemp)
+trap 'rm -f "$hits" "$patterns" "$builtin" "$binary_allow"' EXIT
+
+# Literals that ship inside the sc and sc-mcp binaries and are not private data:
+# - Scorecard's own secret-scanner token prefixes and Maven command line.
+# - The author credit lines in the bundled assembly crypto code.
+# - A certificate authority contact address in the bundled public root store.
+cat >"$binary_allow" <<'ALLOW'
+s/ghp_gho_ghu_ghs_ghr_//g
+s/maven\.repo\.local=//g
+s/ by <[A-Za-z0-9._%+-]+@openssl\.org>//g
+s/[A-Za-z0-9._%+-]+@e-szigno\.hu//g
+ALLOW
 
 # Unmodified Mozilla Public License 2.0. Optional deny rules collide with
 # that required text, so only the built-in rules apply when the digest matches.
@@ -133,6 +145,8 @@ email_is_forbidden() {
   [ "$addr" = "$ALLOWED_EMAIL" ] && return 1
   case "$addr" in
     *@example.com | *@example.invalid) return 1 ;;
+    # Retina image names such as dmg-background@2x.png look like addresses.
+    *@[1-9]x.png | *@[1-9]x.tiff) return 1 ;;
   esac
   return 0
 }
@@ -209,10 +223,15 @@ scan_binary_payload() {
   label="$1"
   file="$2"
   strings_out=$(mktemp)
-  if ! strings -a "$file" >"$strings_out" 2>/dev/null; then
-    rm -f "$strings_out"
+  strings_raw=$(mktemp)
+  if ! strings -a "$file" >"$strings_raw" 2>/dev/null; then
+    rm -f "$strings_out" "$strings_raw"
     fatal_scan "strings failed for $label"
   fi
+  # Remove known literals before matching. Only the literal text is removed,
+  # so anything else on the same string is still scanned.
+  sed -E -f "$binary_allow" "$strings_raw" >"$strings_out"
+  rm -f "$strings_raw"
   set +e
   grep -Ein -f "$patterns" "$strings_out" >/dev/null 2>&1
   grep_status=$?

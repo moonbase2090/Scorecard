@@ -169,4 +169,25 @@ fi
 export RELEASE_DENYLIST=''
 echo "changed license still scanned ok"
 
+# Known literals inside the shipped binaries do not fail the scan,
+# but a leak next to one still does.
+bindist="$work/bindist"
+mkdir -p "$bindist"
+printf '\000\001makeAKIAASIAghp_gho_ghu_ghs_ghr_evalsk_live_\000-Dmaven.repo.local=.sc/m2\000ChaCha20 for x86_64, CRYPTOGAMS by <appro@openssl.org>\000dmg-background@2x.png\000' >"$bindist/sc"
+if ! run_mini --dist "$bindist"; then
+  echo "expected known binary literals to pass" >&2
+  exit 1
+fi
+printf '\000\001ghp_gho_ghu_ghs_ghr_ someone@corp.test\000' >"$bindist/sc"
+if run_mini --dist "$bindist"; then
+  echo "expected an address beside a known literal to fail" >&2
+  exit 1
+fi
+printf '\000\001host-1.local\000' >"$bindist/sc"
+if run_mini --dist "$bindist"; then
+  echo "expected a .local host name in a binary to fail" >&2
+  exit 1
+fi
+echo "binary known literals ok"
+
 echo "check-release-text self-test ok"
