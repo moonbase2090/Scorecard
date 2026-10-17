@@ -104,6 +104,10 @@ test -s "$sc_evidence/sc-version.txt"
 find "$sc_evidence" -type f -print
 ```
 
+## Commit hook
+
+Run `python3 scripts/test-pre-commit.py` to check the hook against temporary Git indexes with real `cargo fmt`. It covers installer reuse, skipped non-Rust changes, partially staged files, unusual filenames, and unstaged child modules without changing this checkout.
+
 ## Helpers and maintenance
 
 `sc_cleanup`, `sc_doctor`, and `sc_run` above are shell helpers, not installed commands. They use Bash, Python 3.11 or newer, Git, and the built binaries. The web recipes need no language-pack services or credentials. The scope recipe uses Rust and needs `cargo-llvm-cov` plus `llvm-tools-preview`; see the pack prerequisites before that drive.
