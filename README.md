@@ -15,7 +15,7 @@ The secrets gate recognizes Slack incoming webhooks, Stripe restricted live keys
 Download `sc` for your platform and run it on a project:
 
 ```bash doctest network
-VERSION=v0.1.6
+VERSION=v0.1.10
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64) TARGET=aarch64-apple-darwin ;;
   Darwin-x86_64) TARGET=x86_64-apple-darwin ;;
@@ -134,20 +134,20 @@ The secrets scan also finds PEM private keys split across source string literals
 
 ## Install
 
-Published release [v0.1.6](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.6). Each `.tar.gz` holds a top-level directory `sc-v<version>-<target>/` with `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md` (v0.1.6 archives use a flat layout; the GitHub Action accepts both).
+Published release [v0.1.10](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.10). Each `.tar.gz` holds a top-level directory `sc-v<version>-<target>/` with `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md`.
 
 | Platform | Asset |
 |---|---|
-| macOS, Apple silicon | `sc-v0.1.6-aarch64-apple-darwin.tar.gz` |
-| macOS, Intel | `sc-v0.1.6-x86_64-apple-darwin.tar.gz` |
-| macOS installer | `sc-v0.1.6-macos.pkg`, or `sc-v0.1.6-universal-apple-darwin.dmg`. Installs `sc` and `sc-mcp` to `/usr/local/bin` |
-| Linux, arm64 | `sc-v0.1.6-aarch64-unknown-linux-gnu.tar.gz` |
-| Linux, x86_64 | `sc-v0.1.6-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS, Apple silicon | `sc-v0.1.10-aarch64-apple-darwin.tar.gz` |
+| macOS, Intel | `sc-v0.1.10-x86_64-apple-darwin.tar.gz` |
+| macOS installer | `sc-v0.1.10-macos.pkg`, or `sc-v0.1.10-universal-apple-darwin.dmg`. Installs `sc` and `sc-mcp` to `/usr/local/bin` |
+| Linux, arm64 | `sc-v0.1.10-aarch64-unknown-linux-gnu.tar.gz` |
+| Linux, x86_64 | `sc-v0.1.10-x86_64-unknown-linux-gnu.tar.gz` |
 
 To check a download, fetch `SHA256SUMS` into the same directory and verify only the files you have:
 
 ```bash
-curl -fsSLO https://github.com/moonbase2090/Scorecard/releases/download/v0.1.6/SHA256SUMS
+curl -fsSLO https://github.com/moonbase2090/Scorecard/releases/download/v0.1.10/SHA256SUMS
 shasum -a 256 -c --ignore-missing SHA256SUMS   # Linux: sha256sum -c --ignore-missing SHA256SUMS
 ```
 
