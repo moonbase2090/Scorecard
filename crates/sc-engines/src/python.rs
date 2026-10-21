@@ -2619,7 +2619,7 @@ dev = ["pytest>=8"]
         assert!(enforced && !pass);
         assert_eq!(reason, "pytest did not run");
         assert_eq!(skipped, ["tests"]);
-        assert!(findings[0].message.contains("pytest timed out after 7s"));
+        assert!(findings[0].message.contains("pytest timed out after 7.0s"));
     }
 
     fn symbols(findings: &[Finding]) -> Vec<String> {

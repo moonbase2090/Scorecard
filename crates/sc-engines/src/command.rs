@@ -53,8 +53,8 @@ impl CommandError {
             } => {
                 let mut message = format!(
                     "{what} timed out after {}s (the budget left for it was {}s)",
-                    elapsed.as_secs(),
-                    limit.as_secs()
+                    seconds(*elapsed),
+                    seconds(*limit)
                 );
                 let tail = stderr_tail(stderr);
                 if !tail.is_empty() {
@@ -81,6 +81,14 @@ impl CommandError {
         format!(
             "Run `{what}` in the project to see what it waits on. If it only needs more time, re-run with --budget-seconds {raised}."
         )
+    }
+}
+
+fn seconds(duration: Duration) -> String {
+    if duration.as_secs() >= 10 {
+        duration.as_secs().to_string()
+    } else {
+        format!("{:.1}", duration.as_secs_f64())
     }
 }
 
@@ -357,9 +365,8 @@ mod tests {
         let err = super::run_cmd(&mut cmd, Duration::from_millis(500)).unwrap_err();
         let message = err.message("cargo test --workspace");
         assert!(
-            message.starts_with(
-                "cargo test --workspace timed out after 0s (the budget left for it was 0s)"
-            ),
+            message.starts_with("cargo test --workspace timed out after 0.")
+                && message.contains("s (the budget left for it was 0.5s); last stderr: "),
             "{message}"
         );
         assert!(
