@@ -218,10 +218,16 @@ fn apply(root: &Path, deadline: Instant, step: Step, report: &mut ToolReport) {
         }
         Err(err) => {
             report.skipped.push(step.engine.into());
-            let message = err.message(step.engine);
+            let timed_out = matches!(err, CommandError::Timeout { .. });
+            let what = if timed_out {
+                command.as_str()
+            } else {
+                step.engine
+            };
+            let message = err.message(what);
             let mut finding = unavailable(step.engine, &message);
-            if matches!(err, CommandError::Timeout) {
-                finding.suggested_action = Some(crate::command::TIMEOUT_FIX.into());
+            if timed_out {
+                finding.suggested_action = Some(err.timeout_fix(what));
             }
             report.findings.push(finding);
             report.gates.push(reported(step.gate, &message));

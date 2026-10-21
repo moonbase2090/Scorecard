@@ -2610,12 +2610,16 @@ dev = ["pytest>=8"]
             &mut runs,
             &mut skipped,
             "python3 -m pytest -q",
-            &CommandError::Timeout,
+            &CommandError::Timeout {
+                elapsed: Duration::from_secs(7),
+                limit: Duration::from_secs(7),
+                stderr: String::new(),
+            },
         );
         assert!(enforced && !pass);
         assert_eq!(reason, "pytest did not run");
         assert_eq!(skipped, ["tests"]);
-        assert!(findings[0].message.contains("timed out"));
+        assert!(findings[0].message.contains("pytest timed out after 7s"));
     }
 
     fn symbols(findings: &[Finding]) -> Vec<String> {

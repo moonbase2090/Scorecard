@@ -126,7 +126,7 @@ fn interpret_list(
         ),
         Ok(_) => Ok(0),
         Err(CommandError::NotFound) => Err(Box::new(unavailable_outcome("cargo is not installed"))),
-        Err(CommandError::Timeout) => Err(Box::new(unavailable_outcome(
+        Err(CommandError::Timeout { .. }) => Err(Box::new(unavailable_outcome(
             "cargo mutants --list timed out",
         ))),
         Err(CommandError::Spawn(err)) => Err(Box::new(unavailable_outcome(&err))),
@@ -143,7 +143,7 @@ fn finish_mutants(
             unavailable_outcome("cargo-mutants is not installed")
         }
         Ok(_) => read_outcomes(root),
-        Err(CommandError::Timeout) => {
+        Err(CommandError::Timeout { .. }) => {
             let mut section = read_outcomes(root).section;
             section.status = "timeout".into();
             section.timeout = section.timeout.max(1);
@@ -416,7 +416,7 @@ mod tests {
         });
         assert!(missing.unavailable.unwrap().contains("not installed"));
         let timed = execute_with(&root, None, 10, Duration::ZERO, |_, _, _| {
-            Err(CommandError::Timeout)
+            Err(CommandError::spent())
         });
         assert_eq!(timed.section.status, "unavailable");
         let patch = root.join("change.diff");
@@ -434,7 +434,7 @@ mod tests {
                 if args.iter().any(|arg| arg == "--list") {
                     Ok(captured(true, "[]", ""))
                 } else {
-                    Err(CommandError::Timeout)
+                    Err(CommandError::spent())
                 }
             },
         );

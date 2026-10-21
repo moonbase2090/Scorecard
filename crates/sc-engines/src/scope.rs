@@ -476,7 +476,7 @@ fn git(root: &Path, args: &[&str]) -> Result<String, String> {
         Ok(captured) if captured.status.success() => Ok(captured.stdout),
         Ok(captured) => Err(captured.stderr.trim().to_string()),
         Err(CommandError::NotFound) => Err("git is not installed".into()),
-        Err(CommandError::Timeout) => Err("git timed out".into()),
+        Err(CommandError::Timeout { .. }) => Err("git timed out".into()),
         Err(CommandError::Spawn(err)) => Err(err),
     }
 }

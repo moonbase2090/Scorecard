@@ -20,21 +20,84 @@ pub struct Captured {
 pub enum CommandError {
     NotFound,
     Spawn(String),
-    Timeout,
+    /// The command was stopped at `limit`, the budget left when it started.
+    /// A zero `limit` means earlier steps had already spent the budget.
+    Timeout {
+        elapsed: Duration,
+        limit: Duration,
+        stderr: String,
+    },
 }
 
 impl CommandError {
+    /// The budget was already spent, so the command never ran.
+    pub fn spent() -> Self {
+        Self::Timeout {
+            elapsed: Duration::ZERO,
+            limit: Duration::ZERO,
+            stderr: String::new(),
+        }
+    }
+
     pub fn message(&self, what: &str) -> String {
         match self {
             Self::NotFound => format!("{what}: cargo is not installed or not on PATH"),
             Self::Spawn(err) => format!("{what}: {err}"),
-            Self::Timeout => format!("{what} timed out"),
+            Self::Timeout { limit, .. } if limit.is_zero() => {
+                format!("{what} did not run: earlier steps used the whole analysis budget")
+            }
+            Self::Timeout {
+                elapsed,
+                limit,
+                stderr,
+            } => {
+                let mut message = format!(
+                    "{what} timed out after {}s (the budget left for it was {}s)",
+                    elapsed.as_secs(),
+                    limit.as_secs()
+                );
+                let tail = stderr_tail(stderr);
+                if !tail.is_empty() {
+                    message.push_str(&format!("; last stderr: {tail}"));
+                }
+                message
+            }
         }
+    }
+
+    /// Exact next step for a timeout: run the command to see what it waits on,
+    /// then rerun with a larger budget.
+    pub fn timeout_fix(&self, what: &str) -> String {
+        let limit = match self {
+            Self::Timeout { limit, .. } => *limit,
+            _ => Duration::ZERO,
+        };
+        let raised = (limit.as_secs() * 2).max(600);
+        if limit.is_zero() {
+            return format!(
+                "Re-run with --budget-seconds {raised}, or find the step that used it up in the report's runs."
+            );
+        }
+        format!(
+            "Run `{what}` in the project to see what it waits on. If it only needs more time, re-run with --budget-seconds {raised}."
+        )
     }
 }
 
-pub const TIMEOUT_FIX: &str =
-    "Raise --budget-seconds, or make this command finish within the deadline.";
+/// The last non-empty stderr lines, at most 300 bytes, on one line.
+fn stderr_tail(stderr: &str) -> String {
+    let lines: Vec<&str> = stderr
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    let joined = lines[lines.len().saturating_sub(3)..].join(" | ");
+    let mut start = joined.len().saturating_sub(300);
+    while !joined.is_char_boundary(start) {
+        start += 1;
+    }
+    joined[start..].to_string()
+}
 
 pub fn brief(text: &str) -> String {
     let mut out = String::new();
@@ -59,7 +122,7 @@ pub fn brief(text: &str) -> String {
 pub fn budget_left(deadline: Instant) -> Result<Duration, CommandError> {
     let left = deadline.saturating_duration_since(Instant::now());
     if left.is_zero() {
-        Err(CommandError::Timeout)
+        Err(CommandError::spent())
     } else {
         Ok(left)
     }
@@ -126,7 +189,7 @@ pub fn run_cmd_input(
     input: Option<&[u8]>,
 ) -> Result<Captured, CommandError> {
     if timeout.is_zero() {
-        return Err(CommandError::Timeout);
+        return Err(CommandError::spent());
     }
     if input.is_some() {
         cmd.stdin(Stdio::piped());
@@ -173,8 +236,12 @@ pub fn run_cmd_input(
             Ok(None) if start.elapsed() >= timeout => {
                 stop_tree(&mut child);
                 let _ = drain(out_handle);
-                let _ = drain(err_handle);
-                return Err(CommandError::Timeout);
+                let stderr = drain(err_handle);
+                return Err(CommandError::Timeout {
+                    elapsed: start.elapsed(),
+                    limit: timeout,
+                    stderr,
+                });
             }
             Ok(None) => thread::sleep(Duration::from_millis(20)),
             Err(err) => {
@@ -280,6 +347,54 @@ mod tests {
     }
 
     #[test]
+    fn timeout_message_names_the_command_the_clock_and_the_last_stderr() {
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
+            .arg("echo 'warming up' >&2; echo 'stuck on ._lib.rs' >&2; sleep 30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let err = super::run_cmd(&mut cmd, Duration::from_millis(500)).unwrap_err();
+        let message = err.message("cargo test --workspace");
+        assert!(
+            message.starts_with(
+                "cargo test --workspace timed out after 0s (the budget left for it was 0s)"
+            ),
+            "{message}"
+        );
+        assert!(
+            message.ends_with("last stderr: warming up | stuck on ._lib.rs"),
+            "{message}"
+        );
+        assert_eq!(
+            err.timeout_fix("cargo test --workspace"),
+            "Run `cargo test --workspace` in the project to see what it waits on. If it only needs more time, re-run with --budget-seconds 600."
+        );
+    }
+
+    #[test]
+    fn spent_budget_is_not_reported_as_a_slow_command() {
+        let message = super::CommandError::spent().message("pytest");
+        assert_eq!(
+            message,
+            "pytest did not run: earlier steps used the whole analysis budget"
+        );
+        assert_eq!(
+            super::CommandError::spent().timeout_fix("pytest"),
+            "Re-run with --budget-seconds 600, or find the step that used it up in the report's runs."
+        );
+    }
+
+    #[test]
+    fn stderr_tail_keeps_the_last_three_lines_within_300_bytes() {
+        let text = "a\n\nb\nc\nd\n";
+        assert_eq!(super::stderr_tail(text), "b | c | d");
+        let long = format!("{}é", "x".repeat(400));
+        let tail = super::stderr_tail(&long);
+        assert!(tail.len() <= 300 && tail.ends_with('é'), "{}", tail.len());
+    }
+
+    #[test]
     fn timeout_kills_a_grandchild_that_holds_the_pipe() {
         let mut cmd = Command::new("sh");
         cmd.arg("-c")
@@ -289,7 +404,7 @@ mod tests {
             .stderr(Stdio::piped());
         let start = Instant::now();
         let err = super::run_cmd(&mut cmd, Duration::from_millis(300)).unwrap_err();
-        assert!(matches!(err, super::CommandError::Timeout));
+        assert!(matches!(err, super::CommandError::Timeout { .. }));
         let elapsed = start.elapsed();
         assert!(
             elapsed < Duration::from_secs(2),

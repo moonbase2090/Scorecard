@@ -75,7 +75,7 @@ The import is not declared in `pyproject.toml`, `requirements.txt`, `setup.cfg`,
 | `config.invalid` | Fix `analyzer.toml` at the path in the message, for example an unknown gate in `fail_on` |
 | Several language packs match | See [above](#several-language-packs-match-rust-node) |
 | A required toolchain is missing | Install the compiler for the pack, or use the `scorecard-tools` image ([packs](packs.md)) |
-| Compile or tests timed out | Raise `--budget-seconds` (default 120) |
+| `<command> timed out after Ns` | The finding names the command, how long it ran, and the last stderr lines. Run that command in the project to see what it waits on, then raise `--budget-seconds` (default 120) if it only needs more time |
 
 ## A config change has no effect
 
