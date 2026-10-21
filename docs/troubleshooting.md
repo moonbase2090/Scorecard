@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Each section starts with what the report says.
+Each section starts with what the report says. For a tool that is not installed, run `sc doctor` in the project: it lists every missing tool with its install command.
 
 ## `tests: pytest is not installed`
 

@@ -2,6 +2,7 @@
 
 ```text
 sc analyze [PATH] [OPTIONS]
+sc doctor [PATH] [--pack PACK]
 sc config path
 sc config init [--force]
 sc setup
@@ -43,6 +44,24 @@ Print or create `~/.config/sc/analyzer.toml`. See [Configure](../how-to/config.m
 | `sc config path` | Print the user config path. |
 | `sc config init` | Create `~/.config/sc` if needed and write a starter from `analyzer.toml.example`. Does not replace an existing file. |
 | `sc config init --force` | Replace an existing file. |
+
+## sc doctor
+
+Lists the tools the project's language pack needs, marks each `ok` or missing, and prints the install command for every missing one. A missing required tool is one an enforced gate cannot run without; a missing optional tool only disables an extra check. The pack comes from the same detection as `sc analyze`; pass `--pack` when several manifests match.
+
+| Exit | Meaning |
+|---|---|
+| `0` | Every required tool is present. |
+| `1` | A required tool is missing. |
+| `2` | No pack matches the path, or `--pack` is unknown. |
+
+```text
+$ sc doctor
+rust pack
+  ok        cargo
+  MISSING   clippy (required, used for lint)
+            install: rustup component add clippy
+```
 
 ## sc setup
 

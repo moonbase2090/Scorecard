@@ -507,6 +507,16 @@ pub fn detect_with_generated(
     Ok(resolve_markers(root, found, include_generated))
 }
 
+/// Names of the packs `sc analyze` would consider for `root`: one when the
+/// pack is decided, several when markers conflict, none when nothing matches.
+pub fn detected_pack_names(root: &Path, override_pack: &str) -> Result<Vec<&'static str>, String> {
+    Ok(match detect_with_generated(root, override_pack, &[])? {
+        Detected::Pack(id) => vec![id.as_str()],
+        Detected::Ambiguous(ids) => ids.into_iter().map(PackId::as_str).collect(),
+        Detected::Unknown => Vec::new(),
+    })
+}
+
 #[cfg(test)]
 pub(crate) fn detect(root: &Path, override_pack: &str) -> Result<Detected, String> {
     detect_with_generated(root, override_pack, &[])

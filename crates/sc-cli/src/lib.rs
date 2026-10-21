@@ -3,6 +3,7 @@
 //!
 //! User-facing analyze output is the scorecard, rendered as JSON and/or Markdown.
 
+mod doctor;
 mod format;
 mod pretty;
 mod progress;
@@ -108,6 +109,14 @@ enum ConfigCmd {
 enum Commands {
     /// Analyze a project tree and print a scorecard.
     Analyze(AnalyzeArgs),
+    /// List the tools the project's language pack needs and how to install the missing ones.
+    Doctor {
+        /// Project directory. Defaults to `.`.
+        path: Option<PathBuf>,
+        /// Pack to check when several manifests match: rust, node, python, bash, go, java, csharp, php, cpp, or web.
+        #[arg(long, value_name = "PACK")]
+        pack: Option<String>,
+    },
     /// Print or create ~/.config/sc/analyzer.toml.
     Config {
         #[command(subcommand)]
@@ -145,6 +154,7 @@ fn stdout_body_format(stdout_format: &str, has_out: bool, _tty: bool) -> &str {
 pub fn run() -> i32 {
     let cli = Cli::parse();
     match cli.command {
+        Commands::Doctor { path, pack } => doctor::run(path, pack),
         Commands::Setup => setup::run(),
         Commands::Skills { command } => skills::run(command),
         Commands::Config { command } => match command {
