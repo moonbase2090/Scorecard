@@ -21,7 +21,7 @@ use sc_core::{
     apply_disposition, compute_scores, load_config_file, normalize_gates, resolve_config_path,
     Finding, Gate, Scorecard, SCORECARD_VERSION,
 };
-use sc_engines::{analyze_with_generated_paths, AnalyzeRequest, RunStatus};
+use sc_engines::{analyze_with_generated_paths, os_metadata_warning, AnalyzeRequest, RunStatus};
 
 pub use format::{to_json, to_markdown};
 use report::to_html;
@@ -292,6 +292,13 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
         },
         None => Vec::new(),
     };
+    if let Some(warning) = os_metadata_warning(
+        &root,
+        &loaded.scope.exclude,
+        &loaded.scope.include_generated,
+    ) {
+        let _ = writeln!(io::stderr(), "{warning}");
+    }
     let generated_paths = generated_output_paths(&root, out.as_deref(), &file_format);
     // The spinner animates on stderr only; stdout stays byte-identical.
     // It starts just before the long analysis run and is cleared before

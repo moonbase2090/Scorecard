@@ -53,7 +53,8 @@ pub use perf::{
 };
 pub use pubs::{pub_items_in_file, PubItem};
 pub use walk::{
-    analyzed_generated_files, filter_paths, git_secrets_paths, secrets_scan_includes_path,
-    source_walk_skips_path, walk, walk_files, walk_with_options, GitSecretsPaths, Walk, WalkEntry,
-    WalkItem, WalkKind, WalkOptions, GENERATED_SKIP_DIRS,
+    analyzed_generated_files, filter_paths, git_secrets_paths, is_os_metadata_file,
+    os_metadata_files, secrets_scan_includes_path, source_walk_skips_path, walk, walk_files,
+    walk_with_options, GitSecretsPaths, Walk, WalkEntry, WalkItem, WalkKind, WalkOptions,
+    GENERATED_SKIP_DIRS,
 };

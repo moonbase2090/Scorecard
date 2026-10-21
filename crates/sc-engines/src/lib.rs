@@ -31,3 +31,4 @@ pub use pipeline::{
     analyze, analyze_with_generated_paths, AnalyzeOutput, AnalyzeRequest, ProgressCallback,
     RunStatus,
 };
+pub use scope::os_metadata_warning;

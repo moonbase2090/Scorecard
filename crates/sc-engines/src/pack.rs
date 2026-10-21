@@ -218,6 +218,7 @@ pub fn text_secrets_with_generated(
                 include_hidden_directories: true,
                 root_directory_excludes: true,
                 include_generated_files: true,
+                ..Default::default()
             },
         ) {
             match item {
