@@ -48,8 +48,8 @@ pub use discover::{
 };
 pub use imports::{imports_in_file, local_names_in_file, ImportHit};
 pub use perf::{
-    cfg_test_coverage, is_cfg_test_only, module_subtree_prefix, out_of_line_cfg_test_paths,
-    out_of_line_cfg_test_paths_from_source, perf_in_file, PerfHit,
+    cfg_test_coverage, cfg_test_line_ranges_from_source, is_cfg_test_only, module_subtree_prefix,
+    out_of_line_cfg_test_paths, out_of_line_cfg_test_paths_from_source, perf_in_file, PerfHit,
 };
 pub use pubs::{pub_items_in_file, PubItem};
 pub use walk::{
