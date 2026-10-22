@@ -169,7 +169,8 @@ runs:
             for finding in findings if isinstance(findings, list) else []:
                 if not isinstance(finding, dict):
                     continue
-                severity = finding.get("severity", "").lower()
+                severity = finding.get("severity", "")
+                severity = severity.lower() if isinstance(severity, str) else ""
                 level = {"error": "error", "warning": "warning"}.get(severity, "notice")
 
                 def escape_data(value):
