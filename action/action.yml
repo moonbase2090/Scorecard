@@ -163,8 +163,6 @@ runs:
             with report.open(encoding="utf-8") as stream:
                 data = json.load(stream)
             for finding in data.get("sections", {}).get("findings", []):
-                if finding.get("disposition") == "ignore":
-                    continue
                 severity = finding.get("severity", "").lower()
                 level = {"error": "error", "warning": "warning"}.get(severity, "notice")
 
