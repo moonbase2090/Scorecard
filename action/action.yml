@@ -130,17 +130,12 @@ runs:
       continue-on-error: true
       shell: bash
       env:
-        SC_FORMAT: ${{ inputs.format }}
         SC_FAIL_ON: ${{ inputs.fail-on }}
         SC_MUTATION: ${{ inputs.mutation }}
         SC_SPEC: ${{ inputs.spec }}
         SC_DIFF: ${{ inputs.diff }}
         SC_BUDGET: ${{ inputs.budget-seconds }}
       run: |
-        case "$SC_FORMAT" in
-          json|md|sarif|html|all) ;;
-          *) echo "format must be json, md, sarif, html, or all" >&2; exit 2 ;;
-        esac
         args=(analyze . --format all --out sc-results --fail-on "$SC_FAIL_ON" --mutation "$SC_MUTATION" --budget-seconds "$SC_BUDGET")
         if [ -n "$SC_SPEC" ]; then
           args+=(--spec "$SC_SPEC")
@@ -156,13 +151,24 @@ runs:
         python3 - <<'PY'
         import json
         import os
+        import sys
         from pathlib import Path
 
         report = Path("sc-results.json")
         if report.is_file():
-            with report.open(encoding="utf-8") as stream:
-                data = json.load(stream)
-            for finding in data.get("sections", {}).get("findings", []):
+            try:
+                with report.open(encoding="utf-8") as stream:
+                    data = json.load(stream)
+            except (OSError, json.JSONDecodeError):
+                print("::warning::Scorecard JSON report is unreadable; annotations were skipped.", file=sys.stderr)
+                data = None
+            findings = data.get("findings", []) if isinstance(data, dict) else []
+            if not findings and isinstance(data, dict):
+                sections = data.get("sections", {})
+                findings = sections.get("findings", []) if isinstance(sections, dict) else []
+            for finding in findings if isinstance(findings, list) else []:
+                if not isinstance(finding, dict):
+                    continue
                 severity = finding.get("severity", "").lower()
                 level = {"error": "error", "warning": "warning"}.get(severity, "notice")
 
