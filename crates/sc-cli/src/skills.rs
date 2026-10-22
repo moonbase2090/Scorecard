@@ -534,6 +534,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     fn fake_muse(home: &Path) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
 
@@ -749,6 +750,7 @@ cp "$3/SKILL.md" "$destination"
     }
 
     #[test]
+    #[cfg(unix)]
     fn all_installs_file_agents_and_muse() {
         let home = temp_home();
         let executable = fake_muse(&home);
@@ -772,6 +774,7 @@ cp "$3/SKILL.md" "$destination"
     }
 
     #[test]
+    #[cfg(unix)]
     fn muse_install_preserves_edits_and_force_replaces_them() {
         let home = temp_home();
         let executable = fake_muse(&home);
