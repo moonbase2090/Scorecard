@@ -2,6 +2,7 @@
 use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -66,22 +67,32 @@ impl CommandError {
     }
 
     /// Exact next step for a timeout: run the command to see what it waits on,
-    /// then rerun with a larger budget.
+    /// then rerun with a budget larger than this run's.
     pub fn timeout_fix(&self, what: &str) -> String {
-        let limit = match self {
-            Self::Timeout { limit, .. } => *limit,
-            _ => Duration::ZERO,
-        };
-        let raised = (limit.as_secs() * 2).max(600);
-        if limit.is_zero() {
-            return format!(
-                "Re-run with --budget-seconds {raised}, or find the step that used it up in the report's runs."
-            );
-        }
-        format!(
-            "Run `{what}` in the project to see what it waits on. If it only needs more time, re-run with --budget-seconds {raised}."
-        )
+        let spent = matches!(self, Self::Timeout { limit, .. } if limit.is_zero());
+        timeout_fix_text(what, spent, RUN_BUDGET_SECS.load(Ordering::Relaxed))
     }
+}
+
+const DEFAULT_BUDGET_SECS: u64 = 120;
+static RUN_BUDGET_SECS: AtomicU64 = AtomicU64::new(DEFAULT_BUDGET_SECS);
+
+/// Record the `--budget-seconds` of the run in progress so a timeout can
+/// suggest a larger one.
+pub fn set_run_budget(budget: Duration) {
+    RUN_BUDGET_SECS.store(budget.as_secs().max(1), Ordering::Relaxed);
+}
+
+fn timeout_fix_text(what: &str, spent: bool, budget_secs: u64) -> String {
+    let raised = budget_secs * 2;
+    if spent {
+        return format!(
+            "Re-run with --budget-seconds {raised}, or find the step that used the budget up in the report's runs."
+        );
+    }
+    format!(
+        "Run `{what}` in the project to see what it waits on. If it only needs more time, re-run with --budget-seconds {raised}."
+    )
 }
 
 fn seconds(duration: Duration) -> String {
@@ -373,10 +384,20 @@ mod tests {
             message.ends_with("last stderr: warming up | stuck on ._lib.rs"),
             "{message}"
         );
-        assert_eq!(
-            err.timeout_fix("cargo test --workspace"),
-            "Run `cargo test --workspace` in the project to see what it waits on. If it only needs more time, re-run with --budget-seconds 600."
+        assert!(err
+            .timeout_fix("cargo test --workspace")
+            .starts_with("Run `cargo test --workspace` in the project to see what it waits on."));
+    }
+
+    #[test]
+    fn suggested_budget_is_twice_the_budget_of_the_run() {
+        assert!(
+            super::timeout_fix_text("cargo test", false, 900).ends_with("--budget-seconds 1800.")
         );
+        assert!(
+            super::timeout_fix_text("cargo test", false, 120).ends_with("--budget-seconds 240.")
+        );
+        assert!(super::timeout_fix_text("cargo test", true, 900).contains("--budget-seconds 1800,"));
     }
 
     #[test]
@@ -386,10 +407,9 @@ mod tests {
             message,
             "pytest did not run: earlier steps used the whole analysis budget"
         );
-        assert_eq!(
-            super::CommandError::spent().timeout_fix("pytest"),
-            "Re-run with --budget-seconds 600, or find the step that used it up in the report's runs."
-        );
+        assert!(super::CommandError::spent()
+            .timeout_fix("pytest")
+            .starts_with("Re-run with --budget-seconds "));
     }
 
     #[test]

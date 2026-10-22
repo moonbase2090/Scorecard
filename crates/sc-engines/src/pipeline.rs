@@ -109,6 +109,7 @@ pub fn analyze_with_generated_paths(
 ) -> AnalyzeOutput {
     // Snapshot Git state before any engine runs and exclude Scorecard's saved
     // report and requested output files from earlier runs.
+    crate::command::set_run_budget(request.budget);
     report(&request, "Detecting pack");
     let git = git_info(&request.root, generated_paths);
     match crate::pack::detect_with_generated(
@@ -1210,7 +1211,11 @@ fn test_phase(
             state.analyzer_error = true;
             state.tests_pass = false;
             state.tests_reason = "timed out".into();
-            state.findings.push(timed_out("tests", &err, "cargo test"));
+            state.findings.push(timed_out(
+                "tests",
+                &err,
+                &cargo_gate_command("test", state.workspace_root, ""),
+            ));
             state.skipped.push("tests".into());
         }
         Err(err) => {

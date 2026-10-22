@@ -371,7 +371,7 @@ fn compile_tree(
         Err(err) => {
             note(runs, "compile", &command, None, Duration::ZERO);
             skipped.push("compile".into());
-            findings.push(unavailable("compile", &err.message("python3")));
+            findings.push(engine_error("compile", &err, "python3", &command));
             (false, "python3 is not available".into())
         }
     }
@@ -577,7 +577,7 @@ fn record_pytest_spawn_error(
 ) -> (bool, bool, String) {
     note(runs, "tests", executed, None, Duration::ZERO);
     skipped.push("tests".into());
-    findings.push(unavailable("tests", &err.message("pytest")));
+    findings.push(engine_error("tests", err, "pytest", executed));
     (true, false, "pytest did not run".into())
 }
 
@@ -802,7 +802,7 @@ fn run_ruff(
         Err(err) => {
             note(runs, "lint", &command, None, Duration::ZERO);
             skipped.push("lint".into());
-            findings.push(unavailable("lint", &err.message("ruff")));
+            findings.push(engine_error("lint", &err, "ruff", &command));
             (false, "ruff did not run".into())
         }
     }
@@ -1324,6 +1324,17 @@ fn note(
         duration_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
         budget_ms: None,
     });
+}
+
+/// A finding for a command that did not complete: a timeout names the command
+/// and how to rerun it, anything else names the missing tool.
+fn engine_error(engine: &str, err: &CommandError, tool: &str, command: &str) -> Finding {
+    let timed_out = matches!(err, CommandError::Timeout { .. });
+    let mut finding = unavailable(engine, &err.message(if timed_out { command } else { tool }));
+    if timed_out {
+        finding.suggested_action = Some(err.timeout_fix(command));
+    }
+    finding
 }
 
 fn unavailable(engine: &str, message: &str) -> Finding {
@@ -2616,10 +2627,17 @@ dev = ["pytest>=8"]
                 stderr: String::new(),
             },
         );
+        assert!(findings[0]
+            .suggested_action
+            .as_deref()
+            .unwrap()
+            .starts_with("Run `python3 -m pytest -q` in the project"));
         assert!(enforced && !pass);
         assert_eq!(reason, "pytest did not run");
         assert_eq!(skipped, ["tests"]);
-        assert!(findings[0].message.contains("pytest timed out after 7.0s"));
+        assert!(findings[0]
+            .message
+            .starts_with("python3 -m pytest -q timed out after 7.0s"));
     }
 
     fn symbols(findings: &[Finding]) -> Vec<String> {

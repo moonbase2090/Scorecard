@@ -126,8 +126,8 @@ fn interpret_list(
         ),
         Ok(_) => Ok(0),
         Err(CommandError::NotFound) => Err(Box::new(unavailable_outcome("cargo is not installed"))),
-        Err(CommandError::Timeout { .. }) => Err(Box::new(unavailable_outcome(
-            "cargo mutants --list timed out",
+        Err(err @ CommandError::Timeout { .. }) => Err(Box::new(unavailable_outcome(
+            &err.message("cargo mutants --list"),
         ))),
         Err(CommandError::Spawn(err)) => Err(Box::new(unavailable_outcome(&err))),
     }
@@ -143,7 +143,7 @@ fn finish_mutants(
             unavailable_outcome("cargo-mutants is not installed")
         }
         Ok(_) => read_outcomes(root),
-        Err(CommandError::Timeout { .. }) => {
+        Err(err @ CommandError::Timeout { .. }) => {
             let mut section = read_outcomes(root).section;
             section.status = "timeout".into();
             section.timeout = section.timeout.max(1);
@@ -151,7 +151,7 @@ fn finish_mutants(
                 section,
                 findings: Vec::new(),
                 ran: false,
-                unavailable: Some("cargo mutants timed out".into()),
+                unavailable: Some(err.message("cargo mutants")),
             }
         }
         Err(CommandError::NotFound) => unavailable_outcome("cargo is not installed"),
