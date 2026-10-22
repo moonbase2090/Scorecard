@@ -2,14 +2,22 @@
 use std::collections::BTreeSet;
 
 pub fn package_name(text: &str) -> Option<String> {
-    let mut in_package = false;
+    manifest_name(text, "package")
+}
+
+pub fn library_name(text: &str) -> Option<String> {
+    manifest_name(text, "lib")
+}
+
+fn manifest_name(text: &str, table: &str) -> Option<String> {
+    let mut in_table = false;
     for line in text.lines() {
         let trimmed = strip_comment(line).trim();
         if trimmed.starts_with('[') {
-            in_package = trimmed == "[package]";
+            in_table = trimmed == format!("[{table}]");
             continue;
         }
-        if in_package {
+        if in_table {
             if let Some(name) = table_string(trimmed, "name") {
                 return Some(normalize(&name));
             }
@@ -27,6 +35,9 @@ pub fn declared_for_file(root: &std::path::Path, file_rel: &str) -> BTreeSet<Str
         if let Ok(text) = std::fs::read_to_string(&path) {
             names.extend(dependency_names(&text));
             if let Some(name) = package_name(&text) {
+                names.insert(name);
+            }
+            if let Some(name) = library_name(&text) {
                 names.insert(name);
             }
         }
@@ -282,5 +293,12 @@ temp = "0.1"
         assert!(deps.contains("serde"));
         assert!(deps.contains("other"));
         assert!(deps.contains("temp"));
+    }
+
+    #[test]
+    fn reads_library_name_when_it_differs_from_the_package_name() {
+        let text = "[package]\nname = \"waypoint\"\n\n[lib]\nname = \"waypoint_core\"\n";
+        assert_eq!(package_name(text).as_deref(), Some("waypoint"));
+        assert_eq!(library_name(text).as_deref(), Some("waypoint_core"));
     }
 }

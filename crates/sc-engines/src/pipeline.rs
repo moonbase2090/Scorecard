@@ -4081,6 +4081,44 @@ mod tests {
     }
 
     #[test]
+    fn own_library_name_is_not_reported_as_an_undeclared_dependency() {
+        use crate::scope::Selection;
+        let dir = std::env::temp_dir().join(format!("sc-sca-library-name-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"waypoint\"\nversion = \"0.1.0\"\n\n[lib]\nname = \"waypoint_core\"\n",
+        )
+        .unwrap();
+        let selection = Selection {
+            mode: "tree".into(),
+            files: vec![analyzed("src/lib.rs", &["waypoint_core", "missing"], &[])],
+            crap_functions: Vec::new(),
+            new_symbols: std::collections::BTreeSet::new(),
+            narrow_untested: false,
+            paths: Vec::new(),
+            loc_changed: 0,
+            files_changed: 0,
+            base: None,
+            other_paths: None,
+            workspace_root: true,
+        };
+        let mut findings = Vec::new();
+        let count = import_findings(
+            &dir,
+            &selection,
+            true,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut findings,
+        );
+        assert_eq!(count, 1, "{findings:?}");
+        assert_eq!(findings[0].symbol.as_deref(), Some("missing"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn hallucinated_import_allows_member_package_and_path_deps() {
         use crate::scope::Selection;
         let dir = std::env::temp_dir().join(format!("sc-sca-member-{}", std::process::id()));
