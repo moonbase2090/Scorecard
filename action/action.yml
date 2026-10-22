@@ -126,6 +126,8 @@ runs:
           install_from_source
         fi
     - name: Analyze
+      id: analyze
+      continue-on-error: true
       shell: bash
       env:
         SC_FORMAT: ${{ inputs.format }}
@@ -136,12 +138,10 @@ runs:
         SC_BUDGET: ${{ inputs.budget-seconds }}
       run: |
         case "$SC_FORMAT" in
-          md) out=sc-results.md ;;
-          json) out=sc-results.json ;;
-          sarif) out=sc-results.sarif ;;
-          *) out=sc-results.html ;;
+          json|md|sarif|html|all) ;;
+          *) echo "format must be json, md, sarif, html, or all" >&2; exit 2 ;;
         esac
-        args=(analyze . --format "$SC_FORMAT" --out "$out" --fail-on "$SC_FAIL_ON" --mutation "$SC_MUTATION" --budget-seconds "$SC_BUDGET")
+        args=(analyze . --format all --out sc-results --fail-on "$SC_FAIL_ON" --mutation "$SC_MUTATION" --budget-seconds "$SC_BUDGET")
         if [ -n "$SC_SPEC" ]; then
           args+=(--spec "$SC_SPEC")
         fi
@@ -149,6 +149,54 @@ runs:
           args+=(--diff "$SC_DIFF")
         fi
         sc "${args[@]}"
+    - name: Annotate findings and write job summary
+      if: always()
+      shell: bash
+      run: |
+        python3 - <<'PY'
+        import json
+        import os
+        from pathlib import Path
+
+        report = Path("sc-results.json")
+        if report.is_file():
+            with report.open(encoding="utf-8") as stream:
+                data = json.load(stream)
+            for finding in data.get("sections", {}).get("findings", []):
+                if finding.get("disposition") == "ignore":
+                    continue
+                severity = finding.get("severity", "").lower()
+                level = {"error": "error", "warning": "warning"}.get(severity, "notice")
+
+                def escape_data(value):
+                    return str(value).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+                def escape_property(value):
+                    return escape_data(value).replace(":", "%3A").replace(",", "%2C")
+
+                properties = [f"title={escape_property(finding.get('rule', 'scorecard'))}"]
+                path = finding.get("file")
+                if path:
+                    properties.append(f"file={escape_property(path)}")
+                span = finding.get("span") or {}
+                for key, field in (("line", "start_line"), ("col", "start_col")):
+                    if span.get(field):
+                        properties.append(f"{key}={span[field]}")
+                message = escape_data(finding.get("message", ""))
+                print(f"::{level} {','.join(properties)}::{message}")
+
+        summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
+        markdown = Path("sc-results.md")
+        with summary.open("a", encoding="utf-8") as stream:
+            if markdown.is_file():
+                stream.write(markdown.read_text(encoding="utf-8"))
+            else:
+                stream.write("# Scorecard\n\nAnalysis did not produce a report. Check the Analyze step for details.\n")
+        PY
+    - name: Propagate analysis failure
+      if: steps.analyze.outcome == 'failure'
+      shell: bash
+      run: exit 1
     - name: Upload report
       if: always() && (inputs.format == 'html' || inputs.format == 'all')
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
