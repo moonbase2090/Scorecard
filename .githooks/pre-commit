@@ -1,0 +1,57 @@
+#!/bin/sh
+# Pre-commit hook: block commits that contain unformatted staged files.
+# Only runs a formatter when matching files are staged.
+#
+# Set up once per clone:  git config core.hooksPath .githooks
+# Bypass (rarely):        git commit --no-verify
+# POSIX sh only.
+
+set -u
+
+# Cargo manifests to check when .rs files are staged (empty = no Rust).
+RUST_MANIFESTS="Cargo.toml"
+# Biome version used for web files (empty = no web check).
+BIOME_VERSION=""
+
+root=$(git rev-parse --show-toplevel) || exit 1
+cd "$root" || exit 1
+
+staged_match() {
+    git diff --cached --name-only --diff-filter=ACMR -- "$@" | grep -q .
+}
+
+failed=0
+
+if [ -n "$RUST_MANIFESTS" ] && staged_match '*.rs'; then
+    if ! command -v cargo >/dev/null 2>&1; then
+        echo "pre-commit: cargo not found; install Rust with rustfmt to commit .rs files" >&2
+        exit 1
+    fi
+    for manifest in $RUST_MANIFESTS; do
+        if ! cargo fmt --manifest-path "$manifest" --all -- --check; then
+            echo "pre-commit: Rust files are not formatted. Fix with:" >&2
+            if [ "$manifest" = "Cargo.toml" ]; then
+                echo "  cargo fmt --all" >&2
+            else
+                echo "  cargo fmt --manifest-path $manifest --all" >&2
+            fi
+            failed=1
+        fi
+    done
+fi
+
+if [ -n "$BIOME_VERSION" ] &&
+    staged_match '*.js' '*.mjs' '*.cjs' '*.jsx' '*.ts' '*.tsx' '*.json' '*.jsonc'; then
+    if ! command -v npx >/dev/null 2>&1; then
+        echo "pre-commit: npx not found; install Node.js to commit web files" >&2
+        exit 1
+    fi
+    if ! npx --yes "@biomejs/biome@$BIOME_VERSION" check --staged --no-errors-on-unmatched; then
+        echo "pre-commit: web files are not formatted. Fix with:" >&2
+        echo "  npx --yes @biomejs/biome@$BIOME_VERSION check --write --staged" >&2
+        echo "then stage the changes again." >&2
+        failed=1
+    fi
+fi
+
+exit "$failed"
