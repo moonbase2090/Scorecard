@@ -386,7 +386,8 @@ fn is_diff_test(rel: &str) -> bool {
     name.ends_with(".py") && (name.starts_with("test_") || name.ends_with("_test.py"))
 }
 
-fn has_tests(root: &Path) -> bool {
+/// True when the tree has a pytest suite, as `sc analyze` decides it.
+pub fn has_tests(root: &Path) -> bool {
     root.join("tests").is_dir()
         || root.join("test").is_dir()
         || root_test_file(root)
@@ -1337,7 +1338,9 @@ fn unavailable(engine: &str, message: &str) -> Finding {
         symbol: None,
         message: message.into(),
         evidence: serde_json::json!({}),
-        suggested_action: Some("Install the tool and re-run".into()),
+        suggested_action: Some(
+            "Install the tool and re-run, or run `sc doctor` to list every missing tool".into(),
+        ),
         disposition: String::new(),
     }
 }
@@ -2600,7 +2603,7 @@ dev = ["pytest>=8"]
         assert_eq!(findings[0].rule, "engine.unavailable");
         assert_eq!(
             findings[0].suggested_action.as_deref(),
-            Some("Install the tool and re-run")
+            Some("Install the tool and re-run, or run `sc doctor` to list every missing tool")
         );
 
         findings.clear();

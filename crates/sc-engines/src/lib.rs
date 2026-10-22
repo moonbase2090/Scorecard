@@ -32,3 +32,5 @@ pub use pipeline::{
     analyze, analyze_with_generated_paths, AnalyzeOutput, AnalyzeRequest, ProgressCallback,
     RunStatus,
 };
+pub use python::has_tests as has_pytest_suite;
+pub use toolchain_plans::c_family_present;

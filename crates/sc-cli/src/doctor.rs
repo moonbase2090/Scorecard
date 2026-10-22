@@ -9,11 +9,13 @@ enum Probe {
     Bin(&'static str),
     /// A command that exits 0 when the tool works.
     Run(&'static [&'static str]),
+    /// Any one of these is enough.
+    Any(&'static [Probe]),
 }
 
 enum Install {
     Cmd(&'static str),
-    /// A system package: `brew install` on macOS, `apt-get install` elsewhere.
+    /// A system package, installed with the host's package manager.
     System {
         brew: &'static str,
         apt: &'static str,
@@ -45,9 +47,21 @@ const fn tool(
     }
 }
 
-fn pack_tools(pack: &str) -> Vec<Tool> {
+/// What the project tree changes about the tools a pack needs, read the way
+/// `sc analyze` reads it.
+#[derive(Default, Clone, Copy)]
+struct Tree {
+    /// A pytest suite exists, so the tests gate is enforced.
+    pytest_suite: bool,
+    /// `uv.lock` or `.venv` exists, so tests run through `uv run`.
+    uv_project: bool,
+    c_files: bool,
+    cxx_files: bool,
+}
+
+fn pack_tools(pack: &str, tree: Tree) -> Vec<Tool> {
     use Install::{Cmd, System};
-    use Probe::{Bin, Run};
+    use Probe::{Any, Bin, Run};
     match pack {
         "rust" => vec![
             tool("cargo", Bin("cargo"), true, "types, tests", Cmd("curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh")),
@@ -57,8 +71,18 @@ fn pack_tools(pack: &str) -> Vec<Tool> {
         ],
         "python" => vec![
             tool("python3", Bin("python3"), true, "compile, tests", System { brew: "python", apt: "python3" }),
-            tool("pytest", Run(&["python3", "-m", "pytest", "--version"]), true, "tests", Cmd("python3 -m pip install pytest pytest-cov")),
-            tool("ruff", Bin("ruff"), true, "lint", Cmd("python3 -m pip install ruff")),
+            tool(
+                "pytest",
+                if tree.uv_project {
+                    Any(&[Run(&["python3", "-m", "pytest", "--version"]), Bin("uv")])
+                } else {
+                    Run(&["python3", "-m", "pytest", "--version"])
+                },
+                tree.pytest_suite,
+                if tree.pytest_suite { "tests" } else { "tests (no pytest suite found)" },
+                Cmd("python3 -m pip install pytest pytest-cov"),
+            ),
+            tool("ruff", Any(&[Bin("ruff"), Bin("uv")]), true, "lint (ruff, or uvx ruff)", Cmd("python3 -m pip install ruff")),
         ],
         "node" => vec![
             tool("node", Bin("node"), true, "types, tests", System { brew: "node", apt: "nodejs" }),
@@ -80,8 +104,8 @@ fn pack_tools(pack: &str) -> Vec<Tool> {
             tool("phpstan", Bin("phpstan"), false, "lint", Cmd("composer require --dev phpstan/phpstan")),
         ],
         "cpp" => vec![
-            tool("cc", Bin("cc"), true, "types (C files)", System { brew: "gcc", apt: "build-essential" }),
-            tool("g++", Bin("g++"), true, "types (C++ files)", System { brew: "gcc", apt: "build-essential" }),
+            tool("cc", Bin("cc"), tree.c_files, "types (C files)", System { brew: "gcc", apt: "build-essential" }),
+            tool("g++", Bin("g++"), tree.cxx_files, "types (C++ files)", System { brew: "gcc", apt: "build-essential" }),
             tool("cmake", Bin("cmake"), false, "build and tests with CMakeLists.txt", System { brew: "cmake", apt: "cmake" }),
             tool("lcov", Bin("lcov"), false, "coverage, crap", System { brew: "lcov", apt: "lcov" }),
         ],
@@ -95,11 +119,33 @@ fn pack_tools(pack: &str) -> Vec<Tool> {
     }
 }
 
-fn install_command(install: &Install, macos: bool) -> String {
-    match install {
-        Install::Cmd(cmd) => (*cmd).to_string(),
-        Install::System { brew, .. } if macos => format!("brew install {brew}"),
-        Install::System { apt, .. } => format!("sudo apt-get install -y {apt}"),
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum PackageManager {
+    Brew,
+    Apt,
+    Other,
+}
+
+fn package_manager() -> PackageManager {
+    if cfg!(target_os = "macos") {
+        PackageManager::Brew
+    } else if on_path("apt-get") {
+        PackageManager::Apt
+    } else {
+        PackageManager::Other
+    }
+}
+
+fn install_command(install: &Install, manager: PackageManager) -> String {
+    match (install, manager) {
+        (Install::Cmd(cmd), _) => (*cmd).to_string(),
+        (Install::System { brew, .. }, PackageManager::Brew) => format!("brew install {brew}"),
+        (Install::System { apt, .. }, PackageManager::Apt) => {
+            format!("sudo apt-get install -y {apt}")
+        }
+        (Install::System { apt, .. }, PackageManager::Other) => {
+            format!("install `{apt}` (Debian package name) with your system package manager")
+        }
     }
 }
 
@@ -126,6 +172,7 @@ fn is_executable(path: &Path) -> bool {
 fn present(probe: &Probe) -> bool {
     match probe {
         Probe::Bin(name) => on_path(name),
+        Probe::Any(probes) => probes.iter().any(present),
         Probe::Run(argv) => Command::new(argv[0])
             .args(&argv[1..])
             .stdin(Stdio::null())
@@ -137,11 +184,16 @@ fn present(probe: &Probe) -> bool {
 }
 
 /// The report text and whether every required tool is present.
-fn render(packs: &[&str], has: &dyn Fn(&Tool) -> bool, macos: bool) -> (String, bool) {
+fn render(
+    packs: &[&str],
+    tree: Tree,
+    has: &dyn Fn(&Tool) -> bool,
+    manager: PackageManager,
+) -> (String, bool) {
     let mut out = String::new();
     let mut ok = true;
     for pack in packs {
-        let tools = pack_tools(pack);
+        let tools = pack_tools(pack, tree);
         out.push_str(&format!("{pack} pack\n"));
         if tools.is_empty() {
             out.push_str("  no external tools needed\n");
@@ -161,7 +213,7 @@ fn render(packs: &[&str], has: &dyn Fn(&Tool) -> bool, macos: bool) -> (String, 
                 "  {label:<9} {} ({kind}, used for {})\n            install: {}\n",
                 tool.name,
                 tool.needed_for,
-                install_command(&tool.install, macos)
+                install_command(&tool.install, manager)
             ));
         }
     }
@@ -170,7 +222,17 @@ fn render(packs: &[&str], has: &dyn Fn(&Tool) -> bool, macos: bool) -> (String, 
 
 pub fn run(path: Option<PathBuf>, pack: Option<String>) -> i32 {
     let path = path.unwrap_or_else(|| PathBuf::from("."));
-    let packs = match sc_engines::detected_pack_names(&path, pack.as_deref().unwrap_or("")) {
+    let root = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+    let config =
+        match sc_core::load_config_file(sc_core::resolve_config_path(None, &root).as_deref()) {
+            Ok(config) => config,
+            Err(err) => {
+                eprintln!("sc: {err}");
+                return 2;
+            }
+        };
+    let chosen = pack.unwrap_or(config.pack.clone());
+    let packs = match sc_engines::detected_pack_names(&root, &chosen) {
         Ok(packs) => packs,
         Err(err) => {
             eprintln!("sc: {err}");
@@ -184,10 +246,29 @@ pub fn run(path: Option<PathBuf>, pack: Option<String>) -> i32 {
         );
         return 2;
     }
+    if packs.len() > 1 {
+        eprintln!(
+            "sc: several language packs match ({}); set pack in analyzer.toml or pass --pack",
+            packs.join(", ")
+        );
+        return 2;
+    }
+    let (c_files, cxx_files) = sc_engines::c_family_present(
+        &root,
+        &config.scope.exclude,
+        &config.scope.include_generated,
+    );
+    let tree = Tree {
+        pytest_suite: sc_engines::has_pytest_suite(&root),
+        uv_project: root.join("uv.lock").is_file() || root.join(".venv").is_dir(),
+        c_files,
+        cxx_files,
+    };
     let (text, ok) = render(
         &packs,
+        tree,
         &|tool| present(&tool.probe),
-        cfg!(target_os = "macos"),
+        package_manager(),
     );
     print!("{text}");
     if ok {
@@ -204,7 +285,12 @@ mod tests {
 
     #[test]
     fn missing_required_tool_fails_and_prints_its_install_command() {
-        let (text, ok) = render(&["rust"], &|tool| tool.name != "cargo-llvm-cov", false);
+        let (text, ok) = render(
+            &["rust"],
+            Tree::default(),
+            &|tool| tool.name != "cargo-llvm-cov",
+            PackageManager::Apt,
+        );
         assert!(!ok);
         assert!(
             text.contains("MISSING   cargo-llvm-cov (required, used for coverage, crap)"),
@@ -219,7 +305,12 @@ mod tests {
 
     #[test]
     fn missing_optional_tool_passes_with_a_lowercase_label() {
-        let (text, ok) = render(&["rust"], &|tool| tool.name != "cargo-mutants", false);
+        let (text, ok) = render(
+            &["rust"],
+            Tree::default(),
+            &|tool| tool.name != "cargo-mutants",
+            PackageManager::Apt,
+        );
         assert!(ok);
         assert!(
             text.contains("missing   cargo-mutants (optional, used for --mutation)"),
@@ -229,8 +320,18 @@ mod tests {
 
     #[test]
     fn system_packages_use_brew_on_macos_and_apt_elsewhere() {
-        let (mac, _) = render(&["bash"], &|tool| tool.name != "shellcheck", true);
-        let (linux, _) = render(&["bash"], &|tool| tool.name != "shellcheck", false);
+        let (mac, _) = render(
+            &["bash"],
+            Tree::default(),
+            &|tool| tool.name != "shellcheck",
+            PackageManager::Brew,
+        );
+        let (linux, _) = render(
+            &["bash"],
+            Tree::default(),
+            &|tool| tool.name != "shellcheck",
+            PackageManager::Apt,
+        );
         assert!(mac.contains("install: brew install shellcheck"), "{mac}");
         assert!(
             linux.contains("install: sudo apt-get install -y shellcheck"),
@@ -239,8 +340,91 @@ mod tests {
     }
 
     #[test]
+    fn without_apt_or_brew_the_package_name_is_given_for_the_user_to_install() {
+        let (text, _) = render(
+            &["bash"],
+            Tree::default(),
+            &|tool| tool.name != "shellcheck",
+            PackageManager::Other,
+        );
+        assert!(text.contains("install: install `shellcheck` (Debian package name) with your system package manager"), "{text}");
+    }
+
+    #[test]
+    fn a_c_only_tree_does_not_require_gxx_and_a_cxx_only_tree_does_not_require_cc() {
+        let no_gxx = |tool: &Tool| tool.name != "g++";
+        let no_cc = |tool: &Tool| tool.name != "cc";
+        let c_only = Tree {
+            c_files: true,
+            ..Tree::default()
+        };
+        let cxx_only = Tree {
+            cxx_files: true,
+            ..Tree::default()
+        };
+        assert!(render(&["cpp"], c_only, &no_gxx, PackageManager::Apt).1);
+        assert!(!render(&["cpp"], c_only, &no_cc, PackageManager::Apt).1);
+        assert!(render(&["cpp"], cxx_only, &no_cc, PackageManager::Apt).1);
+        assert!(!render(&["cpp"], cxx_only, &no_gxx, PackageManager::Apt).1);
+    }
+
+    #[test]
+    fn pytest_is_required_only_when_the_tree_has_a_suite() {
+        let no_pytest = |tool: &Tool| tool.name != "pytest";
+        assert!(
+            render(
+                &["python"],
+                Tree::default(),
+                &no_pytest,
+                PackageManager::Apt
+            )
+            .1
+        );
+        let suite = Tree {
+            pytest_suite: true,
+            ..Tree::default()
+        };
+        assert!(!render(&["python"], suite, &no_pytest, PackageManager::Apt).1);
+    }
+
+    #[test]
+    fn uv_stands_in_for_pytest_in_a_uv_project_and_for_ruff_always() {
+        let tools = pack_tools(
+            "python",
+            Tree {
+                pytest_suite: true,
+                uv_project: true,
+                ..Tree::default()
+            },
+        );
+        let pytest = tools.iter().find(|tool| tool.name == "pytest").unwrap();
+        let ruff = tools.iter().find(|tool| tool.name == "ruff").unwrap();
+        assert!(
+            matches!(&pytest.probe, Probe::Any(probes) if probes.iter().any(|p| matches!(p, Probe::Bin("uv"))))
+        );
+        assert!(
+            matches!(&ruff.probe, Probe::Any(probes) if probes.iter().any(|p| matches!(p, Probe::Bin("uv"))))
+        );
+        let plain = pack_tools(
+            "python",
+            Tree {
+                pytest_suite: true,
+                ..Tree::default()
+            },
+        );
+        assert!(matches!(
+            &plain
+                .iter()
+                .find(|tool| tool.name == "pytest")
+                .unwrap()
+                .probe,
+            Probe::Run(_)
+        ));
+    }
+
+    #[test]
     fn packs_without_external_tools_say_so() {
-        let (text, ok) = render(&["web"], &|_| false, false);
+        let (text, ok) = render(&["web"], Tree::default(), &|_| false, PackageManager::Apt);
         assert!(ok);
         assert_eq!(text, "web pack\n  no external tools needed\n");
     }

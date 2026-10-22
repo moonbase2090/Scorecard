@@ -57,7 +57,7 @@ Command flags override matching config settings. Every run writes `.sc/last-scor
 
 ### `sc doctor`
 
-`sc doctor [PATH] [--pack PACK]` lists the tools the project's language pack needs and the install command for each missing one. It exits 1 when a required tool is missing and 2 when no pack matches. Run it when a finding says a tool is not installed.
+`sc doctor [PATH] [--pack PACK]` lists the tools the project's language pack needs and the install command for each missing one. It exits 1 when a required tool is missing and 2 when no pack matches or several do. Run it when a finding says a tool is not installed.
 
 ### `sc setup`
 

@@ -2265,10 +2265,7 @@ fn unavailable(engine: &str, message: &str) -> Finding {
         symbol: None,
         message: message.into(),
         evidence: serde_json::json!({}),
-        suggested_action: Some(
-            "Run `sc doctor` to see which tools are missing and how to install them, then re-run"
-                .into(),
-        ),
+        suggested_action: Some("Install the required toolchain and re-run".into()),
         disposition: String::new(),
     }
 }

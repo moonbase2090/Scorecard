@@ -47,13 +47,13 @@ Print or create `~/.config/sc/analyzer.toml`. See [Configure](../how-to/config.m
 
 ## sc doctor
 
-Lists the tools the project's language pack needs, marks each `ok` or missing, and prints the install command for every missing one. A missing required tool is one an enforced gate cannot run without; a missing optional tool only disables an extra check. The pack comes from the same detection as `sc analyze`; pass `--pack` when several manifests match.
+Lists the tools the project's language pack needs, marks each `ok` or missing, and prints the install command for every missing one. A missing required tool is one an enforced gate cannot run without; a missing optional tool only disables an extra check. Requirements follow the tree: `cc` is required only with `.c` files and `g++` only with C++ files, `pytest` only with a pytest suite, and `uv` stands in for `pytest` in a project with `uv.lock` or `.venv` and for `ruff` anywhere. The pack comes from the same detection as `sc analyze`, including `pack` in `analyzer.toml`. When several manifests match, `sc doctor` stops like `sc analyze` does; pass `--pack`. Install commands use `brew` on macOS and `apt-get` where it exists; otherwise they give the Debian package name.
 
 | Exit | Meaning |
 |---|---|
 | `0` | Every required tool is present. |
 | `1` | A required tool is missing. |
-| `2` | No pack matches the path, or `--pack` is unknown. |
+| `2` | No pack matches the path, several packs match, or `--pack` is unknown. |
 
 ```text
 $ sc doctor
