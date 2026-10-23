@@ -52,12 +52,18 @@ tests. They are not real credentials; secret scanning skips them
 
 ## Development setup
 
-This repository ships a pre-commit hook in `.githooks/` that blocks commits
-containing unformatted staged files. Enable it once per clone:
+Enable the repository's formatting hook:
 
 ```sh
-git config core.hooksPath .githooks
+sh scripts/setup-hooks.sh
 ```
 
-(`scripts/setup-hooks.sh` does the same.) The hook only runs when relevant
-files are staged. If it fails, run `cargo fmt --all`, stage the result, and commit again.
+The hook checks a temporary copy of the Git index. Staged Rust changes trigger
+`cargo fmt --all -- --check` for the staged workspace. Staged JavaScript,
+TypeScript, and JSON files trigger Biome 2.6.2 formatting checks. Install Rust
+with rustfmt and Node.js with npm; the first web check downloads Biome through
+`npx`. Working files and the index remain unchanged.
+
+If the hook fails, format the reported files, stage the result with `git add`,
+and retry. See [the pre-commit guide](docs/how-to/pre-commit.md) for commands.
+Run `python3 scripts/test-pre-commit.py` to verify partial staging and web checks.

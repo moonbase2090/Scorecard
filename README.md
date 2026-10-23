@@ -167,3 +167,5 @@ For a Cargo workspace, analyze the root to check every member. Analyze a member 
 ## License
 
 Scorecard is licensed under the [MIT License](LICENSE).
+
+Contributors can enable [staged formatting checks](docs/how-to/pre-commit.md#check-staged-formatting) with `sh scripts/setup-hooks.sh`.

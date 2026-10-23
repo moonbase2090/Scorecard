@@ -104,6 +104,15 @@ test -s "$sc_evidence/sc-version.txt"
 find "$sc_evidence" -type f -print
 ```
 
+## Formatting hook
+
+For changes to `.githooks/pre-commit` or its installer, run
+`python3 scripts/test-pre-commit.py`. It uses Git, Python 3, Rust with rustfmt,
+and Node.js with npm. Its first web check downloads pinned Biome through npx.
+Require successful real commits from formatted indexes and rejected commits from
+malformed indexes, including when working files have the opposite formatting.
+Run the same script in the allocated clean macOS VM and retain its output.
+
 ## Helpers and maintenance
 
 `sc_cleanup`, `sc_doctor`, and `sc_run` above are shell helpers, not installed commands. They use Bash, Python 3.11 or newer, Git, and the built binaries. The web recipes need no language-pack services or credentials. The scope recipe uses Rust and needs `cargo-llvm-cov` plus `llvm-tools-preview`; see the pack prerequisites before that drive.
