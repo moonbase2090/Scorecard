@@ -372,7 +372,11 @@ fn compile_tree(
             note(runs, "compile", &command, None, Duration::ZERO);
             skipped.push("compile".into());
             findings.push(engine_error("compile", &err, "python3", &command));
-            (false, "python3 is not available".into())
+            let reason = match err {
+                CommandError::Timeout { .. } => format!("`{command}` timed out"),
+                _ => "python3 is not available".into(),
+            };
+            (false, reason)
         }
     }
 }
@@ -2278,6 +2282,35 @@ dev = ["pytest>=8"]
         assert_eq!(tree_counts.hallucinated, 2, "{tree:?}");
         assert!(tree.iter().any(|finding| finding.file == "src/old.py"));
         assert!(tree.iter().any(|finding| finding.file == "src/new.py"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn compile_reason_separates_a_timeout_from_a_command_that_could_not_start() {
+        let dir = scratch("compile-reason");
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("src/a.py"), "x = 1\n").unwrap();
+        let reason_for = |root: &Path, deadline: Instant| {
+            let (mut findings, mut runs, mut ran, mut skipped) =
+                (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+            let (pass, reason) = compile_tree(
+                root,
+                deadline,
+                &mut findings,
+                &mut runs,
+                &mut ran,
+                &mut skipped,
+                None,
+            );
+            assert!(!pass);
+            assert_eq!(skipped, ["compile"]);
+            reason
+        };
+        let timed_out = reason_for(&dir, Instant::now());
+        assert_eq!(timed_out, "`python3 -m compileall -q src` timed out");
+        let missing = dir.join("no-such-directory");
+        let not_started = reason_for(&missing, Instant::now() + Duration::from_secs(20));
+        assert_eq!(not_started, "python3 is not available");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
