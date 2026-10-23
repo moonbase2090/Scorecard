@@ -792,8 +792,8 @@ mod tests {
             "{files:?}"
         );
         assert!(
-            files.iter().any(|file| file.ends_with("tests/leak.rs")),
-            "{files:?}"
+            !files.iter().any(|file| file.ends_with("tests/leak.rs")),
+            "test fixture secrets should not fail the secrets gate: {files:?}"
         );
         assert!(
             files.iter().any(|file| file.ends_with("b/leak.py")),
