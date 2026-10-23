@@ -113,6 +113,9 @@ enum Commands {
     Tui {
         /// Project directory containing .sc/last-scorecard.json. Defaults to `.`.
         path: Option<PathBuf>,
+        /// Print a compact saved summary without entering the alternate screen.
+        #[arg(long)]
+        inline: bool,
     },
     /// Analyze a project tree and print a scorecard.
     Analyze(AnalyzeArgs),
@@ -154,7 +157,9 @@ pub fn run() -> i32 {
     let cli = Cli::parse();
     match cli.command {
         #[cfg(feature = "tui")]
-        Commands::Tui { path } => tui::run(path.as_deref().unwrap_or_else(|| Path::new("."))),
+        Commands::Tui { path, inline } => {
+            tui::run(path.as_deref().unwrap_or_else(|| Path::new(".")), inline)
+        }
         Commands::Setup => setup::run(),
         Commands::Skills { command } => skills::run(command),
         Commands::Config { command } => match command {
