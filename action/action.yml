@@ -17,7 +17,11 @@ inputs:
     required: false
     default: off
   format:
-    description: json, md, sarif, html, or all
+    description: >-
+      Upload selection: sarif uploads code scanning results on public repositories;
+      html uploads all report files as an artifact; all does both; json and md skip
+      uploads. All report formats, finding annotations, and the Markdown job summary
+      are generated for every selection.
     required: false
     default: sarif
   diff:
