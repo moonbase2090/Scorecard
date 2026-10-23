@@ -133,3 +133,97 @@ fn doctor_does_not_demand_pytest_without_a_suite() {
         "{stdout}"
     );
 }
+
+#[cfg(unix)]
+fn python_project(name: &str, python: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+    let root = project(name, "requirements.txt");
+    std::fs::create_dir_all(root.join("tests")).unwrap();
+    let bin = root.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    fake_tool(&bin, "python3");
+    std::fs::write(bin.join("python3"), python).unwrap();
+    fake_tool(&bin, "ruff");
+    (root, bin)
+}
+
+#[test]
+#[cfg(unix)]
+fn uv_project_requires_uv_even_when_system_pytest_works() {
+    for marker in ["uv.lock", ".venv"] {
+        let (root, bin) = python_project(marker, "#!/bin/sh\nexit 0\n");
+        if marker == ".venv" {
+            std::fs::create_dir(root.join(marker)).unwrap();
+        } else {
+            std::fs::write(root.join(marker), "").unwrap();
+        }
+        let output = doctor(&root, &bin);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(output.status.code(), Some(1), "{stdout}");
+        assert!(
+            stdout.contains("MISSING   uv (required, used for tests via uv run)"),
+            "{stdout}"
+        );
+        assert!(
+            stdout.contains("install: python3 -m pip install uv"),
+            "{stdout}"
+        );
+        assert!(!stdout.contains("pip install pytest"), "{stdout}");
+
+        fake_tool(&bin, "uv");
+        std::fs::write(bin.join("python3"), "#!/bin/sh\nexit 1\n").unwrap();
+        let output = doctor(&root, &bin);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(output.status.code(), Some(0), "{stdout}");
+        assert!(stdout.contains("ok        uv\n"), "{stdout}");
+        assert!(
+            stdout.contains("ok        pytest-cov or coverage.py\n"),
+            "{stdout}"
+        );
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn python_suite_requires_coverage_tooling_unless_coverage_is_disabled() {
+    let (root, bin) = python_project(
+        "coverage",
+        "#!/bin/sh\ncase \"$*\" in\n  '-m pytest --version') exit 0 ;;\n  *) exit 1 ;;\nesac\n",
+    );
+    let output = doctor(&root, &bin);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(1), "{stdout}");
+    assert!(stdout.contains("ok        pytest\n"), "{stdout}");
+    assert!(
+        stdout.contains("MISSING   pytest-cov or coverage.py (required, used for coverage, crap)"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("install: python3 -m pip install pytest-cov"),
+        "{stdout}"
+    );
+
+    for probe in ["-c import pytest_cov", "-m coverage --version"] {
+        std::fs::write(bin.join("python3"), format!("#!/bin/sh\ncase \"$*\" in\n  '-m pytest --version'|'{probe}') exit 0 ;;\n  *) exit 1 ;;\nesac\n")).unwrap();
+        let output = doctor(&root, &bin);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+
+    std::fs::write(
+        bin.join("python3"),
+        "#!/bin/sh\ncase \"$*\" in\n  '-m pytest --version') exit 0 ;;\n  *) exit 1 ;;\nesac\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("analyzer.toml"), "[engines]\ncoverage = false\n").unwrap();
+    let output = doctor(&root, &bin);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}

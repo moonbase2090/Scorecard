@@ -55,6 +55,7 @@ struct Tree {
     pytest_suite: bool,
     /// `uv.lock` or `.venv` exists, so tests run through `uv run`.
     uv_project: bool,
+    coverage_enabled: bool,
     c_files: bool,
     cxx_files: bool,
 }
@@ -72,15 +73,26 @@ fn pack_tools(pack: &str, tree: Tree) -> Vec<Tool> {
         "python" => vec![
             tool("python3", Bin("python3"), true, "compile, tests", System { brew: "python", apt: "python3" }),
             tool(
-                "pytest",
+                if tree.uv_project { "uv" } else { "pytest" },
                 if tree.uv_project {
-                    Any(&[Run(&["python3", "-m", "pytest", "--version"]), Bin("uv")])
+                    Bin("uv")
                 } else {
                     Run(&["python3", "-m", "pytest", "--version"])
                 },
                 tree.pytest_suite,
-                if tree.pytest_suite { "tests" } else { "tests (no pytest suite found)" },
-                Cmd("python3 -m pip install pytest pytest-cov"),
+                if tree.uv_project { "tests via uv run" } else if tree.pytest_suite { "tests" } else { "tests (no pytest suite found)" },
+                if tree.uv_project { Cmd("python3 -m pip install uv") } else { Cmd("python3 -m pip install pytest") },
+            ),
+            tool(
+                "pytest-cov or coverage.py",
+                if tree.uv_project {
+                    Bin("uv")
+                } else {
+                    Any(&[Run(&["python3", "-c", "import pytest_cov"]), Run(&["python3", "-m", "coverage", "--version"])])
+                },
+                tree.pytest_suite && tree.coverage_enabled,
+                "coverage, crap",
+                if tree.uv_project { Cmd("python3 -m pip install uv") } else { Cmd("python3 -m pip install pytest-cov") },
             ),
             tool("ruff", Any(&[Bin("ruff"), Bin("uv")]), true, "lint (ruff, or uvx ruff)", Cmd("python3 -m pip install ruff")),
         ],
@@ -261,6 +273,7 @@ pub fn run(path: Option<PathBuf>, pack: Option<String>) -> i32 {
     let tree = Tree {
         pytest_suite: sc_engines::has_pytest_suite(&root),
         uv_project: root.join("uv.lock").is_file() || root.join(".venv").is_dir(),
+        coverage_enabled: config.engines.coverage,
         c_files,
         cxx_files,
     };
@@ -388,7 +401,7 @@ mod tests {
     }
 
     #[test]
-    fn uv_stands_in_for_pytest_in_a_uv_project_and_for_ruff_always() {
+    fn uv_is_the_test_runner_in_a_uv_project_and_an_alternative_for_ruff() {
         let tools = pack_tools(
             "python",
             Tree {
@@ -397,11 +410,9 @@ mod tests {
                 ..Tree::default()
             },
         );
-        let pytest = tools.iter().find(|tool| tool.name == "pytest").unwrap();
+        let uv = tools.iter().find(|tool| tool.name == "uv").unwrap();
         let ruff = tools.iter().find(|tool| tool.name == "ruff").unwrap();
-        assert!(
-            matches!(&pytest.probe, Probe::Any(probes) if probes.iter().any(|p| matches!(p, Probe::Bin("uv"))))
-        );
+        assert!(matches!(&uv.probe, Probe::Bin("uv")));
         assert!(
             matches!(&ruff.probe, Probe::Any(probes) if probes.iter().any(|p| matches!(p, Probe::Bin("uv"))))
         );
