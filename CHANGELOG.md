@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- `sc analyze` ignores macOS AppleDouble (`._*`) and `.DS_Store` files and prints one stderr warning with the command that deletes them. Test runners and build tools can still read these files and fail.
+- `sc analyze` ignores macOS AppleDouble (`._*`) and `.DS_Store` files and prints one stderr warning with the command that deletes them. Test runners and build tools can still read these files and fail. The secrets scan still reads them, with or without Git.
 
 ## [0.1.10] - 2026-10-15
 

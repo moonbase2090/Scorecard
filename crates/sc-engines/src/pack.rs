@@ -218,7 +218,8 @@ pub fn text_secrets_with_generated(
                 include_hidden_directories: true,
                 root_directory_excludes: true,
                 include_generated_files: true,
-                ..Default::default()
+                // The Git path scans these by name too; a text secret in `._x` must not hide.
+                include_os_metadata: true,
             },
         ) {
             match item {
