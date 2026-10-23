@@ -10,6 +10,13 @@ The secrets scan checks files up to 64 MiB even when they contain NUL bytes. It 
 
 The secrets gate recognizes Slack incoming webhooks, Stripe restricted live keys (`rk_live_`), and AWS provider secret keys in Terraform, alongside the existing token and key formats.
 
+## Browse a saved analysis
+
+The optional `tui` Cargo feature adds `sc tui [PATH]`, a keyboard browser for
+`PATH/.sc/last-scorecard.json`. Build with `cargo build --release -p sc-cli --features tui`,
+run `sc analyze` in your project, then open `sc tui`. Use the gate rail, badge tabs,
+and status bar to inspect the last completed analysis. See [Browse a saved analysis](docs/how-to/tui.md).
+
 ## Quickstart
 
 Download `sc` for your platform and run it on a project:

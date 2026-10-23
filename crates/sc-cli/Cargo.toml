@@ -18,9 +18,15 @@ path = "src/main.rs"
 
 [features]
 default = []
-tui = []
+tui = ["dep:lunatui-core", "dep:lunatui-runtime", "dep:lunatui-term", "dep:lunatui-theme", "dep:lunatui-widgets", "dep:terminal_size"]
 
 [dependencies]
+lunatui-core = { git = "https://github.com/moonbase2090/lunatui", rev = "d20e7403ad73917c82fd222ca04e99e632bd0a08", optional = true }
+lunatui-runtime = { git = "https://github.com/moonbase2090/lunatui", rev = "d20e7403ad73917c82fd222ca04e99e632bd0a08", optional = true, features = ["app"] }
+lunatui-term = { git = "https://github.com/moonbase2090/lunatui", rev = "d20e7403ad73917c82fd222ca04e99e632bd0a08", optional = true }
+lunatui-theme = { git = "https://github.com/moonbase2090/lunatui", rev = "d20e7403ad73917c82fd222ca04e99e632bd0a08", optional = true }
+lunatui-widgets = { git = "https://github.com/moonbase2090/lunatui", rev = "d20e7403ad73917c82fd222ca04e99e632bd0a08", optional = true }
+terminal_size = { version = "0.4", optional = true }
 sc-core = { path = "../sc-core" }
 sc-engines = { path = "../sc-engines" }
 sc-sarif = { path = "../sc-sarif" }
