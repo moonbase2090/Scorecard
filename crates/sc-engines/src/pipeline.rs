@@ -4086,11 +4086,6 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("sc-sca-library-name-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
-            dir.join("Cargo.toml"),
-            "[package]\nname = \"waypoint\"\nversion = \"0.1.0\"\n\n[lib]\nname = \"waypoint_core\"\n",
-        )
-        .unwrap();
         let selection = Selection {
             mode: "tree".into(),
             files: vec![analyzed("src/lib.rs", &["waypoint_core", "missing"], &[])],
@@ -4104,17 +4099,30 @@ mod tests {
             other_paths: None,
             workspace_root: true,
         };
-        let mut findings = Vec::new();
-        let count = import_findings(
-            &dir,
-            &selection,
-            true,
-            &mut Vec::new(),
-            &mut Vec::new(),
-            &mut findings,
-        );
-        assert_eq!(count, 1, "{findings:?}");
-        assert_eq!(findings[0].symbol.as_deref(), Some("missing"));
+        for library in [
+            "[lib]\nname = \"waypoint_core\"\n",
+            "[ lib ]\nname = \"waypoint_core\"\n",
+            "[\"lib\"]\nname = \"waypoint_core\"\n",
+            "lib.name = \"waypoint_core\"\n",
+        ] {
+            std::fs::write(
+                dir.join("Cargo.toml"),
+                format!("{library}[package]\nname = \"waypoint\"\nversion = \"0.1.0\"\n"),
+            )
+            .unwrap();
+            let mut findings = Vec::new();
+            let count = import_findings(
+                &dir,
+                &selection,
+                true,
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut findings,
+            );
+            assert_eq!(count, 1, "{library}: {findings:?}");
+            assert_eq!(findings.len(), 1, "{library}: {findings:?}");
+            assert_eq!(findings[0].symbol.as_deref(), Some("missing"));
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
