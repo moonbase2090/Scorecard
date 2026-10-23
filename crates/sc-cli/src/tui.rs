@@ -486,7 +486,7 @@ mod tests {
         card.sections.findings = (0..6)
             .map(|index| Finding {
                 id: format!("finding-{index}"),
-                rule: "lint.rule".into(),
+                rule: "lint.failed".into(),
                 engine: "lint".into(),
                 severity: "warning".into(),
                 file: format!("src/{index}.rs"),
@@ -526,10 +526,10 @@ mod tests {
             findings_snapshot(&mut browser),
             [
                 "Severity  File:line                            Rule",
-                "> warning src/0.rs                             lint.rule",
-                "  warning src/1.rs                             lint.rule",
-                "  warning src/2.rs                             lint.rule",
-                "  warning src/3.rs                             lint.rule",
+                "> warning src/0.rs                             lint.failed",
+                "  warning src/1.rs                             lint.failed",
+                "  warning src/2.rs                             lint.failed",
+                "  warning src/3.rs                             lint.failed",
                 "1/6 | PgUp/PgDn Home/End",
                 "Message 0",
             ]
@@ -539,10 +539,10 @@ mod tests {
             findings_snapshot(&mut browser),
             [
                 "Severity  File:line                            Rule",
-                "  warning src/2.rs                             lint.rule",
-                "  warning src/3.rs                             lint.rule",
-                "  warning src/4.rs                             lint.rule",
-                "> warning src/5.rs                             lint.rule",
+                "  warning src/2.rs                             lint.failed",
+                "  warning src/3.rs                             lint.failed",
+                "  warning src/4.rs                             lint.failed",
+                "> warning src/5.rs                             lint.failed",
                 "6/6 | PgUp/PgDn Home/End",
                 "Message 5",
             ]
