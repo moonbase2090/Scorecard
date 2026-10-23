@@ -155,7 +155,6 @@ runs:
         python3 - <<'PY'
         import json
         import os
-        import sys
         from pathlib import Path
 
         report = Path("sc-results.json")
@@ -164,7 +163,7 @@ runs:
                 with report.open(encoding="utf-8") as stream:
                     data = json.load(stream)
             except (OSError, json.JSONDecodeError):
-                print("::warning::Scorecard JSON report is unreadable; annotations were skipped.", file=sys.stderr)
+                print("::warning::Scorecard JSON report is unreadable; annotations were skipped.")
                 data = None
             findings = data.get("findings", []) if isinstance(data, dict) else []
             if not findings and isinstance(data, dict):
