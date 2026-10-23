@@ -1239,6 +1239,7 @@ dependencies = [
  "serde_json",
  "terminal_size",
  "termlens",
+ "url",
 ]
 
 [[package]]
