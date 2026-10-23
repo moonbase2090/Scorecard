@@ -477,6 +477,7 @@ fn git(root: &Path, args: &[&str]) -> Result<String, String> {
         Ok(captured) => Err(captured.stderr.trim().to_string()),
         Err(CommandError::NotFound) => Err("git is not installed".into()),
         Err(CommandError::Timeout { .. }) => Err("git timed out".into()),
+        Err(err @ CommandError::BudgetExhausted) => Err(err.message("git")),
         Err(CommandError::Spawn(err)) => Err(err),
     }
 }

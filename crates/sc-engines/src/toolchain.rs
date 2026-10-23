@@ -218,15 +218,18 @@ fn apply(root: &Path, deadline: Instant, step: Step, report: &mut ToolReport) {
         }
         Err(err) => {
             report.skipped.push(step.engine.into());
-            let timed_out = matches!(err, CommandError::Timeout { .. });
-            let what = if timed_out {
+            let budget_error = matches!(
+                err,
+                CommandError::Timeout { .. } | CommandError::BudgetExhausted
+            );
+            let what = if budget_error {
                 command.as_str()
             } else {
                 step.engine
             };
             let message = err.message(what);
             let mut finding = unavailable(step.engine, &message);
-            if timed_out {
+            if budget_error {
                 finding.suggested_action = Some(err.timeout_fix(what));
             }
             report.findings.push(finding);

@@ -1125,10 +1125,14 @@ fn compile_phase(root: &Path, manifest: &Path, deadline: Instant, state: &mut Ru
             }
             state.findings.extend(errors);
         }
-        Err(err @ CommandError::Timeout { .. }) => {
+        Err(err @ (CommandError::Timeout { .. } | CommandError::BudgetExhausted)) => {
             state.analyzer_error = true;
             state.types_pass = false;
-            state.types_reason = "timed out".into();
+            state.types_reason = err.message(&cargo_gate_command(
+                "check",
+                state.workspace_root,
+                "--message-format=json",
+            ));
             note_run(
                 &mut state.runs,
                 "compile",
@@ -1207,10 +1211,10 @@ fn test_phase(
             }
             state.findings.extend(failures);
         }
-        Err(err @ CommandError::Timeout { .. }) => {
+        Err(err @ (CommandError::Timeout { .. } | CommandError::BudgetExhausted)) => {
             state.analyzer_error = true;
             state.tests_pass = false;
-            state.tests_reason = "timed out".into();
+            state.tests_reason = err.message(&cargo_gate_command("test", state.workspace_root, ""));
             state.findings.push(timed_out(
                 "tests",
                 &err,
@@ -1906,7 +1910,7 @@ fn run_lint_engine(
                 true
             }
         }
-        Err(err @ CommandError::Timeout { .. }) => {
+        Err(err @ (CommandError::Timeout { .. } | CommandError::BudgetExhausted)) => {
             note_run(sink.runs, "lint", script, None, started.elapsed());
             sink.skipped.push("lint".into());
             sink.findings.push(timed_out("lint", &err, script));

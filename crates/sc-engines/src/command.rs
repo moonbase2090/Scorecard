@@ -21,8 +21,9 @@ pub struct Captured {
 pub enum CommandError {
     NotFound,
     Spawn(String),
+    /// The budget was spent before the command could start.
+    BudgetExhausted,
     /// The command was stopped at `limit`, the budget left when it started.
-    /// A zero `limit` means earlier steps had already spent the budget.
     Timeout {
         elapsed: Duration,
         limit: Duration,
@@ -33,18 +34,14 @@ pub enum CommandError {
 impl CommandError {
     /// The budget was already spent, so the command never ran.
     pub fn spent() -> Self {
-        Self::Timeout {
-            elapsed: Duration::ZERO,
-            limit: Duration::ZERO,
-            stderr: String::new(),
-        }
+        Self::BudgetExhausted
     }
 
     pub fn message(&self, what: &str) -> String {
         match self {
             Self::NotFound => format!("{what}: cargo is not installed or not on PATH"),
             Self::Spawn(err) => format!("{what}: {err}"),
-            Self::Timeout { limit, .. } if limit.is_zero() => {
+            Self::BudgetExhausted => {
                 format!("{what} did not run: earlier steps used the whole analysis budget")
             }
             Self::Timeout {
@@ -69,7 +66,7 @@ impl CommandError {
     /// Exact next step for a timeout: run the command to see what it waits on,
     /// then rerun with a budget larger than this run's.
     pub fn timeout_fix(&self, what: &str) -> String {
-        let spent = matches!(self, Self::Timeout { limit, .. } if limit.is_zero());
+        let spent = matches!(self, Self::BudgetExhausted);
         timeout_fix_text(what, spent, RUN_BUDGET_SECS.load(Ordering::Relaxed))
     }
 }
@@ -219,7 +216,10 @@ pub fn run_cmd_input(
     }
     let mut child = match cmd.spawn() {
         Ok(child) => child,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+        Err(err)
+            if err.kind() == std::io::ErrorKind::NotFound
+                && cmd.get_current_dir().is_none_or(|dir| dir.is_dir()) =>
+        {
             return Err(CommandError::NotFound)
         }
         Err(err) => return Err(CommandError::Spawn(err.to_string())),
@@ -402,7 +402,18 @@ mod tests {
 
     #[test]
     fn spent_budget_is_not_reported_as_a_slow_command() {
-        let message = super::CommandError::spent().message("pytest");
+        let root = std::env::temp_dir().join(format!("sc-no-spawn-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let marker = root.join("started");
+        let _ = std::fs::remove_file(&marker);
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
+            .arg("echo started > started")
+            .current_dir(&root);
+        let err = super::run_cmd(&mut cmd, Duration::ZERO).unwrap_err();
+        assert!(matches!(err, super::CommandError::BudgetExhausted));
+        assert!(!marker.exists());
+        let message = err.message("pytest");
         assert_eq!(
             message,
             "pytest did not run: earlier steps used the whole analysis budget"
@@ -410,6 +421,7 @@ mod tests {
         assert!(super::CommandError::spent()
             .timeout_fix("pytest")
             .starts_with("Re-run with --budget-seconds "));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

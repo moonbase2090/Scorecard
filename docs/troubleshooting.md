@@ -76,6 +76,7 @@ The import is not declared in `pyproject.toml`, `requirements.txt`, `setup.cfg`,
 | Several language packs match | See [above](#several-language-packs-match-rust-node) |
 | A required toolchain is missing | Install the compiler for the pack, or use the `scorecard-tools` image ([packs](packs.md)) |
 | `<command> timed out after Ns` | The finding names the command, how long it ran, and the last stderr lines. Run that command in the project to see what it waits on, then raise `--budget-seconds` (default 120) if it only needs more time |
+| `<command> did not run: earlier steps used the whole analysis budget` | The command never started. Check the report's runs for the earlier step that used the budget, then re-run with the larger `--budget-seconds` value suggested in the finding. No command duration or stderr is reported for an unstarted step |
 
 ## A config change has no effect
 

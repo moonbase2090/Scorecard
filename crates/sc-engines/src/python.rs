@@ -371,11 +371,9 @@ fn compile_tree(
         Err(err) => {
             note(runs, "compile", &command, None, Duration::ZERO);
             skipped.push("compile".into());
-            findings.push(engine_error("compile", &err, "python3", &command));
-            let reason = match err {
-                CommandError::Timeout { .. } => format!("`{command}` timed out"),
-                _ => "python3 is not available".into(),
-            };
+            let finding = engine_error("compile", &err, "python3", &command);
+            let reason = finding.message.clone();
+            findings.push(finding);
             (false, reason)
         }
     }
@@ -1330,12 +1328,21 @@ fn note(
     });
 }
 
-/// A finding for a command that did not complete: a timeout names the command
-/// and how to rerun it, anything else names the missing tool.
+/// Budget failures name the command and how to rerun it. Other failures retain
+/// the tool name and the command error details.
 fn engine_error(engine: &str, err: &CommandError, tool: &str, command: &str) -> Finding {
-    let timed_out = matches!(err, CommandError::Timeout { .. });
-    let mut finding = unavailable(engine, &err.message(if timed_out { command } else { tool }));
-    if timed_out {
+    if matches!(err, CommandError::NotFound) {
+        return unavailable(engine, &format!("{tool} is not installed or not on PATH"));
+    }
+    let budget_error = matches!(
+        err,
+        CommandError::Timeout { .. } | CommandError::BudgetExhausted
+    );
+    let mut finding = unavailable(
+        engine,
+        &err.message(if budget_error { command } else { tool }),
+    );
+    if budget_error {
         finding.suggested_action = Some(err.timeout_fix(command));
     }
     finding
@@ -2286,7 +2293,49 @@ dev = ["pytest>=8"]
     }
 
     #[test]
-    fn compile_reason_separates_a_timeout_from_a_command_that_could_not_start() {
+    fn a_missing_compile_tool_names_the_tool_that_could_not_start() {
+        let mut cmd = Command::new("sc-no-such-python-5b08");
+        let err = run_cmd(&mut cmd, Duration::from_secs(5)).unwrap_err();
+        assert!(matches!(err, CommandError::NotFound));
+        let finding = engine_error("compile", &err, "python3", "python3 -m compileall -q src");
+        assert_eq!(finding.message, "python3 is not installed or not on PATH");
+        assert_eq!(
+            finding.suggested_action.as_deref(),
+            Some("Install the tool and re-run")
+        );
+    }
+
+    #[test]
+    fn a_running_compile_command_reports_measured_timeout_details() {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "echo waiting-for-compiler >&2; exec sleep 30"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let err = run_cmd(&mut cmd, Duration::from_millis(100)).unwrap_err();
+        assert!(matches!(err, CommandError::Timeout { .. }));
+        let finding = engine_error("compile", &err, "python3", "python3 -m compileall -q src");
+        assert!(
+            finding
+                .message
+                .starts_with("python3 -m compileall -q src timed out after "),
+            "{}",
+            finding.message
+        );
+        assert!(
+            finding
+                .message
+                .ends_with("(the budget left for it was 0.1s); last stderr: waiting-for-compiler"),
+            "{}",
+            finding.message
+        );
+        assert!(finding.suggested_action.unwrap().starts_with(
+            "Run `python3 -m compileall -q src` in the project to see what it waits on."
+        ));
+    }
+
+    #[test]
+    fn compile_reason_distinguishes_spent_budget_from_a_spawn_failure() {
         let dir = scratch("compile-reason");
         std::fs::create_dir_all(dir.join("src")).unwrap();
         std::fs::write(dir.join("src/a.py"), "x = 1\n").unwrap();
@@ -2306,11 +2355,13 @@ dev = ["pytest>=8"]
             assert_eq!(skipped, ["compile"]);
             reason
         };
-        let timed_out = reason_for(&dir, Instant::now());
-        assert_eq!(timed_out, "`python3 -m compileall -q src` timed out");
-        let missing = dir.join("no-such-directory");
+        let spent = reason_for(&dir, Instant::now());
+        assert_eq!(spent, "python3 -m compileall -q src did not run: earlier steps used the whole analysis budget");
+        let missing = dir.join("not-a-directory");
+        std::fs::write(&missing, "a file cannot be the command's working directory").unwrap();
         let not_started = reason_for(&missing, Instant::now() + Duration::from_secs(20));
-        assert_eq!(not_started, "python3 is not available");
+        assert!(not_started.starts_with("python3: "), "{not_started}");
+        assert!(!not_started.contains("timed out"), "{not_started}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
