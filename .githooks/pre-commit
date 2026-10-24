@@ -1,0 +1,35 @@
+#!/bin/sh
+set -eu
+cd "$(git rev-parse --show-toplevel)"
+staged=$(mktemp -d)
+trap 'rm -rf "$staged"' EXIT
+trap 'exit 1' HUP INT TERM
+
+git diff --cached --name-only --diff-filter=ACMR -z -- '*.rs' > "$staged/files"
+[ -s "$staged/files" ] || exit 0
+
+# A temporary Cargo package checks index contents without formatting unstaged
+# changes or following modules into files outside the staged set.
+edition=$(git show :Cargo.toml | sed -n 's/^edition = "\([0-9]*\)".*/\1/p')
+[ -n "$edition" ] || { echo 'Cannot read Rust edition from staged Cargo.toml.' >&2; exit 1; }
+printf '[package]\nname = "staged-format"\nversion = "0.0.0"\nedition = "%s"\n[workspace]\n' "$edition" > "$staged/Cargo.toml"
+for config in rustfmt.toml .rustfmt.toml; do
+    if git cat-file -e ":$config" 2>/dev/null; then
+        git show ":$config" > "$staged/$config"
+    fi
+done
+xargs -0 sh -c '
+    snapshot=$1
+    shift
+    for file do
+        entry=$(mktemp -d "$snapshot/sourceXXXXXX") || exit 1
+        git show ":$file" > "$entry/source.rs" || exit 1
+        name=${entry##*/}
+        printf "[[bin]]\nname = \"%s\"\npath = \"%s/source.rs\"\n" "$name" "$name" >> "$snapshot/Cargo.toml"
+    done
+' sh "$staged" < "$staged/files"
+if ! cargo fmt --manifest-path "$staged/Cargo.toml" --check -- --config skip_children=true; then
+    echo 'Formatting check failed. Fix: cargo fmt --all' >&2
+    echo 'Stage the formatted changes and retry the commit.' >&2
+    exit 1
+fi

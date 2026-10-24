@@ -3,6 +3,7 @@
 ```text
 sc analyze [PATH] [OPTIONS]
 sc doctor [PATH] [--pack PACK]
+sc tui [PATH]    # requires the tui Cargo feature
 sc config path
 sc config init [--force]
 sc setup
@@ -34,6 +35,27 @@ sc help [COMMAND]
 While analysis runs, a spinner with the current step and elapsed time animates on stderr when it is a terminal (silent when piped, in CI, with `TERM=dumb`, or from `sc-mcp`); stdout is unchanged, so JSON/SARIF pipes are unaffected. `NO_COLOR` preserves this uncolored progress display, including step and elapsed-time updates during tests and coverage. Use `--quiet` to hide progress.
 
 Command-line flags override the matching config keys.
+
+## sc tui
+
+Available only in builds with the `tui` Cargo feature. `PATH` is a project directory,
+defaulting to `.`. Reads `PATH/.sc/last-scorecard.json` without running analysis or changing files.
+Requires interactive stdin and stdout. Exits 0 when you quit, including for a saved failing
+report. Exits 2 for a missing or invalid report, noninteractive input/output, or terminal setup failure.
+
+The gate rail shows PASS, FAIL, or REPORT for advisory failures. Tabs show the total
+findings count and the number of engines that ran. The status bar shows the saved verdict.
+The Findings tab reports its count; the findings table and file links are not available yet.
+
+| Key | Action |
+|---|---|
+| Up/Down, `k`/`j` | Select a gate |
+| Home/End | Select the first/last gate |
+| Tab/Shift+Tab, Right/Left, `l`/`h` | Cycle tabs |
+| `q`, Ctrl+C | Quit and restore the terminal |
+
+The initial terminal size sets the layout. Reopen after resizing. Below 60 columns or
+12 rows, the browser shows a size hint. See [Browse a saved analysis](../how-to/tui.md).
 
 ## sc config
 

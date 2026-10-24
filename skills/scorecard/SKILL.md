@@ -25,7 +25,7 @@ Install the skill for an agent with `sc skills install --agent codex`; see [Skil
 
 ## Commands
 
-The top-level commands are `sc analyze`, `sc config`, `sc doctor`, `sc setup`, `sc skills`, and `sc help [COMMAND]`.
+The top-level commands are `sc analyze`, `sc config`, `sc doctor`, `sc setup`, `sc skills`, and `sc help [COMMAND]`. Builds with the optional `tui` Cargo feature also provide `sc tui [PATH]` for interactive browsing of `PATH/.sc/last-scorecard.json`. Use `sc analyze --format json` for automation.
 
 ### `sc analyze [PATH] [OPTIONS]`
 
