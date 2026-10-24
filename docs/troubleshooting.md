@@ -38,6 +38,14 @@ When `analyzer.toml` sets `toolchain`, Cargo check, test, coverage, and lint use
 rustup default stable
 ```
 
+## `ignoring N macOS metadata file(s)`
+
+Copying a project through a non-Mac volume or archive leaves AppleDouble (`._*`) and `.DS_Store` files. `sc` skips them, but `pytest`, `cargo`, and other tools can read them and fail or time out. Delete them:
+
+```bash
+find . \( -name '._*' -o -name .DS_Store \) -type f -delete
+```
+
 ## `several language packs match (rust, node)`
 
 Exit 2 when more than one language marker matches and more than one of those languages has source files, or none of them do. A larger file count does not choose a pack. Pass `--pack rust`, or add `pack = "rust"` to `analyzer.toml`. Headers do not count as source and do not turn a Python project into an ambiguous tree. The terminal may cut this message short; `.sc/last-scorecard.json` has the full text. An empty tree says to set `pack` in `analyzer.toml` or pass `--pack`.

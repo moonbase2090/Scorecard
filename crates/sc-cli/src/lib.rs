@@ -24,7 +24,7 @@ use sc_core::{
     apply_disposition, compute_scores, load_config_file, normalize_gates, resolve_config_path,
     Finding, Gate, Scorecard, SCORECARD_VERSION,
 };
-use sc_engines::{analyze_with_generated_paths, AnalyzeRequest, RunStatus};
+use sc_engines::{analyze_with_generated_paths, os_metadata_warning, AnalyzeRequest, RunStatus};
 
 pub use format::{to_json, to_markdown};
 use report::to_html;
@@ -114,6 +114,9 @@ enum Commands {
     Tui {
         /// Project directory containing .sc/last-scorecard.json. Defaults to `.`.
         path: Option<PathBuf>,
+        /// Print a compact saved summary without entering the alternate screen.
+        #[arg(long)]
+        inline: bool,
     },
     /// Analyze a project tree and print a scorecard.
     Analyze(AnalyzeArgs),
@@ -164,7 +167,9 @@ pub fn run() -> i32 {
     match cli.command {
         Commands::Doctor { path, pack } => doctor::run(path, pack),
         #[cfg(feature = "tui")]
-        Commands::Tui { path } => tui::run(path.as_deref().unwrap_or_else(|| Path::new("."))),
+        Commands::Tui { path, inline } => {
+            tui::run(path.as_deref().unwrap_or_else(|| Path::new(".")), inline)
+        }
         Commands::Setup => setup::run(),
         Commands::Skills { command } => skills::run(command),
         Commands::Config { command } => match command {
@@ -312,6 +317,13 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
         },
         None => Vec::new(),
     };
+    if let Some(warning) = os_metadata_warning(
+        &root,
+        &loaded.scope.exclude,
+        &loaded.scope.include_generated,
+    ) {
+        let _ = writeln!(io::stderr(), "{warning}");
+    }
     let generated_paths = generated_output_paths(&root, out.as_deref(), &file_format);
     // The spinner animates on stderr only; stdout stays byte-identical.
     // It starts just before the long analysis run and is cleared before

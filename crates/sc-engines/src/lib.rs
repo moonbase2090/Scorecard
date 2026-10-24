@@ -33,4 +33,5 @@ pub use pipeline::{
     RunStatus,
 };
 pub use python::has_tests as has_pytest_suite;
+pub use scope::os_metadata_warning;
 pub use toolchain_plans::c_family_present;

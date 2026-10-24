@@ -1,0 +1,72 @@
+name: attribution
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: attribution-${{ github.event_name }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  attribution-self-test:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Exercise the checker and merge payload handling
+        run: python3 scripts/test-check-attribution.py
+      - name: Check this PR with read-only permissions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_REPO: ${{ github.repository }}
+        run: python3 scripts/check-attribution.py pr --repo "$PR_REPO" --pr "$PR_NUMBER" --head "$PR_HEAD"
+
+  trusted-attribution:
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_HEAD: ${{ github.event.pull_request.head.sha }}
+      PR_REPO: ${{ github.repository }}
+    steps:
+      - name: Mark the PR head pending
+        run: |
+          [[ "$PR_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          gh api --hostname github.com --method POST "repos/$PR_REPO/statuses/$PR_HEAD" \
+            -f state=pending -f context=commit-attribution \
+            -f description='Checking all PR commit messages and current PR text'
+      # pull_request_target defaults to trusted default-branch code. Never use a PR ref here.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate all PR commit messages and current PR text
+        run: python3 scripts/check-attribution.py pr --repo "$PR_REPO" --pr "$PR_NUMBER" --head "$PR_HEAD"
+      - name: Publish the head status
+        if: always() && !cancelled()
+        env:
+          CHECK_STATE: ${{ job.status == 'success' && 'success' || 'failure' }}
+        run: |
+          [[ "$PR_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          gh api --hostname github.com --method POST "repos/$PR_REPO/statuses/$PR_HEAD" \
+            -f state="$CHECK_STATE" -f context=commit-attribution \
+            -f description='Attribution policy check completed; inspect the workflow for details'

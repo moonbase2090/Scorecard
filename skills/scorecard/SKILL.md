@@ -25,7 +25,7 @@ Install the skill for an agent with `sc skills install --agent codex`; see [Skil
 
 ## Commands
 
-The top-level commands are `sc analyze`, `sc config`, `sc doctor`, `sc setup`, `sc skills`, and `sc help [COMMAND]`. Builds with the optional `tui` Cargo feature also provide `sc tui [PATH]` for interactive browsing of `PATH/.sc/last-scorecard.json`. Use `sc analyze --format json` for automation.
+The top-level commands are `sc analyze`, `sc config`, `sc doctor`, `sc setup`, `sc skills`, and `sc help [COMMAND]`. Builds with the optional `tui` Cargo feature also provide `sc tui [PATH]` for interactive browsing of `PATH/.sc/last-scorecard.json`. On Findings, use Up/Down, PageUp/PageDown, and Home/End to browse rows. Existing files inside the project have OSC 8 file-and-line links. `sc tui [PATH] --inline` prints up to eight gates and five findings without entering the alternate screen. Redirected inline output is plain text. Use `sc analyze --format json` for automation.
 
 ### `sc analyze [PATH] [OPTIONS]`
 
