@@ -106,7 +106,15 @@ find "$sc_evidence" -type f -print
 
 ## Commit hook
 
-Run `python3 scripts/test-pre-commit.py` to check the hook against temporary Git indexes with real `cargo fmt`. It covers installer reuse, skipped non-Rust changes, partially staged files, unusual filenames, and unstaged child modules without changing this checkout.
+For hook or installer changes, run `python3 scripts/test-pre-commit.py` with Git,
+Python 3, Rust with rustfmt, and Node.js with npm. The first web check downloads
+Biome 2.6.2. Require all ten real-commit cases to pass: installer reuse, Rust and
+web partial staging in both directions, unusual names, unstaged child modules,
+staged Biome configuration, web rename/deletion, and unrelated commits. Verify
+rejections preserve HEAD, index blobs, and working files; accepted commits contain
+the staged blobs and preserve unstaged edits. Rust files outside Cargo targets
+must still be checked. Repeat this script from the exact source archive in the
+allocated clean macOS guest and retain its output.
 
 ## Helpers and maintenance
 

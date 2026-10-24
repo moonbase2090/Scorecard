@@ -50,6 +50,38 @@ pub fn out_of_line_cfg_test_paths_from_source(text: &str, declaring_rel: &str) -
     out_of_line_cfg_test_paths(&file, declaring_rel)
 }
 
+/// Source line ranges occupied by inline `#[cfg(test)]` modules.
+pub fn cfg_test_line_ranges_from_source(text: &str) -> Vec<(usize, usize)> {
+    let Ok(file) = syn::parse_file(text) else {
+        return Vec::new();
+    };
+    let mut visitor = CfgTestRanges(Vec::new());
+    visitor.visit_file(&file);
+    visitor.0.sort_unstable();
+    visitor.0
+}
+
+struct CfgTestRanges(Vec<(usize, usize)>);
+
+impl<'ast> Visit<'ast> for CfgTestRanges {
+    fn visit_item_mod(&mut self, item: &'ast syn::ItemMod) {
+        if is_cfg_test(&item.attrs) {
+            if let Some((_, items)) = &item.content {
+                let start = item
+                    .attrs
+                    .first()
+                    .map_or_else(|| item.span().start().line, |attr| attr.span().start().line);
+                self.0.push((start, item.span().end().line));
+                for child in items {
+                    self.visit_item(child);
+                }
+                return;
+            }
+        }
+        syn::visit::visit_item_mod(self, item);
+    }
+}
+
 /// Directory prefix that holds children of a module file (`src/helpers/` for
 /// both `src/helpers.rs` and `src/helpers/mod.rs`).
 pub fn module_subtree_prefix(rel: &str) -> String {

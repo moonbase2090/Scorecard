@@ -73,6 +73,8 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
         run: cargo test --workspace --locked
+      - name: TUI feature
+        run: bash scripts/verify-tui.sh
       - name: archive layout
         run: bash scripts/test-archive-layout.sh
       - name: release text check
@@ -137,7 +139,7 @@ jobs:
       - name: Install Rust 1.88
         run: rustup toolchain install 1.88 --profile minimal
       - name: Check MSRV
-        run: cargo +1.88 check --workspace --locked --all-targets
+        run: cargo +1.88 check --workspace --locked --all-targets --all-features
 
   # Workspace line coverage via cargo-llvm-cov, with the report as an
   # artifact. Push-only like dogfood: PRs already run the suite without

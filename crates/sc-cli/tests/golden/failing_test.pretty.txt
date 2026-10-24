@@ -13,7 +13,7 @@ gates
 scores
   correctness      0.75  [########..]
   efficiency       1.00  [##########]
-  maintainability  0.95  [##########]
+  maintainability  1.00  [##########]
   security         1.00  [##########]
   a11y             1.00  [##########]
 
