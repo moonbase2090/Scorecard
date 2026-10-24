@@ -33,7 +33,7 @@ sc help [COMMAND]
 
 While analysis runs, a spinner with the current step and elapsed time animates on stderr when it is a terminal (silent when piped, in CI, with `TERM=dumb`, or from `sc-mcp`); stdout is unchanged, so JSON/SARIF pipes are unaffected. `NO_COLOR` preserves this uncolored progress display, including step and elapsed-time updates during tests and coverage. Use `--quiet` to hide progress.
 
-`sc analyze` skips macOS AppleDouble (`._*`) and `.DS_Store` files in every engine's file walk and writes one stderr line with the count, the first file, and the `find` command that deletes them ([troubleshooting](docs/troubleshooting.md#ignoring-n-macos-metadata-files)). Test runners and build tools can still read these files and fail.
+`sc analyze` skips macOS AppleDouble (`._*`) and `.DS_Store` files in every engine's file walk and writes one stderr line with the count, the first file, and the `find` command that deletes them ([troubleshooting](../troubleshooting.md#ignoring-n-macos-metadata-files)). Test runners and build tools can still read these files and fail.
 
 Command-line flags override the matching config keys.
 
