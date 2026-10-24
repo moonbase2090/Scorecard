@@ -251,13 +251,18 @@ impl App for Browser {
         let accent = base
             .fg(cx.token(Token::Accent))
             .bg(cx.token(Token::Surface1));
-        cx.set_style(area, base);
         if area.width < 60 || area.height < 12 {
+            cx.set_style(area, base);
             line("Open sc tui in a terminal at least 60x12")
                 .style(base)
                 .render(area, &mut cx);
             return;
         }
+        // Blocks style their entire areas; only the footer retains the base background.
+        cx.set_style(
+            Rect::new(area.x, area.y + area.height - 1, area.width, 1),
+            base,
+        );
         let rail_width = 24.min(area.width / 3);
         let rail = Rect::new(area.x, area.y, rail_width, area.height - 1);
         let panel = Rect::new(
