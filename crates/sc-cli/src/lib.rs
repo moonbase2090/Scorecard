@@ -9,6 +9,8 @@ mod progress;
 mod report;
 mod setup;
 mod skills;
+#[cfg(feature = "tui")]
+mod tui;
 mod user_config;
 
 use std::fs;
@@ -106,6 +108,12 @@ enum ConfigCmd {
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum Commands {
+    /// Browse a saved scorecard in an interactive terminal.
+    #[cfg(feature = "tui")]
+    Tui {
+        /// Project directory containing .sc/last-scorecard.json. Defaults to `.`.
+        path: Option<PathBuf>,
+    },
     /// Analyze a project tree and print a scorecard.
     Analyze(AnalyzeArgs),
     /// Print or create ~/.config/sc/analyzer.toml.
@@ -145,6 +153,8 @@ fn stdout_body_format(stdout_format: &str, has_out: bool, _tty: bool) -> &str {
 pub fn run() -> i32 {
     let cli = Cli::parse();
     match cli.command {
+        #[cfg(feature = "tui")]
+        Commands::Tui { path } => tui::run(path.as_deref().unwrap_or_else(|| Path::new("."))),
         Commands::Setup => setup::run(),
         Commands::Skills { command } => skills::run(command),
         Commands::Config { command } => match command {
