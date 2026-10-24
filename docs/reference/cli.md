@@ -2,7 +2,7 @@
 
 ```text
 sc analyze [PATH] [OPTIONS]
-sc tui [PATH]    # requires the tui Cargo feature
+sc tui [PATH] [--inline]    # requires the tui Cargo feature
 sc config path
 sc config init [--force]
 sc setup
@@ -41,17 +41,25 @@ Command-line flags override the matching config keys.
 
 Available only in builds with the `tui` Cargo feature. `PATH` is a project directory,
 defaulting to `.`. Reads `PATH/.sc/last-scorecard.json` without running analysis or changing files.
-Requires interactive stdin and stdout. Exits 0 when you quit, including for a saved failing
-report. Exits 2 for a missing or invalid report, noninteractive input/output, or terminal setup failure.
+Full-screen mode requires interactive stdin and stdout. `--inline` prints a summary without
+entering the alternate screen or reading input. It shows up to eight gates and five findings,
+then counts the remaining items. Redirected output is plain text. Exits 0 after displaying
+the saved report, including a failing report. Exits 2 for a missing or invalid report,
+noninteractive full-screen input/output, terminal setup failure, or output failure.
 
 The gate rail shows PASS, FAIL, or REPORT for advisory failures. Tabs show the total
 findings count and the number of engines that ran. The status bar shows the saved verdict.
-The Findings tab reports its count; the findings table and file links are not available yet.
+The Findings table renders only visible rows and shows the selected finding message.
+Existing files inside the project have OSC 8 links with escaped `file:` URIs and `#L<line>`
+fragments when a positive line number is saved. Terminals decide how to open these links.
+Missing files, directories, control-character paths, and paths or symlinks outside the
+project stay plain text. Inline mode emits links only on a terminal with a non-dumb `TERM`.
 
 | Key | Action |
 |---|---|
-| Up/Down, `k`/`j` | Select a gate |
-| Home/End | Select the first/last gate |
+| Up/Down, `k`/`j` | Select a finding on Findings, otherwise a gate |
+| Home/End | Select the first/last finding or gate |
+| PageUp/PageDown | Move one visible page on Findings |
 | Tab/Shift+Tab, Right/Left, `l`/`h` | Cycle tabs |
 | `q`, Ctrl+C | Quit and restore the terminal |
 
