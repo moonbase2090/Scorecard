@@ -2,20 +2,21 @@
 use std::collections::BTreeSet;
 
 pub fn package_name(text: &str) -> Option<String> {
-    let mut in_package = false;
-    for line in text.lines() {
-        let trimmed = strip_comment(line).trim();
-        if trimmed.starts_with('[') {
-            in_package = trimmed == "[package]";
-            continue;
-        }
-        if in_package {
-            if let Some(name) = table_string(trimmed, "name") {
-                return Some(normalize(&name));
-            }
-        }
-    }
-    None
+    manifest_name(text, "package")
+}
+
+pub fn library_name(text: &str) -> Option<String> {
+    manifest_name(text, "lib")
+}
+
+fn manifest_name(text: &str, table: &str) -> Option<String> {
+    let manifest: toml::Value = toml::from_str(text).ok()?;
+    manifest
+        .get(table)?
+        .get("name")?
+        .as_str()
+        .filter(|name| !name.is_empty())
+        .map(normalize)
 }
 
 /// Names this source file may import: its own package, that package's
@@ -27,6 +28,9 @@ pub fn declared_for_file(root: &std::path::Path, file_rel: &str) -> BTreeSet<Str
         if let Ok(text) = std::fs::read_to_string(&path) {
             names.extend(dependency_names(&text));
             if let Some(name) = package_name(&text) {
+                names.insert(name);
+            }
+            if let Some(name) = library_name(&text) {
                 names.insert(name);
             }
         }
@@ -154,19 +158,6 @@ fn header_segments(header: &str) -> Vec<String> {
     parts
 }
 
-fn table_string(line: &str, key: &str) -> Option<String> {
-    let (left, right) = line.split_once('=')?;
-    if left.trim() != key {
-        return None;
-    }
-    let right = right.trim().trim_matches('"').trim_matches('\'');
-    if right.is_empty() {
-        None
-    } else {
-        Some(right.to_string())
-    }
-}
-
 fn strip_comment(line: &str) -> &str {
     match line.find('#') {
         Some(index) => &line[..index],
@@ -282,5 +273,25 @@ temp = "0.1"
         assert!(deps.contains("serde"));
         assert!(deps.contains("other"));
         assert!(deps.contains("temp"));
+    }
+
+    #[test]
+    fn reads_library_name_when_it_differs_from_the_package_name() {
+        let text = "[package]\nname = \"waypoint\"\n\n[lib]\nname = \"waypoint_core\"\n";
+        assert_eq!(package_name(text).as_deref(), Some("waypoint"));
+        assert_eq!(library_name(text).as_deref(), Some("waypoint_core"));
+    }
+
+    #[test]
+    fn reads_library_names_from_equivalent_toml_forms() {
+        for library in [
+            "[lib]\nname = \"demo_core\"\n",
+            "[ lib ]\nname = \"demo_core\"\n",
+            "[\"lib\"]\nname = \"demo_core\"\n",
+            "lib.name = \"demo_core\"\n",
+        ] {
+            let text = format!("{library}[package]\nname = \"demo-package\"\n");
+            assert_eq!(library_name(&text).as_deref(), Some("demo_core"), "{text}");
+        }
     }
 }
