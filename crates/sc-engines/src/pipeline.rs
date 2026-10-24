@@ -4179,7 +4179,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let selection = Selection {
             mode: "tree".into(),
-            files: vec![analyzed("src/lib.rs", &["waypoint_core", "missing"], &[])],
+            files: vec![analyzed("src/main.rs", &["sample_core", "missing"], &[])],
             crap_functions: Vec::new(),
             new_symbols: std::collections::BTreeSet::new(),
             narrow_untested: false,
@@ -4191,14 +4191,14 @@ mod tests {
             workspace_root: true,
         };
         for library in [
-            "[lib]\nname = \"waypoint_core\"\n",
-            "[ lib ]\nname = \"waypoint_core\"\n",
-            "[\"lib\"]\nname = \"waypoint_core\"\n",
-            "lib.name = \"waypoint_core\"\n",
+            "[lib]\nname = \"sample_core\"\n",
+            "[ lib ]\nname = \"sample_core\"\n",
+            "[\"lib\"]\nname = \"sample_core\"\n",
+            "lib.name = \"sample_core\"\n",
         ] {
             std::fs::write(
                 dir.join("Cargo.toml"),
-                format!("{library}[package]\nname = \"waypoint\"\nversion = \"0.1.0\"\n"),
+                format!("{library}[package]\nname = \"sample\"\nversion = \"0.1.0\"\n"),
             )
             .unwrap();
             let mut findings = Vec::new();
