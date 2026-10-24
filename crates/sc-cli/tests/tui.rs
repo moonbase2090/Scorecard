@@ -498,3 +498,37 @@ fn findings_redraw_changed_combining_graphemes() -> termlens::Result<()> {
     assert!(terminal.wait_exit()?.success());
     Ok(())
 }
+
+#[cfg(unix)]
+#[test]
+fn quitting_restores_terminal_modes_and_original_screen() -> termlens::Result<()> {
+    let project = Project::new("restore");
+    project.report();
+    // PENDIN records pending input reprocessing, not a persistent terminal mode.
+    for key in [Key::Char('q'), Key::Ctrl('c')] {
+        let mut terminal = Terminal::builder()
+            .size(100, 24)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .timeout(Duration::from_secs(5))
+            .args([
+                "-c",
+                "stty -pendin; before=$(stty -g); \"$1\" tui \"$2\"; code=$?; stty -pendin; after=$(stty -g); test \"$before\" = \"$after\" || { printf 'BEFORE:%s\\nAFTER:%s\\n' \"$before\" \"$after\"; exit 99; }; printf 'RESTORED:%s\\n' \"$code\"; exit \"$code\"",
+                "tui-restore",
+                env!("CARGO_BIN_EXE_sc"),
+            ])
+            .arg(&project.0)
+            .spawn("/bin/sh")?;
+        terminal.wait_until(|s| s.contains("Selected gate: types"))?;
+        terminal.send(key)?;
+        let status = terminal.wait_exit()?;
+        assert!(
+            status.success(),
+            "{key:?}: {status:?}: {}",
+            terminal.screen().text()
+        );
+        assert!(terminal.screen().contains("RESTORED:0"));
+        assert!(!terminal.screen().contains("Scorecard"));
+    }
+    Ok(())
+}

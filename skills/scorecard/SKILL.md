@@ -149,3 +149,13 @@ Publish `scorecard.sarif` to the CI code-scanning service when configured. Use a
 - Do not put API keys in `analyzer.toml`, command output, or committed files.
 - Do not use `--force` on a skill install unless the user wants the existing copy replaced.
 - Do not claim checks ran when the report marks an engine skipped or unavailable.
+
+## Verify TUI source changes
+
+For changes to the optional browser, run `bash scripts/verify-tui.sh` for styled
+snapshots, the encoder oracle, real-binary termlens flows, and feature-enabled clippy.
+Run `bash scripts/verify-tui-perf.sh` on macOS or Linux for the release-build frame gate.
+Every measured frame must be at most 16 ms. Review snapshot text and style changes
+individually before accepting them. See `docs/how-to/tui.md` for the measured scope.
+Record both commands and their results at the PR head; a passing default-feature
+workspace test does not cover the browser.

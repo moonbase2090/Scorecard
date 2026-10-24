@@ -109,6 +109,7 @@ pub fn analyze_with_generated_paths(
 ) -> AnalyzeOutput {
     // Snapshot Git state before any engine runs and exclude Scorecard's saved
     // report and requested output files from earlier runs.
+    crate::command::set_run_budget(request.budget);
     report(&request, "Detecting pack");
     let git = git_info(&request.root, generated_paths);
     match crate::pack::detect_with_generated(
@@ -1124,10 +1125,14 @@ fn compile_phase(root: &Path, manifest: &Path, deadline: Instant, state: &mut Ru
             }
             state.findings.extend(errors);
         }
-        Err(CommandError::Timeout) => {
+        Err(err @ (CommandError::Timeout { .. } | CommandError::BudgetExhausted)) => {
             state.analyzer_error = true;
             state.types_pass = false;
-            state.types_reason = "timed out".into();
+            state.types_reason = err.message(&cargo_gate_command(
+                "check",
+                state.workspace_root,
+                "--message-format=json",
+            ));
             note_run(
                 &mut state.runs,
                 "compile",
@@ -1135,9 +1140,11 @@ fn compile_phase(root: &Path, manifest: &Path, deadline: Instant, state: &mut Ru
                 None,
                 Duration::ZERO,
             );
-            state
-                .findings
-                .push(timed_out("compile", "cargo check timed out"));
+            state.findings.push(timed_out(
+                "compile",
+                &err,
+                &cargo_gate_command("check", state.workspace_root, "--message-format=json"),
+            ));
             state.skipped.push("compile".into());
         }
         Err(err) => {
@@ -1204,13 +1211,15 @@ fn test_phase(
             }
             state.findings.extend(failures);
         }
-        Err(CommandError::Timeout) => {
+        Err(err @ (CommandError::Timeout { .. } | CommandError::BudgetExhausted)) => {
             state.analyzer_error = true;
             state.tests_pass = false;
-            state.tests_reason = "timed out".into();
-            state
-                .findings
-                .push(timed_out("tests", "cargo test timed out"));
+            state.tests_reason = err.message(&cargo_gate_command("test", state.workspace_root, ""));
+            state.findings.push(timed_out(
+                "tests",
+                &err,
+                &cargo_gate_command("test", state.workspace_root, ""),
+            ));
             state.skipped.push("tests".into());
         }
         Err(err) => {
@@ -1901,11 +1910,10 @@ fn run_lint_engine(
                 true
             }
         }
-        Err(CommandError::Timeout) => {
+        Err(err @ (CommandError::Timeout { .. } | CommandError::BudgetExhausted)) => {
             note_run(sink.runs, "lint", script, None, started.elapsed());
             sink.skipped.push("lint".into());
-            sink.findings
-                .push(timed_out("lint", "lint command timed out"));
+            sink.findings.push(timed_out("lint", &err, script));
             true
         }
         Err(err) => {
@@ -2248,9 +2256,9 @@ fn run_git(root: &Path, args: &[&str]) -> Result<String, ()> {
     }
 }
 
-fn timed_out(engine: &str, message: &str) -> Finding {
-    let mut finding = unavailable(engine, message);
-    finding.suggested_action = Some(crate::command::TIMEOUT_FIX.into());
+fn timed_out(engine: &str, err: &CommandError, command: &str) -> Finding {
+    let mut finding = unavailable(engine, &err.message(command));
+    finding.suggested_action = Some(err.timeout_fix(command));
     finding
 }
 
@@ -4168,6 +4176,52 @@ mod tests {
         assert_eq!(findings[0].rule, "sca.undeclared_dependency");
         assert!(findings[0].message.starts_with("Advisory:"));
         assert!(!findings[0].message.contains("Strongly"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn own_library_name_is_not_reported_as_an_undeclared_dependency() {
+        use crate::scope::Selection;
+        let dir = std::env::temp_dir().join(format!("sc-sca-library-name-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let selection = Selection {
+            mode: "tree".into(),
+            files: vec![analyzed("src/main.rs", &["sample_core", "missing"], &[])],
+            crap_functions: Vec::new(),
+            new_symbols: std::collections::BTreeSet::new(),
+            narrow_untested: false,
+            paths: Vec::new(),
+            loc_changed: 0,
+            files_changed: 0,
+            base: None,
+            other_paths: None,
+            workspace_root: true,
+        };
+        for library in [
+            "[lib]\nname = \"sample_core\"\n",
+            "[ lib ]\nname = \"sample_core\"\n",
+            "[\"lib\"]\nname = \"sample_core\"\n",
+            "lib.name = \"sample_core\"\n",
+        ] {
+            std::fs::write(
+                dir.join("Cargo.toml"),
+                format!("{library}[package]\nname = \"sample\"\nversion = \"0.1.0\"\n"),
+            )
+            .unwrap();
+            let mut findings = Vec::new();
+            let count = import_findings(
+                &dir,
+                &selection,
+                true,
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut findings,
+            );
+            assert_eq!(count, 1, "{library}: {findings:?}");
+            assert_eq!(findings.len(), 1, "{library}: {findings:?}");
+            assert_eq!(findings[0].symbol.as_deref(), Some("missing"));
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

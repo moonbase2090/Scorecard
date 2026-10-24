@@ -34,7 +34,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       # Fixture tooling the test suite shells out to. ubuntu-latest already
       # ships node/npm, python3, go, JDK+maven+gradle, dotnet, and g++/cmake.
       - name: Install Rust coverage tooling
@@ -85,6 +85,24 @@ jobs:
       - name: release install staging
         run: bash scripts/test-release-install-staging.sh
 
+  tui-perf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - name: TUI maximum frame time
+        shell: bash
+        run: bash scripts/verify-tui-perf.sh 2>&1 | tee tui-perf.log
+      - name: Upload frame measurements
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tui-perf
+          path: tui-perf.log
+          if-no-files-found: error
+
   # macOS coverage runs on pushes to develop and manual dispatch, not PRs.
   # Library tests exercise Rust coverage and Python linting. Ubuntu covers
   # the full multi-language fixture matrix.
@@ -97,7 +115,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: rustfmt, clippy, llvm-tools-preview
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Install core test tools
         run: |
           cargo install cargo-llvm-cov --locked
@@ -121,7 +139,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Install cargo-deny
         run: cargo install cargo-deny --locked --version 0.20.2
       - name: cargo-deny check
@@ -135,7 +153,7 @@ jobs:
       # Install 1.88 via rustup instead of a second dtolnay pin: two pins
       # from the same action at different refs confuse Dependabot.
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Install Rust 1.88
         run: rustup toolchain install 1.88 --profile minimal
       - name: Check MSRV
@@ -156,7 +174,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: llvm-tools-preview
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       # Same fixture toolchain as check-ubuntu: llvm-cov runs the full
       # suite including the fixture tests.
       - name: Install Rust coverage tooling
@@ -208,7 +226,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       # Dogfood runs the repo's own test suite, so it needs the same
       # fixture tooling as check-ubuntu (see that job for rationale).
       - name: Install Rust coverage tooling
