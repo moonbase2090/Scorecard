@@ -2,6 +2,7 @@
 
 ```text
 sc analyze [PATH] [OPTIONS]
+sc doctor [PATH] [--pack PACK]
 sc tui [PATH]    # requires the tui Cargo feature
 sc config path
 sc config init [--force]
@@ -65,6 +66,24 @@ Print or create `~/.config/sc/analyzer.toml`. See [Configure](../how-to/config.m
 | `sc config path` | Print the user config path. |
 | `sc config init` | Create `~/.config/sc` if needed and write a starter from `analyzer.toml.example`. Does not replace an existing file. |
 | `sc config init --force` | Replace an existing file. |
+
+## sc doctor
+
+Lists the tools the project's language pack needs, marks each `ok` or missing, and prints the install command for every missing one. A missing required tool is one an enforced gate cannot run without; a missing optional tool only disables an extra check. Requirements follow the tree: `cc` is required only with `.c` files and `g++` only with C++ files, `pytest` only with a pytest suite, and `uv` is required to run a pytest suite in a project with `uv.lock` or `.venv`, even when system pytest is installed. With a suite and coverage enabled, doctor also checks for `pytest-cov` or `coverage.py`; uv supplies these automatically for uv projects. Elsewhere, either installed coverage tool is enough. `uv` can also supply `ruff`. The pack comes from the same detection as `sc analyze`, including `pack` in `analyzer.toml`. When several manifests match, `sc doctor` stops like `sc analyze` does; pass `--pack`. Install commands use `brew` on macOS and `apt-get` where it exists; otherwise they give the Debian package name.
+
+| Exit | Meaning |
+|---|---|
+| `0` | Every required tool is present. |
+| `1` | A required tool is missing. |
+| `2` | No pack matches the path, several packs match, or `--pack` is unknown. |
+
+```text
+$ sc doctor
+rust pack
+  ok        cargo
+  MISSING   clippy (required, used for lint)
+            install: rustup component add clippy
+```
 
 ## sc setup
 

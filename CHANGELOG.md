@@ -4,6 +4,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `sc doctor` lists the tools the project's language pack needs, marks the missing ones, and prints each install command. It exits 1 when a required tool is missing. A finding for a missing tool now points to it.
+
 ## [0.1.10] - 2026-10-15
 
 ### Fixed
