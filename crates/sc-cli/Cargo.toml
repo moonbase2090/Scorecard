@@ -37,7 +37,7 @@ libc = "0.2.189"
 serde_json.workspace = true
 
 [dev-dependencies]
-termlens = { version = "=0.11.5", default-features = false }
+termlens = { version = "=0.11.6", default-features = false }
 
 [[test]]
 name = "tui"
