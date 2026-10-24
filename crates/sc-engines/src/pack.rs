@@ -746,6 +746,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)] // creates symlinks
     fn secrets_walk_reaches_deep_files_dotenv_and_honors_exclude() {
         let key = planted_access_key();
         let root = temp("secrets-walk");
@@ -1248,6 +1249,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)] // relies on mode bits
     fn an_unreadable_directory_fails_the_secrets_gate() {
         use std::os::unix::fs::PermissionsExt;
         let root = temp("secrets-unreadable");
@@ -1278,6 +1280,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)] // creates symlinks
     fn symlinks_are_not_followed_and_testdata_exclude_hides_fixtures() {
         let key = planted_access_key();
         let root = temp("secrets-cycle");
