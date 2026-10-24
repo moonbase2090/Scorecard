@@ -13,7 +13,7 @@ The human report in `crates/sc-cli/src/pretty.rs` paints with ANSI named colors 
 1. Default report color stays the ANSI palette (`green`, `red`, `blue`, `yellow`, bright black). The terminal theme owns that contrast.
 2. An opt-in Graphite theme, off by default, paints truecolor from `tokens(ThemeVariant::Dark)` or `tokens(ThemeVariant::Light)`.
 3. Depend on `graphite-core` by a full git revision. The crate sets `publish = false`, so there is no crates.io version to require.
-4. Accept Graphite's MPL-2.0 license, the same license as Scorecard. Link the crate. Do not vendor or rewrite it. A separate helper, if one were ever required, may be MIT. None is required for this work.
+4. Accept Graphite's MPL-2.0 license. Scorecard is MIT-licensed, and linking an MPL-2.0 crate does not change that. Link the crate. Do not vendor or rewrite it. A separate helper, if one were ever required, may be MIT. None is required for this work.
 5. Keep today's `NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`, and TTY rules for report color. The theme runs only when color is already on. `NO_COLOR` leaves the uncolored spinner visible.
 6. Call `ellipsize` only after the pinned revision treats extended grapheme clusters as atomic. The default branch still walks scalars.
 7. Keep the ASCII `~` cut when color is off. `ellipsize` always appends U+2026.
