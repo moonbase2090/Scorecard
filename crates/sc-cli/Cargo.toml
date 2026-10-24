@@ -37,6 +37,8 @@ libc = "0.2.189"
 serde_json.workspace = true
 
 [dev-dependencies]
+insta = { version = "1.43", default-features = false }
+lunatui-test = { git = "https://github.com/moonbase2090/lunatui", rev = "dbf6f6d6575b4caf45c40b39c7567103a1a185f0" }
 termlens = { version = "=0.11.5", default-features = false }
 
 [[test]]

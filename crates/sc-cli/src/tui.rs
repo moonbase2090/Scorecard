@@ -4,7 +4,7 @@
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
-use lunatui_core::{clip_display_prefix, ClusterTable, Color, Grid, Rect, Style, UnderlineStyle};
+use lunatui_core::{clip_display_prefix, ClusterTable, Grid, Rect, Style, UnderlineStyle};
 use lunatui_runtime::{is_quit, App, ControlFlow, Input};
 use lunatui_term::{ColorMode, Encoder, Event, KeyCode, KeyKind, Session};
 use lunatui_theme::{Theme, Token, Variant};
@@ -66,31 +66,9 @@ pub(super) fn run(project: &Path, inline: bool) -> i32 {
 fn browse(mut browser: Browser, width: u16, height: u16) -> io::Result<()> {
     let mut input = Input::open()?;
     let mut session = Session::enter(io::stdout())?;
-    let mut previous = Grid::new(width, height);
-    let mut encoder = Encoder::new();
-    let mut previous_links: Vec<Link> = Vec::new();
-    let mut clusters = ClusterTable::new();
-    let area = Rect::new(0, 0, width, height);
+    let mut frame = Frame::new(width, height);
     loop {
-        let mut grid = Grid::new(width, height);
-        grid.fill(area, Style::new().bg(Color::Default), ' ', &mut clusters);
-        browser.render(&mut grid, area, &mut clusters);
-        let mut bytes = Vec::new();
-        for link in &previous_links {
-            link.append_plain_to(&mut bytes);
-        }
-        bytes.extend_from_slice(encoder.encode_diff(
-            &previous,
-            &grid,
-            &clusters,
-            ColorMode::TrueColor,
-        ));
-        for link in &browser.links {
-            link.append_to(&mut bytes);
-        }
-        session.present_frame(&bytes)?;
-        previous = grid;
-        previous_links = std::mem::take(&mut browser.links);
+        frame.present(&mut browser, &mut session)?;
         let Some(events) = input.next_frame()? else {
             return Ok(());
         };
@@ -99,6 +77,53 @@ fn browse(mut browser: Browser, width: u16, height: u16) -> io::Result<()> {
                 return Ok(());
             }
         }
+    }
+}
+
+struct Frame {
+    previous: Grid,
+    encoder: Encoder,
+    previous_links: Vec<Link>,
+    clusters: ClusterTable,
+}
+
+impl Frame {
+    fn new(width: u16, height: u16) -> Self {
+        Self {
+            previous: Grid::new(width, height),
+            encoder: Encoder::new(),
+            previous_links: Vec::new(),
+            clusters: ClusterTable::new(),
+        }
+    }
+
+    fn present<W: Write>(
+        &mut self,
+        browser: &mut Browser,
+        session: &mut Session<W>,
+    ) -> io::Result<()> {
+        let width = self.previous.width();
+        let height = self.previous.height();
+        let area = Rect::new(0, 0, width, height);
+        let mut grid = Grid::new(width, height);
+        browser.render(&mut grid, area, &mut self.clusters);
+        let mut bytes = Vec::new();
+        for link in &self.previous_links {
+            link.append_plain_to(&mut bytes);
+        }
+        bytes.extend_from_slice(self.encoder.encode_diff(
+            &self.previous,
+            &grid,
+            &self.clusters,
+            ColorMode::TrueColor,
+        ));
+        for link in &browser.links {
+            link.append_to(&mut bytes);
+        }
+        session.present_frame(&bytes)?;
+        self.previous = grid;
+        self.previous_links = std::mem::take(&mut browser.links);
+        Ok(())
     }
 }
 
@@ -226,13 +251,18 @@ impl App for Browser {
         let accent = base
             .fg(cx.token(Token::Accent))
             .bg(cx.token(Token::Surface1));
-        cx.set_style(area, base);
         if area.width < 60 || area.height < 12 {
+            cx.set_style(area, base);
             line("Open sc tui in a terminal at least 60x12")
                 .style(base)
                 .render(area, &mut cx);
             return;
         }
+        // Blocks style their entire areas; only the footer retains the base background.
+        cx.set_style(
+            Rect::new(area.x, area.y + area.height - 1, area.width, 1),
+            base,
+        );
         let rail_width = 24.min(area.width / 3);
         let rail = Rect::new(area.x, area.y, rail_width, area.height - 1);
         let panel = Rect::new(
@@ -481,7 +511,7 @@ mod tests {
             .contains("Selected gate: types"));
     }
 
-    fn findings_card() -> Scorecard {
+    pub(super) fn findings_card() -> Scorecard {
         let mut card = Scorecard::skeleton("demo", 30);
         card.sections.findings = (0..6)
             .map(|index| Finding {
@@ -562,3 +592,6 @@ mod tests {
         assert!(grid.display_text(&clusters).contains("at least 60x12"));
     }
 }
+
+#[cfg(test)]
+mod gates;
