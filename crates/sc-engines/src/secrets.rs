@@ -1,13 +1,20 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 use sc_core::{Finding, Span};
 
 /// Documented AWS example secret. It is not a live credential.
 const AWS_DOCUMENTED_SECRET: &str = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
 
 pub fn secrets_in_text(text: &str, rel: &str) -> Vec<Finding> {
+    if is_test_fixture_path(rel) {
+        return Vec::new();
+    }
     let mut out = Vec::new();
     let lines: Vec<&str> = text.lines().collect();
+    let cfg_test_lines = sc_graph::cfg_test_line_ranges_from_source(text);
     for (index, at) in pem_private_key_hits(&lines) {
+        if line_is_test_only(index + 1, &cfg_test_lines) {
+            continue;
+        }
         let line_no = index as u32 + 1;
         let col = at as u32 + 1;
         out.push(Finding {
@@ -34,6 +41,9 @@ pub fn secrets_in_text(text: &str, rel: &str) -> Vec<Finding> {
         });
     }
     for (index, line) in lines.iter().enumerate() {
+        if line_is_test_only(index + 1, &cfg_test_lines) {
+            continue;
+        }
         let line_no = index as u32 + 1;
         let Some((rule, at)) = match_line(line) else {
             continue;
@@ -59,6 +69,22 @@ pub fn secrets_in_text(text: &str, rel: &str) -> Vec<Finding> {
         });
     }
     out
+}
+
+fn line_is_test_only(line: usize, ranges: &[(usize, usize)]) -> bool {
+    ranges
+        .iter()
+        .any(|(start, end)| (*start..=*end).contains(&line))
+}
+
+fn is_test_fixture_path(rel: &str) -> bool {
+    let parts: Vec<_> = rel.split('/').collect();
+    parts
+        .iter()
+        .any(|part| matches!(*part, "tests" | "testdata" | "fixtures"))
+        || rel.ends_with("_test.rs")
+        || rel.ends_with("/test.rs")
+        || rel.ends_with("/tests.rs")
 }
 
 fn secret_name(rule: &str) -> &'static str {
@@ -509,6 +535,19 @@ mod tests {
     fn mixed_tail(len: usize) -> String {
         let parts = ["Ab", "3k", "Qm", "9Z", "nR", "4p", "Lx", "7w"];
         parts.iter().cycle().take(len / 2).copied().collect()
+    }
+
+    #[test]
+    fn skips_test_only_rust_modules_and_fixture_paths_but_scans_product_code() {
+        let key = format!("{}{}", "AKIA", "QWERTYUIOPASDFGH");
+        let source = format!(
+            "const PRODUCT_KEY: &str = \"{key}\";\n#[cfg(test)]\nmod tests {{\n    const FIXTURE_KEY: &str = \"{key}\";\n}}\n"
+        );
+        let findings = secrets_in_text(&source, "src/lib.rs");
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].rule, "secrets.aws_access_key");
+        assert_eq!(findings[0].span.as_ref().unwrap().start_line, 1);
+        assert!(secrets_in_text(&format!("key = \"{key}\"\n"), "testdata/aws.rs").is_empty());
     }
 
     #[test]

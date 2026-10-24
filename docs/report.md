@@ -94,7 +94,7 @@ Top-level fields of `.sc/last-scorecard.json` and `--format json`:
 | `metrics` | Changed lines and files, `coverage_changed`, `crap_max`, `crap_over_threshold`, `hallucinated_imports` |
 | `crap` | Threshold and worst functions with `cc`, `coverage`, and `crap` |
 | `mutation` | `status`, `score`, `killed`, `survived`, `timeout`, `unviable` when `--mutation` is not `off` |
-| `test_value` | Present when `--mutation` is not `off`; mirrors `mutation` and reserves stubs for future test-value engines (see `docs/design/test-value.md`) |
+| `test_value` | Present when `--mutation` is not `off` or when `--diff` runs the test-weakening engine; mirrors `mutation` and reports `weakening` (see `docs/design/test-value.md`) |
 | `findings` | `rule`, `engine`, `severity`, `file`, `span`, `symbol`, `message`, `suggested_action`, `disposition`, `evidence` |
 | `engines_run`, `engines_skipped` | As in the terminal footer |
 | `runs` | Every command `sc` ran, with exit code and duration |
@@ -126,3 +126,7 @@ ls sc-report.json sc-report.md sc-report.sarif sc-report.html
 | `.sc/coverage/` | Coverage reports written by the test runs |
 
 It is safe to delete. Add `.sc/` to `.gitignore`.
+
+Generated source files appear in `generated_files_warning.skipped_files` when their leading generator header excludes them from source analysis. The Markdown, HTML, and terminal reports list these paths under "Generated files skipped by source analysis" with the `include_generated` key under `[scope]` needed to analyze them. The suggested snippet parses as written in `analyzer.toml`. Secrets scanning still checks these files. The existing `files` list identifies generated paths that source analysis included. SARIF carries this section in `runs[0].properties.generated_files_warning`.
+
+![Report naming a generated file skipped by source analysis](images/generated-skipped-report.png)

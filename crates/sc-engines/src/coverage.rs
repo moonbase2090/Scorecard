@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! Function line coverage from `cargo llvm-cov --workspace --json`.
 //!
 //! Names are demangled and crate disambiguator hashes are stripped, then matched
@@ -47,16 +47,22 @@ pub struct CoverageData {
     pub line_rate: f64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum SymbolMatch {
+    CratePrefix,
+    Exact,
+}
+
 impl CoverageData {
     /// A coverage path is not shared with a shorter path when a longer known
     /// file is the real suffix. Among remaining matches, the tightest path
     /// wins. A higher number from another file does not replace it.
     pub fn for_function_known(&self, file: &str, symbol: &str, known: &[&str]) -> Option<f64> {
-        let mut best: Option<(usize, f64)> = None;
+        let mut best: Option<(usize, SymbolMatch, f64)> = None;
         for function in &self.functions {
-            if !symbol_matches(&function.demangled, symbol) {
+            let Some(symbol_match) = symbol_match(&function.demangled, symbol) else {
                 continue;
-            }
+            };
             if !path_owned(&function.file, file, known.iter().copied()) {
                 continue;
             }
@@ -64,15 +70,24 @@ impl CoverageData {
                 continue;
             };
             best = Some(match best {
-                None => (prefix, function.coverage),
-                Some((best_prefix, _)) if prefix < best_prefix => (prefix, function.coverage),
-                Some((best_prefix, coverage)) if prefix == best_prefix => {
-                    (prefix, coverage.max(function.coverage))
+                None => (prefix, symbol_match, function.coverage),
+                Some((best_prefix, _, _)) if prefix < best_prefix => {
+                    (prefix, symbol_match, function.coverage)
+                }
+                Some((best_prefix, best_rank, _))
+                    if prefix == best_prefix && symbol_match > best_rank =>
+                {
+                    (prefix, symbol_match, function.coverage)
+                }
+                Some((best_prefix, best_rank, coverage))
+                    if prefix == best_prefix && symbol_match == best_rank =>
+                {
+                    (prefix, best_rank, coverage.max(function.coverage))
                 }
                 Some(kept) => kept,
             });
         }
-        best.map(|(_, coverage)| coverage)
+        best.map(|(_, _, coverage)| coverage)
     }
 }
 
@@ -231,8 +246,14 @@ fn path_after_crate(demangled: &str) -> &str {
         .unwrap_or(demangled)
 }
 
-pub fn symbol_matches(demangled: &str, symbol: &str) -> bool {
-    path_after_crate(demangled) == symbol
+fn symbol_match(demangled: &str, symbol: &str) -> Option<SymbolMatch> {
+    if demangled == symbol {
+        Some(SymbolMatch::Exact)
+    } else if path_after_crate(demangled) == symbol {
+        Some(SymbolMatch::CratePrefix)
+    } else {
+        None
+    }
 }
 
 /// Scored files plus paths that exist only so a longer report path can own its hits.
@@ -433,8 +454,11 @@ mod tests {
         let mangled = "_RNvCs5M70vpLA1I5_8covprobe8classify";
         let name = normalize_demangled(mangled);
         assert_eq!(name, "covprobe::classify");
-        assert!(symbol_matches(&name, "classify"));
-        assert!(!symbol_matches(&name, "other"));
+        assert_eq!(
+            symbol_match(&name, "classify"),
+            Some(SymbolMatch::CratePrefix)
+        );
+        assert_eq!(symbol_match(&name, "other"), None);
     }
 
     #[test]
@@ -502,8 +526,35 @@ mod tests {
 
     #[test]
     fn method_path_matches_exactly() {
-        assert!(symbol_matches("crate::Foo::bar", "Foo::bar"));
-        assert!(!symbol_matches("crate::Foo::bar", "bar"));
+        assert_eq!(
+            symbol_match("crate::Foo::bar", "Foo::bar"),
+            Some(SymbolMatch::CratePrefix)
+        );
+        assert_eq!(symbol_match("crate::Foo::bar", "bar"), None);
+    }
+
+    #[test]
+    fn exact_module_path_wins_over_a_crate_prefix_fallback() {
+        let data = CoverageData {
+            functions: vec![
+                CovFunction {
+                    file: "src/workspace.rs".into(),
+                    demangled: "workspace::String::from".into(),
+                    coverage: 0.25,
+                },
+                CovFunction {
+                    file: "src/workspace.rs".into(),
+                    demangled: "crate::String::from".into(),
+                    coverage: 1.0,
+                },
+            ],
+            line_rate: 0.5,
+        };
+
+        assert_eq!(
+            data.for_function_known("src/workspace.rs", "workspace::String::from", &[]),
+            Some(0.25)
+        );
     }
 
     #[test]
@@ -512,7 +563,7 @@ mod tests {
         let full = rustc_demangle::demangle(raw).to_string();
         let name = normalize_demangled(raw);
         assert!(
-            symbol_matches(&name, "complexity::CcVisitor::visit_expr"),
+            symbol_match(&name, "complexity::CcVisitor::visit_expr").is_some(),
             "full={full} norm={name}"
         );
     }
@@ -523,7 +574,7 @@ mod tests {
         let full = rustc_demangle::demangle(raw).to_string();
         let name = normalize_demangled(raw);
         assert!(
-            symbol_matches(&name, "pack::PackId::as_str"),
+            symbol_match(&name, "pack::PackId::as_str").is_some(),
             "full={full} norm={name}"
         );
     }
@@ -532,7 +583,7 @@ mod tests {
     fn generic_instantiation_matches_the_base_symbol() {
         let raw = "_RINvNtCsh9m6iVWrboU_10sc_engines4crap8evaluateNCNvNtB4_6python3run0EB4_";
         let name = normalize_demangled(raw);
-        assert!(symbol_matches(&name, "crap::evaluate"), "{name}");
-        assert!(!symbol_matches(&name, "evaluate"), "{name}");
+        assert!(symbol_match(&name, "crap::evaluate").is_some(), "{name}");
+        assert_eq!(symbol_match(&name, "evaluate"), None, "{name}");
     }
 }

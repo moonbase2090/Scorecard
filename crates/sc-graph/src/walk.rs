@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -69,6 +69,7 @@ pub enum WalkItem {
 pub struct Walk {
     root: PathBuf,
     includes: Vec<String>,
+    include_generated_files: bool,
     inner: IgnoreWalk,
 }
 
@@ -79,6 +80,45 @@ pub struct WalkOptions {
     pub include_hidden_directories: bool,
     /// Match `directory/**` exclusions from the project root only.
     pub root_directory_excludes: bool,
+    /// Read generated files while preserving directory and path exclusions.
+    pub include_generated_files: bool,
+    /// Yield macOS AppleDouble (`._*`) and `.DS_Store` files, which are skipped by default.
+    pub include_os_metadata: bool,
+}
+
+/// True for the macOS metadata files a copy to a non-HFS volume leaves behind.
+pub fn is_os_metadata_file(name: &str) -> bool {
+    name == ".DS_Store" || name.starts_with("._")
+}
+
+/// Project-relative paths of macOS metadata files that `walk` skips.
+pub fn os_metadata_files(
+    root: &Path,
+    exclude: &[String],
+    include_generated: &[String],
+) -> Vec<String> {
+    let options = WalkOptions {
+        include_os_metadata: true,
+        ..WalkOptions::default()
+    };
+    let mut found: Vec<String> =
+        walk_with_options(root, root, exclude, include_generated, None, options)
+            .filter_map(|item| match item {
+                WalkItem::Entry(entry)
+                    if entry.kind == WalkKind::File
+                        && entry
+                            .path
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .is_some_and(is_os_metadata_file) =>
+                {
+                    Some(relative_path(root, &entry.path))
+                }
+                _ => None,
+            })
+            .collect();
+    found.sort();
+    found
 }
 
 /// Walk a project subtree with the shared defaults, nested `.gitignore`
@@ -131,6 +171,7 @@ pub fn walk_with_options(
     let filter_includes = includes.clone();
     let include_hidden_directories = options.include_hidden_directories;
     let root_directory_excludes = options.root_directory_excludes;
+    let include_os_metadata = options.include_os_metadata;
     builder.filter_entry(move |entry| {
         let rel = relative_path(&filter_root, entry.path());
         if rel.is_empty() {
@@ -140,11 +181,18 @@ pub fn walk_with_options(
             return false;
         }
         let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
+        if !is_dir
+            && !include_os_metadata
+            && is_os_metadata_file(&entry.file_name().to_string_lossy())
+        {
+            return false;
+        }
         !is_dir || !skip_directory(&rel, &filter_includes, include_hidden_directories)
     });
     Walk {
         root,
         includes,
+        include_generated_files: options.include_generated_files,
         inner: builder.build(),
     }
 }
@@ -238,21 +286,9 @@ pub fn source_walk_skips_path(
     skip_directory(rel, include_generated, include_hidden_directories)
 }
 
-/// Whether a git-listed path should be scanned for secrets (excludes, generated markers).
-pub fn secrets_scan_includes_path(
-    root: &Path,
-    rel: &str,
-    exclude: &[String],
-    include_generated: &[String],
-) -> bool {
-    if rel.is_empty() {
-        return false;
-    }
-    if is_excluded(rel, exclude, true) {
-        return false;
-    }
-    let path = root.join(rel);
-    included_path(rel, include_generated) || !is_generated_file(&path)
+/// Whether the configured scope includes a git-listed path for secrets scanning.
+pub fn secrets_scan_includes_path(rel: &str, exclude: &[String]) -> bool {
+    !rel.is_empty() && !is_excluded(rel, exclude, true)
 }
 
 /// Return regular files from a shared project walk.
@@ -339,7 +375,10 @@ impl Iterator for Walk {
                     let kind = if file_type.is_dir() {
                         WalkKind::Directory
                     } else if file_type.is_file() {
-                        if !included_path(&rel, &self.includes) && is_generated_file(&path) {
+                        if !self.include_generated_files
+                            && !included_path(&rel, &self.includes)
+                            && is_generated_file(&path)
+                        {
                             continue;
                         }
                         WalkKind::File
@@ -430,8 +469,8 @@ fn included_path(rel: &str, includes: &[String]) -> bool {
     })
 }
 
-/// Generated source markers are normally in the first comment block. Reading
-/// a bounded prefix keeps large files cheap to classify.
+/// Recognize generator header lines only within leading comments. Read at
+/// most 16 KiB and ignore a line truncated by that limit.
 pub fn is_generated_file(path: &Path) -> bool {
     let Ok(file) = File::open(path) else {
         return false;
@@ -444,9 +483,73 @@ pub fn is_generated_file(path: &Path) -> bool {
     {
         return false;
     }
-    let header = String::from_utf8_lossy(&bytes).to_ascii_lowercase();
-    header.contains("@generated")
-        || (header.contains("code generated") && header.contains("do not edit"))
+    let mut header = String::from_utf8_lossy(&bytes).to_ascii_lowercase();
+    if bytes.len() == GENERATED_HEADER_BYTES && !header.ends_with('\n') {
+        header.truncate(header.rfind('\n').map_or(0, |index| index + 1));
+    }
+    let hash_comments = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "py" | "pyi"
+                    | "sh"
+                    | "bash"
+                    | "zsh"
+                    | "fish"
+                    | "rb"
+                    | "r"
+                    | "pl"
+                    | "pm"
+                    | "ps1"
+                    | "php"
+                    | "yaml"
+                    | "yml"
+                    | "toml"
+            )
+        });
+    let mut in_block = false;
+    for line in header.trim_start_matches('\u{feff}').lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let comment = if in_block {
+            line.trim_start_matches('*').trim_start()
+        } else if let Some(comment) = line
+            .strip_prefix("//")
+            .or_else(|| line.strip_prefix('#').filter(|_| hash_comments))
+        {
+            comment.trim_start()
+        } else if let Some(comment) = line.strip_prefix("/*") {
+            in_block = true;
+            comment.trim_start()
+        } else if let Some(comment) = line.strip_prefix("<!--") {
+            comment.trim_start()
+        } else {
+            break;
+        };
+        let comment = comment
+            .trim_end_matches("*/")
+            .trim_end_matches("-->")
+            .trim();
+        if comment == "@generated"
+            || comment
+                .strip_prefix("@generated")
+                .is_some_and(|rest| rest.starts_with(char::is_whitespace))
+            || (comment.starts_with("code generated ") && comment.ends_with("do not edit."))
+        {
+            return true;
+        }
+        if in_block && line.contains("*/") {
+            if !line.ends_with("*/") {
+                break;
+            }
+            in_block = false;
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -469,6 +572,110 @@ mod tests {
             .collect();
         paths.sort();
         paths
+    }
+
+    #[test]
+    fn walk_skips_os_metadata_and_lists_it_on_request() {
+        let root = temp("os-metadata");
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/lib.rs"), "fn kept() {}\n").unwrap();
+        fs::write(root.join("src/._lib.rs"), [0u8, 5, 0x16, 7]).unwrap();
+        fs::write(root.join(".DS_Store"), [0u8, 0, 0, 1]).unwrap();
+        fs::write(root.join("src/.dotfile"), "x\n").unwrap();
+        assert_eq!(paths(&root, &[]), vec!["src/.dotfile", "src/lib.rs"]);
+        assert_eq!(
+            os_metadata_files(&root, &[], &[]),
+            vec![".DS_Store", "src/._lib.rs"]
+        );
+    }
+
+    #[test]
+    fn generated_markers_must_be_leading_comment_headers() {
+        let root = temp("header-markers");
+        let path = root.join("source.rs");
+        for header in [
+            "// @generated\n",
+            "// @generated by tool\n",
+            "// Code generated by tool; DO NOT EDIT.\n",
+            "/*\n * @generated\n */\n",
+            "<!-- @generated -->\n",
+            "// License\n\n// @generated\n",
+            "/* License */\n// @generated\n",
+        ] {
+            fs::write(&path, format!("{header}fn source() {{}}\n")).unwrap();
+            assert!(is_generated_file(&path), "{header}");
+            assert!(paths(&root, &[]).is_empty(), "{header}");
+        }
+        for source in [
+            "// notes about @generated markers\nfn source() {}\n".to_string(),
+            "// This code generated the report.\n// Please DO NOT EDIT the deployment notes.\nfn source() {}\n".to_string(),
+            "const MARKER: &str = \"@generated\";\n".to_string(),
+            "fn source() {}\n// @generated\n".to_string(),
+            "// @generatedness\nfn source() {}\n".to_string(),
+            "/* License */ fn source() {}\n// @generated\n".to_string(),
+            format!("// {}@generatedness\n", " ".repeat(GENERATED_HEADER_BYTES - 13)),
+            format!("{}// @generated\nfn source() {{}}\n", "// padding\n".repeat(1700)),
+            "// Code generated by tool\n// DO NOT EDIT.\nfn source() {}\n".to_string(),
+        ] {
+            fs::write(&path, &source).unwrap();
+            assert!(!is_generated_file(&path), "{source}");
+            assert_eq!(paths(&root, &[]), ["source.rs"]);
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn directives_and_attributes_end_the_generated_header() {
+        let root = temp("header-directives");
+        for (file, source) in [
+            (
+                "source.cpp",
+                "#include <iostream>\n// @generated\nint main() {}\n",
+            ),
+            (
+                "source.c",
+                "#define VALUE 1\n// @generated\nint value = VALUE;\n",
+            ),
+            (
+                "source.h",
+                "# include <stdio.h>\n// @generated\nint value;\n",
+            ),
+            (
+                "source.rs",
+                "#![allow(dead_code)]\n// @generated\nfn source() {}\n",
+            ),
+            (
+                "source.rs",
+                "#[allow(dead_code)]\n// @generated\nfn source() {}\n",
+            ),
+            ("source.rs", "# @generated\nfn source() {}\n"),
+        ] {
+            let path = root.join(file);
+            fs::write(&path, source).unwrap();
+            assert!(!is_generated_file(&path), "{file}: {source}");
+            assert_eq!(filter_paths(&root, &[file.into()], &[], &[]), [file]);
+            fs::remove_file(path).unwrap();
+        }
+        for file in ["source.py", "source.sh"] {
+            let path = root.join(file);
+            fs::write(
+                &path,
+                "#!/usr/bin/env interpreter\n# License\n# @generated\n",
+            )
+            .unwrap();
+            assert!(is_generated_file(&path), "{file}");
+            assert!(paths(&root, &[]).is_empty(), "{file}");
+            fs::remove_file(path).unwrap();
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn self_analysis_includes_the_generated_header_detector() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let rel = "crates/sc-graph/src/walk.rs";
+        assert!(!is_generated_file(&root.join(rel)));
+        assert_eq!(filter_paths(&root, &[rel.into()], &[], &[]), [rel]);
     }
 
     #[test]

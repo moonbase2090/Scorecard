@@ -6,7 +6,7 @@
 2. Checks that the reference names every `sc analyze` flag, config key, gate,
    and rule id the code defines, and that every `sc` command and flag the docs
    show in code exists in `sc --help`.
-3. Checks that release links and version pins use the Cargo.toml version.
+3. Checks that installation links and pins use the README's published release.
 4. Checks that relative Markdown links resolve.
 
 Usage:
@@ -268,14 +268,18 @@ def check_reference(sc: Path) -> list[str]:
 
 
 def check_versions() -> list[str]:
-    manifest = (ROOT / "Cargo.toml").read_text()
-    version = re.search(r'(?ms)^\[workspace\.package\].*?^version = "([^"]+)"', manifest).group(1)
+    readme = (ROOT / "README.md").read_text()
+    published = re.search(r"(?m)^Published release \[v(\d+\.\d+\.\d+)\]\(", readme)
+    if not published:
+        return ["README.md: declare the published release with `Published release [vX.Y.Z](URL)`"]
+    version = published.group(1)
     errors = []
     patterns = [
         r"releases/download/v(\d+\.\d+\.\d+)",
         r"releases/tag/v(\d+\.\d+\.\d+)",
         r"\bsc-v(\d+\.\d+\.\d+)-",
         r"\bVERSION=v(\d+\.\d+\.\d+)",
+        r"\bVER=(\d+\.\d+\.\d+)",
         r"Scorecard/action@v(\d+\.\d+\.\d+)",
     ]
     for path in doc_files():
@@ -283,7 +287,7 @@ def check_versions() -> list[str]:
         for pattern in patterns:
             for found in re.findall(pattern, text):
                 if found != version:
-                    errors.append(f"{path.relative_to(ROOT)}: v{found} should be v{version}")
+                    errors.append(f"{path.relative_to(ROOT)}: v{found} should be published release v{version}")
     return errors
 
 

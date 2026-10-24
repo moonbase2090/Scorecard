@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! Choose how Cargo commands pick a rustup toolchain.
 //!
 //! - `analyzer.toml` `toolchain` sets `RUSTUP_TOOLCHAIN` to that channel.

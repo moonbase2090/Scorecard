@@ -4,8 +4,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `sc analyze` ignores macOS AppleDouble (`._*`) and `.DS_Store` files and prints one stderr warning with the command that deletes them. Test runners and build tools can still read these files and fail. The secrets scan still reads them, with or without Git.
+
+## [0.1.10] - 2026-10-15
+
+### Fixed
+
+- The release-text binary scan ignores known literals that ship in the binaries: the analyzers' token prefixes and Maven command line, author credits in bundled crypto code, a root certificate contact address, and retina image names. The v0.1.9 publish job stopped on these, so v0.1.9 was not published.
+- In binaries, GitHub tokens are matched by their exact format and no substring is deleted before matching, so a token next to the analyzers' prefix table is still found (#271).
+
+## [0.1.9] - 2026-10-15 (not published)
+
+### Fixed
+
+- The release-text check scans each file for addresses in one pass instead of starting a process per line. The v0.1.8 publish job timed out in that scan, so v0.1.8 was not published.
+
+## [0.1.8] - 2026-10-14 (not published)
+
+### Fixed
+
+- The release publish job has 45 minutes instead of 15. The v0.1.7 run timed out while the release-text check unpacked the built archives, so v0.1.7 was not published.
+- Generated-header scans can no longer be bypassed (#259).
+
+### Changed
+
+- Scorecard is now MIT licensed.
+
+## [0.1.7] - 2026-10-11 (not published)
+
 ### Added
 
+- `scripts/check-release-text.sh` and `RELEASING.md`: block release publish when changelog, release metadata, docs, or built assets match private-infrastructure patterns (generic rules in git; optional `RELEASE_DENYLIST` / local denylist for site-specific terms). Unpacks release `.tar.gz`, `.pkg` (`bsdtar`), and `.dmg` (`p7zip` / `hdiutil`) archives for inspection; invalid denylist regexes or unpack failures fail closed.
+- Add a Windows support plan at `docs/planning/windows.md`. Windows is not a supported platform. The README, the quickstart, and the release assets are unchanged.
+- Diff-scoped **test weakening** for Rust (`test_value.weakening`): report-only heuristics when `--diff` is set and product `.rs` changes, including assertion loosening, new `#[ignore]` / `#[should_panic]`, and removed tests. Runs even when `mutation.mode` is `off`. Terminal and HTML reports show weakening counts; see `docs/design/test-value.md`.
 - Release `.tar.gz` archives use a nested `sc-vX.Y.Z-<target>/` directory. `scripts/check-archive-layout.py` enforces the layout in release builds and CI. The GitHub Action still installs flat v0.1.6 archives.
 - The Scorecard action accepts `budget-seconds` and passes it to `sc analyze`.
 - Add `sc skills install` and once-per-version automatic skill installation for detected agents (#183).
@@ -21,6 +54,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Extract internal clippy, Makefile, HTML report, and scorecard data handling into focused modules without changing the JSON contract (#192, #197–#199).
 
 ### Fixed
+
+- Validate installation links against the published release so preparing the next version does not require unpublished downloads.
+
+- Harden secrets scan file selection while preserving configured path exclusions.
+- Report `secrets.empty_scope` and fail the secrets gate when the scan selects no files, instead of reporting a perfect pass (#239).
+- Install Rust coverage and Python lint tools for macOS core tests in CI.
+
+- `NO_COLOR` no longer hides analysis progress on interactive stderr. The uncolored spinner continues showing the current step and elapsed time; `--quiet` still suppresses it.
 
 - The Python pack honors `--diff`. Compile, Ruff, import, and CRAP findings are limited to changed `.py` files. Pytest runs only changed `test_*.py` and `*_test.py` files, so a pre-existing failure outside the diff does not fail the gate. Secret findings on unchanged paths are dropped. Tree mode is unchanged.
 - Tree-scope Rust analysis reuses its already-discovered source paths and text while checking out-of-line test modules, avoiding a second workspace walk and redundant reads without changing findings.
@@ -156,7 +197,7 @@ Workspace version `0.1.0`. Not tagged. Not published to crates.io.
 - `--mutation diff` or `--mutation full` runs `cargo-mutants` from `sc-engines`. Mutation stays off unless you ask.
 - `--llm on` calls an OpenAI-compatible endpoint. The default is `http://127.0.0.1:11434/v1`. If that endpoint is unchanged and `XAI_API_KEY` is set, the call uses SpaceXAI at `https://api.x.ai/v1` with model `grok-4.5`.
 - Docs for packs, config, MCP, and CRAP. The readme sample is `sc analyze testdata/good_crate --format md`.
-- License is MPL-2.0. MSRV is Rust 1.85.
+- License is MIT. MSRV is Rust 1.85.
 
 ### Fixed
 

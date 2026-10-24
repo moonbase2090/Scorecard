@@ -1,4 +1,4 @@
-sc 0.1.6  testdata/failing_test  rust  GITSHA STATE  scope tree
+sc 0.1.10  testdata/failing_test  rust  GITSHA STATE  scope tree
 
 FAIL
 
@@ -13,7 +13,7 @@ gates
 scores
   correctness      0.75  [########..]
   efficiency       1.00  [##########]
-  maintainability  0.95  [##########]
+  maintainability  1.00  [##########]
   security         1.00  [##########]
   a11y             1.00  [##########]
 
@@ -32,6 +32,6 @@ error
   Fix the failing test or the behavior it checks
 
 engines run: compile, tests, complexity, crap, sca, secrets, perf, lint
-engines skipped: coverage, spec, mutation, llm
+engines skipped: coverage, spec, mutation, llm, test_value.weakening
 duration: DURs
 exit 1: a gate failed

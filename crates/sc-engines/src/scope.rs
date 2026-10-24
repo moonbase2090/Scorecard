@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 use std::collections::BTreeSet;
 use std::path::Path;
 use std::process::Command;
@@ -8,6 +8,24 @@ use sc_graph::FunctionInfo;
 
 use crate::command::{run_cmd, CommandError};
 use crate::facts::{analyze_rels, AnalyzedFile};
+
+/// Warning for macOS metadata files (`._*`, `.DS_Store`) under `root`. `sc`
+/// ignores them, but a test runner or build tool may still read them.
+pub fn os_metadata_warning(
+    root: &Path,
+    exclude: &[String],
+    include_generated: &[String],
+) -> Option<String> {
+    let files = sc_graph::os_metadata_files(root, exclude, include_generated);
+    let first = files.first()?;
+    let quoted_root = root.to_string_lossy().replace('\'', "'\\''");
+    Some(format!(
+        "sc: ignoring {} macOS metadata file(s) such as {first} (AppleDouble ._* and .DS_Store). \
+         Test runners and build tools can still read them and fail. \
+         Delete them with: find '{quoted_root}' \\( -name '._*' -o -name .DS_Store \\) -type f -delete",
+        files.len()
+    ))
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct ScanScope<'a> {

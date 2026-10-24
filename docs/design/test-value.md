@@ -159,6 +159,16 @@ Missing tools produce `engine.unavailable` / `status: not_measured` with install
 
 **Output:** `test_value.weakening` counts and findings `test_value.weakening` (severity warning, disposition `ask`) with diff hunk references.
 
+**Scope cut (v1):** Changing only the expected value in `assert_eq!(actual, old)` → `assert_eq!(actual, new)` while product code changes is **not** flagged. That update may be legitimate; loosening macros (`assert_eq!` → `assert!`, exact match → `contains`) are the primary signals.
+
+**Limits (v1, report-only):**
+
+- Runs only with `--diff` and when at least one non-test `.rs` file changes in the patch.
+- `tests/*.rs`, `*_test.rs`, and paths under `tests/` are always scanned; inline `#[cfg(test)]` modules in `src/*.rs` are scanned only when the same diff hunk contains `#[test]`, `mod tests`, or `fn test_`.
+- Loosening detection looks at removed/added lines in each hunk: `assert_eq!` → `assert!`, `assert_eq!` → `.contains(` / `contains(&`, new `#[ignore]` / `#[should_panic]`, removed `#[test]` / `fn test_`, deleted test files. `assert_ne!`, `debug_assert!`, and snapshot files are not covered yet.
+- Findings use the hunk’s new-file start line; stage-A candidates carry `verification: unverified`.
+- Without `--diff`, `test_value.weakening` is `skipped` with reason `needs --diff`.
+
 ### 3. Tautology checks — deliverable 4
 
 **Purpose:** Flag tests that cannot fail meaningfully.

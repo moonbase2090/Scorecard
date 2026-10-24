@@ -27,6 +27,9 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Build sc
-        run: cargo build --locked -p sc-cli
+        run: cargo build --locked -p sc-cli --features tui
       - name: Check docs against the CLI
-        run: python3 scripts/check-docs.py --sc target/debug/sc --network
+        run: |
+          python3 scripts/test-check-docs.py
+          python3 scripts/check-version-stamps.py
+          python3 scripts/check-docs.py --sc target/debug/sc --network

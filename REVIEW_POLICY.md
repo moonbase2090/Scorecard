@@ -2,6 +2,16 @@
 
 This policy applies to every pull request, whether a person or an agent wrote it.
 
+## Suspended until MB2090 says otherwise
+
+Until MB2090 says otherwise, one agent works a story and one peer reviews it. Moonbase approves, merges, and deploys.
+
+- A pull request does not need a Proof section.
+- Extra review gates are off. That includes a new review at a new tip, a second reviewer, and dry-run demands.
+- Peer findings do not block. File each one as a follow-up and fix it after deployment.
+
+The no-PII rule and the authorship rules still apply. While this note is in effect, it suspends section 2, the proof and extra-review requirements in sections 3 and 4, and the review exceptions that demand another review. Agents do not merge.
+
 ## 1. Classify every PR
 
 **Trunk**: the change touches shared code that other parts depend on:
@@ -65,5 +75,18 @@ Every PR meets these. Reviewers block on any miss.
 ## 7. Merging
 
 - Merge commits only. No admin overrides.
+- Check all PR commit messages and the exact proposed merge title/body with
+  `scripts/check-attribution.py`. The owner uses the
+  [validated merge-payload procedure](docs/how-to/commit-attribution.md#owner-merge-procedure);
+  a head status cannot intercept later edits in GitHub's merge UI.
 - Code-scanning threads are resolved only when they are report-only or addressed, never just to unblock a merge.
-- Releases and tags need owner approval.
+- Releases and tags need owner approval. Release text and artifacts must not reference private infrastructure, hostnames, personal paths, or internal tooling (`RELEASING.md`, `scripts/check-release-text.sh`).
+
+## Review exceptions
+
+These rules narrow when a fresh review is needed. They replace nothing above unless they say so.
+
+- **Docs-only and changelog-only PRs** may merge on green checks plus the release-text check, with no review. A PR qualifies only if every changed file is documentation or the changelog; any code, config, CI, or workflow change makes it a normal PR.
+- **A SHIP carries over** a clean rebase or a label-only change, as long as the PR's own diff is unchanged. Compare the old and new tips with `git range-diff` or the patch-id (`git diff <base>...<tip> | git patch-id --stable`). If the diff changed at all, the PR needs a new review at the new tip.
+- **Leaf Windows fixes** merge on a code SHIP and green CI. Windows runtime proof for them is batched and recorded before each release instead of blocking each PR.
+- **Still need a full cross-family review at the exact tip**: security and red-team fixes, trunk PRs, CI and workflow changes, release PRs, and public-API changes. The reviewer is a different model family than the author, and the review names the tip SHA.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! CLI for the `sc` scorecard gate.
 //!
 //! User-facing analyze output is the scorecard, rendered as JSON and/or Markdown.
@@ -9,6 +9,8 @@ mod progress;
 mod report;
 mod setup;
 mod skills;
+#[cfg(feature = "tui")]
+mod tui;
 mod user_config;
 
 use std::fs;
@@ -21,7 +23,7 @@ use sc_core::{
     apply_disposition, compute_scores, load_config_file, normalize_gates, resolve_config_path,
     Finding, Gate, Scorecard, SCORECARD_VERSION,
 };
-use sc_engines::{analyze_with_generated_paths, AnalyzeRequest, RunStatus};
+use sc_engines::{analyze_with_generated_paths, os_metadata_warning, AnalyzeRequest, RunStatus};
 
 pub use format::{to_json, to_markdown};
 use report::to_html;
@@ -106,6 +108,15 @@ enum ConfigCmd {
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum Commands {
+    /// Browse a saved scorecard in an interactive terminal.
+    #[cfg(feature = "tui")]
+    Tui {
+        /// Project directory containing .sc/last-scorecard.json. Defaults to `.`.
+        path: Option<PathBuf>,
+        /// Print a compact saved summary without entering the alternate screen.
+        #[arg(long)]
+        inline: bool,
+    },
     /// Analyze a project tree and print a scorecard.
     Analyze(AnalyzeArgs),
     /// Print or create ~/.config/sc/analyzer.toml.
@@ -145,6 +156,10 @@ fn stdout_body_format(stdout_format: &str, has_out: bool, _tty: bool) -> &str {
 pub fn run() -> i32 {
     let cli = Cli::parse();
     match cli.command {
+        #[cfg(feature = "tui")]
+        Commands::Tui { path, inline } => {
+            tui::run(path.as_deref().unwrap_or_else(|| Path::new(".")), inline)
+        }
         Commands::Setup => setup::run(),
         Commands::Skills { command } => skills::run(command),
         Commands::Config { command } => match command {
@@ -292,6 +307,13 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
         },
         None => Vec::new(),
     };
+    if let Some(warning) = os_metadata_warning(
+        &root,
+        &loaded.scope.exclude,
+        &loaded.scope.include_generated,
+    ) {
+        let _ = writeln!(io::stderr(), "{warning}");
+    }
     let generated_paths = generated_output_paths(&root, out.as_deref(), &file_format);
     // The spinner animates on stderr only; stdout stays byte-identical.
     // It starts just before the long analysis run and is cleared before

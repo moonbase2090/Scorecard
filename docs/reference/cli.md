@@ -2,10 +2,11 @@
 
 ```text
 sc analyze [PATH] [OPTIONS]
+sc tui [PATH] [--inline]    # requires the tui Cargo feature
 sc config path
 sc config init [--force]
 sc setup
-sc skills install [--agent all|codex|shared|claude|cursor|kiro|muse|detected] [--check] [--force]
+sc skills install [--agent AGENT] [--check] [--force]
 sc help [COMMAND]
 ```
 
@@ -30,9 +31,40 @@ sc help [COMMAND]
 | `--config PATH` | see [config](config.md#where-sc-looks) | Config file to use. |
 | `--quiet` | off | Suppress the progress spinner on stderr. |
 
-While analysis runs, a spinner with the current step and elapsed time animates on stderr when it is a terminal (silent when piped, in CI, with `NO_COLOR`/`TERM=dumb`, or from `sc-mcp`); stdout is unchanged, so JSON/SARIF pipes are unaffected.
+While analysis runs, a spinner with the current step and elapsed time animates on stderr when it is a terminal (silent when piped, in CI, with `TERM=dumb`, or from `sc-mcp`); stdout is unchanged, so JSON/SARIF pipes are unaffected. `NO_COLOR` preserves this uncolored progress display, including step and elapsed-time updates during tests and coverage. Use `--quiet` to hide progress.
+
+`sc analyze` skips macOS AppleDouble (`._*`) and `.DS_Store` files in every engine's file walk and writes one stderr line with the count, the first file, and the `find` command that deletes them ([troubleshooting](../troubleshooting.md#ignoring-n-macos-metadata-files)). Test runners and build tools can still read these files and fail.
 
 Command-line flags override the matching config keys.
+
+## sc tui
+
+Available only in builds with the `tui` Cargo feature. `PATH` is a project directory,
+defaulting to `.`. Reads `PATH/.sc/last-scorecard.json` without running analysis or changing files.
+Full-screen mode requires interactive stdin and stdout. `--inline` prints a summary without
+entering the alternate screen or reading input. It shows up to eight gates and five findings,
+then counts the remaining items. Redirected output is plain text. Exits 0 after displaying
+the saved report, including a failing report. Exits 2 for a missing or invalid report,
+noninteractive full-screen input/output, terminal setup failure, or output failure.
+
+The gate rail shows PASS, FAIL, or REPORT for advisory failures. Tabs show the total
+findings count and the number of engines that ran. The status bar shows the saved verdict.
+The Findings table renders only visible rows and shows the selected finding message.
+Existing files inside the project have OSC 8 links with escaped `file:` URIs and `#L<line>`
+fragments when a positive line number is saved. Terminals decide how to open these links.
+Missing files, directories, control-character paths, and paths or symlinks outside the
+project stay plain text. Inline mode emits links only on a terminal with a non-dumb `TERM`.
+
+| Key | Action |
+|---|---|
+| Up/Down, `k`/`j` | Select a finding on Findings, otherwise a gate |
+| Home/End | Select the first/last finding or gate |
+| PageUp/PageDown | Move one visible page on Findings |
+| Tab/Shift+Tab, Right/Left, `l`/`h` | Cycle tabs |
+| `q`, Ctrl+C | Quit and restore the terminal |
+
+The initial terminal size sets the layout. Reopen after resizing. Below 60 columns or
+12 rows, the browser shows a size hint. See [Browse a saved analysis](../how-to/tui.md).
 
 ## sc config
 
@@ -50,11 +82,11 @@ Installs the Scorecard agent skill for the legacy agent locations and registers 
 
 ## sc skills install
 
-Installs the embedded Scorecard skill. Default `--agent all` targets Codex (`~/.codex` and shared `~/.agents` skills), Claude Code, Cursor, Kiro, and Muse. `--agent codex` writes both Codex and shared locations. `--agent detected` targets only existing config directories or agents whose CLI is on `PATH`; when Codex is detected, it uses existing Codex/shared directories and creates `~/.codex` only when Codex is detected by its CLI and neither directory exists. This mode is used by the macOS package hook and honors automatic-install opt-outs.
+Installs the embedded Scorecard skill. Default `--agent all` targets all supported integrations. Run `sc skills install --help` for the supported agent identifiers. `--agent codex` writes both Codex and shared locations. `--agent detected` targets only existing config directories or agents whose CLI is on `PATH`; when Codex is detected, it uses existing Codex/shared directories and creates `~/.codex` only when Codex is detected by its CLI and neither directory exists. This mode is used by the macOS package hook and honors automatic-install opt-outs.
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--agent AGENT` | `all` | `all`, `codex`, `shared`, `claude`, `cursor`, `kiro`, `muse`, or `detected`. |
+| `--agent AGENT` | `all` | Agent identifier, `all`, or `detected`. Run `sc skills install --help` for supported values. |
 | `--check` | off | Check selected targets without writing. Exits 1 if a skill is missing or differs from the embedded copy. Cannot be combined with `--force`. |
 | `--force` | off | Replace an existing skill, including a user-edited copy. |
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! Deterministic engines. They return findings and never print diagnostics.
 
 mod a11y;
@@ -25,8 +25,10 @@ mod secrets;
 mod spec_check;
 mod toolchain;
 mod toolchain_plans;
+mod weakening;
 
 pub use pipeline::{
     analyze, analyze_with_generated_paths, AnalyzeOutput, AnalyzeRequest, ProgressCallback,
     RunStatus,
 };
+pub use scope::os_metadata_warning;

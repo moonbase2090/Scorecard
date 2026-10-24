@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! Time `crap_score` across a fixed table of functions.
 
 use std::hint::black_box;

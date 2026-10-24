@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! Clippy command scoping and diagnostic parsing.
 
 use std::path::Path;

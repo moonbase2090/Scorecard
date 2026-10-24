@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! Line coverage reports for the non-Rust packs.
 //!
 //! Each parser returns statement hits inside a function span. Missing reports

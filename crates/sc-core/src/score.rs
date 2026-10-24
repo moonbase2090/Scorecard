@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! Dimension scores and the CRAP formula.
 //!
 //! Dimension scores are in `0.0..=1.0`. Each score starts at 1.0. Most
@@ -6,7 +6,7 @@
 //! clamped to 0.0.
 //!
 //! - correctness: `compile`, `tests`, `config`, `lint`, and `html` findings
-//! - maintainability: `complexity`, `crap`, and `coverage` findings
+//! - maintainability: `complexity` and `crap` findings
 //! - efficiency: `perf` findings (only when `engines.perf` is on)
 //! - security: `secrets` and `sca` findings (`sca` warnings subtract 0.01)
 //! - a11y: `a11y` findings
@@ -45,6 +45,11 @@ pub fn compute_scores(findings: &[Finding]) -> Scores {
 }
 
 fn penalty_for(finding: &Finding) -> f64 {
+    // Missing coverage records describe unknown measurements, not poor
+    // coverage. Keep their warning visible without treating it as a score hit.
+    if finding.rule == "coverage.missing" || finding.rule == "coverage.unmatched" {
+        return 0.0;
+    }
     match (finding.engine.as_str(), finding.severity.as_str()) {
         // Undeclared dependencies are advisory (`sca` gate is never enforced by
         // default), so they weigh in proportionally instead of drowning out the
@@ -168,6 +173,18 @@ mod tests {
         let findings: Vec<_> = (0..16).map(|_| finding("sca", "warning")).collect();
         let scores = compute_scores(&findings);
         assert!((scores.security - 0.84).abs() < 1e-9, "{scores:?}");
+    }
+
+    #[test]
+    fn unmeasured_coverage_warnings_do_not_lower_maintainability() {
+        let mut missing = finding("coverage", "warning");
+        missing.rule = "coverage.missing".into();
+        let mut unmatched = finding("coverage", "warning");
+        unmatched.rule = "coverage.unmatched".into();
+
+        let scores = compute_scores(&[missing, unmatched]);
+
+        assert_eq!(scores.maintainability, 1.0);
     }
 
     fn finding(engine: &str, severity: &str) -> Finding {

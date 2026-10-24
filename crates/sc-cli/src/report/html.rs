@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MIT
 //! Self-contained HTML scorecard report.
 //!
 //! `to_html` renders one `.html` file with inline CSS and no external
@@ -50,15 +50,28 @@ fn generated_files_warning(out: &mut String, card: &Scorecard) {
     let Some(warning) = card.sections.generated_files_warning.as_ref() else {
         return;
     };
-    out.push_str("<h2>generated files analyzed</h2>\n<div class=\"card\"><p>");
-    out.push_str(&esc(&warning.suggested_action));
-    out.push_str("</p><ul class=\"pathlist\">");
-    for file in &warning.files {
-        out.push_str("<li><code>");
-        out.push_str(&esc(file));
-        out.push_str("</code></li>");
+    for (heading, files) in [
+        ("generated files analyzed", &warning.files),
+        (
+            "generated files skipped by source analysis",
+            &warning.skipped_files,
+        ),
+    ] {
+        if files.is_empty() {
+            continue;
+        }
+        out.push_str(&format!(
+            "<h2>{heading}</h2>\n<div class=\"card\"><ul class=\"pathlist\">"
+        ));
+        for file in files {
+            out.push_str("<li><code>");
+            out.push_str(&esc(file));
+            out.push_str("</code></li>");
+        }
+        out.push_str("</ul><p>");
+        out.push_str(&esc(&warning.suggested_action));
+        out.push_str("</p></div>\n");
     }
-    out.push_str("</ul></div>\n");
 }
 
 const CSS: &str = r#"
@@ -845,6 +858,13 @@ fn deep(out: &mut String, card: &Scorecard) {
         out.push_str(&esc(&tv.status));
         out.push_str(" · mutation ");
         out.push_str(&esc(&tv.mutation.status));
+        out.push_str(" · weakening ");
+        out.push_str(&esc(&tv.weakening.status));
+        if tv.weakening.status == "ran" {
+            out.push_str(" (");
+            out.push_str(&tv.weakening.findings.to_string());
+            out.push_str(" findings)");
+        }
         out.push_str("</p>");
     }
     match &card.sections.spec.path {

@@ -1,4 +1,4 @@
-Scorecard 0.1.6 — command-line tools, not a Mac app
+Scorecard 0.1.10 — command-line tools, not a Mac app
 ====================================================
 
 This disk image holds two command-line programs, `sc` and `sc-mcp`.
@@ -45,4 +45,4 @@ To remove them later, delete the two files from wherever you put them:
   sudo rm /usr/local/bin/sc /usr/local/bin/sc-mcp
 
 The `README.md` in this window is the full manual. `LICENSE.txt` covers
-the terms (MPL-2.0).
+the terms (MIT).
