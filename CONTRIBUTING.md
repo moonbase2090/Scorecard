@@ -39,7 +39,10 @@ same value in the dogfood job).
 
 - Use a short imperative subject line (e.g. `Add SARIF output for findings`).
 - Sign as `MB2090 <322824348+mb2090@users.noreply.github.com>`.
-- No `Co-authored-by` or other attribution trailers.
+- No `Co-authored-by` or other attribution trailers. Check a proposed message with
+  `python3 scripts/check-attribution.py message commit-message.txt`.
+- PR checks inspect every commit and current PR text. The owner validates the exact
+  merge payload before submitting it. See [commit and merge-message attribution](docs/how-to/commit-attribution.md).
 
 ## Issues
 
