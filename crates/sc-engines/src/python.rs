@@ -371,8 +371,10 @@ fn compile_tree(
         Err(err) => {
             note(runs, "compile", &command, None, Duration::ZERO);
             skipped.push("compile".into());
-            findings.push(unavailable("compile", &err.message("python3")));
-            (false, "python3 is not available".into())
+            let finding = engine_error("compile", &err, "python3", &command);
+            let reason = finding.message.clone();
+            findings.push(finding);
+            (false, reason)
         }
     }
 }
@@ -577,7 +579,7 @@ fn record_pytest_spawn_error(
 ) -> (bool, bool, String) {
     note(runs, "tests", executed, None, Duration::ZERO);
     skipped.push("tests".into());
-    findings.push(unavailable("tests", &err.message("pytest")));
+    findings.push(engine_error("tests", err, "pytest", executed));
     (true, false, "pytest did not run".into())
 }
 
@@ -802,7 +804,7 @@ fn run_ruff(
         Err(err) => {
             note(runs, "lint", &command, None, Duration::ZERO);
             skipped.push("lint".into());
-            findings.push(unavailable("lint", &err.message("ruff")));
+            findings.push(engine_error("lint", &err, "ruff", &command));
             (false, "ruff did not run".into())
         }
     }
@@ -1324,6 +1326,26 @@ fn note(
         duration_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
         budget_ms: None,
     });
+}
+
+/// Budget failures name the command and how to rerun it. Other failures retain
+/// the tool name and the command error details.
+fn engine_error(engine: &str, err: &CommandError, tool: &str, command: &str) -> Finding {
+    if matches!(err, CommandError::NotFound) {
+        return unavailable(engine, &format!("{tool} is not installed or not on PATH"));
+    }
+    let budget_error = matches!(
+        err,
+        CommandError::Timeout { .. } | CommandError::BudgetExhausted
+    );
+    let mut finding = unavailable(
+        engine,
+        &err.message(if budget_error { command } else { tool }),
+    );
+    if budget_error {
+        finding.suggested_action = Some(err.timeout_fix(command));
+    }
+    finding
 }
 
 fn unavailable(engine: &str, message: &str) -> Finding {
@@ -2271,6 +2293,79 @@ dev = ["pytest>=8"]
     }
 
     #[test]
+    fn a_missing_compile_tool_names_the_tool_that_could_not_start() {
+        let mut cmd = Command::new("sc-no-such-python-5b08");
+        let err = run_cmd(&mut cmd, Duration::from_secs(5)).unwrap_err();
+        assert!(matches!(err, CommandError::NotFound));
+        let finding = engine_error("compile", &err, "python3", "python3 -m compileall -q src");
+        assert_eq!(finding.message, "python3 is not installed or not on PATH");
+        assert_eq!(
+            finding.suggested_action.as_deref(),
+            Some("Install the tool and re-run")
+        );
+    }
+
+    #[test]
+    fn a_running_compile_command_reports_measured_timeout_details() {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "echo waiting-for-compiler >&2; exec sleep 30"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let err = run_cmd(&mut cmd, Duration::from_millis(100)).unwrap_err();
+        assert!(matches!(err, CommandError::Timeout { .. }));
+        let finding = engine_error("compile", &err, "python3", "python3 -m compileall -q src");
+        assert!(
+            finding
+                .message
+                .starts_with("python3 -m compileall -q src timed out after "),
+            "{}",
+            finding.message
+        );
+        assert!(
+            finding
+                .message
+                .ends_with("(the budget left for it was 0.1s); last stderr: waiting-for-compiler"),
+            "{}",
+            finding.message
+        );
+        assert!(finding.suggested_action.unwrap().starts_with(
+            "Run `python3 -m compileall -q src` in the project to see what it waits on."
+        ));
+    }
+
+    #[test]
+    fn compile_reason_distinguishes_spent_budget_from_a_spawn_failure() {
+        let dir = scratch("compile-reason");
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("src/a.py"), "x = 1\n").unwrap();
+        let reason_for = |root: &Path, deadline: Instant| {
+            let (mut findings, mut runs, mut ran, mut skipped) =
+                (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+            let (pass, reason) = compile_tree(
+                root,
+                deadline,
+                &mut findings,
+                &mut runs,
+                &mut ran,
+                &mut skipped,
+                None,
+            );
+            assert!(!pass);
+            assert_eq!(skipped, ["compile"]);
+            reason
+        };
+        let spent = reason_for(&dir, Instant::now());
+        assert_eq!(spent, "python3 -m compileall -q src did not run: earlier steps used the whole analysis budget");
+        let missing = dir.join("not-a-directory");
+        std::fs::write(&missing, "a file cannot be the command's working directory").unwrap();
+        let not_started = reason_for(&missing, Instant::now() + Duration::from_secs(20));
+        assert!(not_started.starts_with("python3: "), "{not_started}");
+        assert!(!not_started.contains("timed out"), "{not_started}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn empty_diff_does_not_compile_or_lint_the_tree() {
         let dir = scratch("diff-empty");
         std::fs::create_dir_all(dir.join("src")).unwrap();
@@ -2610,12 +2705,23 @@ dev = ["pytest>=8"]
             &mut runs,
             &mut skipped,
             "python3 -m pytest -q",
-            &CommandError::Timeout,
+            &CommandError::Timeout {
+                elapsed: Duration::from_secs(7),
+                limit: Duration::from_secs(7),
+                stderr: String::new(),
+            },
         );
+        assert!(findings[0]
+            .suggested_action
+            .as_deref()
+            .unwrap()
+            .starts_with("Run `python3 -m pytest -q` in the project"));
         assert!(enforced && !pass);
         assert_eq!(reason, "pytest did not run");
         assert_eq!(skipped, ["tests"]);
-        assert!(findings[0].message.contains("timed out"));
+        assert!(findings[0]
+            .message
+            .starts_with("python3 -m pytest -q timed out after 7.0s"));
     }
 
     fn symbols(findings: &[Finding]) -> Vec<String> {
