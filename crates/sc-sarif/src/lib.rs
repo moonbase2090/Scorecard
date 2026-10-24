@@ -38,7 +38,7 @@ pub fn to_sarif(card: &Scorecard) -> String {
         })
         .collect();
     let doc = json!({
-        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
         "version": "2.1.0",
         "runs": [{
             "tool": {
@@ -83,7 +83,7 @@ fn result(finding: &Finding) -> Value {
     };
     let mut location = json!({
         "physicalLocation": {
-            "artifactLocation": {"uri": finding.file},
+            "artifactLocation": {"uri": encode_uri_path(&finding.file)},
         }
     });
     if let Some(span) = &finding.span {
@@ -98,6 +98,21 @@ fn result(finding: &Finding) -> Value {
         "message": {"text": finding.message},
         "locations": [location],
     })
+}
+
+// SARIF artifact URIs are URI references, so spaces and other reserved bytes
+// must be percent-encoded. `/` separates path segments and stays as is.
+fn encode_uri_path(path: &str) -> String {
+    let mut encoded = String::with_capacity(path.len());
+    for byte in path.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                encoded.push(char::from(byte));
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
 }
 
 #[cfg(test)]
@@ -123,6 +138,55 @@ mod tests {
         let text = to_sarif(&card);
         assert!(text.contains("\"version\": \"2.1.0\""));
         assert!(text.contains("secrets.github_token"));
+    }
+
+    #[test]
+    fn sarif_declares_the_published_2_1_0_schema() {
+        let card = Scorecard::skeleton(".", 30);
+        let value: Value = serde_json::from_str(&to_sarif(&card)).unwrap();
+        assert_eq!(
+            value["$schema"],
+            "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json"
+        );
+    }
+
+    #[test]
+    fn artifact_uri_is_percent_encoded() {
+        let mut card = Scorecard::skeleton(".", 30);
+        card.sections.findings.push(Finding {
+            id: "secrets:src/my file.rs:1".into(),
+            rule: "secrets.github_token".into(),
+            engine: "secrets".into(),
+            severity: "error".into(),
+            file: "src/my file.rs".into(),
+            span: None,
+            symbol: None,
+            message: "token".into(),
+            evidence: serde_json::json!({}),
+            suggested_action: None,
+            disposition: "fix".into(),
+        });
+        card.sections.findings.push(Finding {
+            id: "secrets:src/100%#ü.rs:1".into(),
+            rule: "secrets.github_token".into(),
+            engine: "secrets".into(),
+            severity: "error".into(),
+            file: "src/100%#ü.rs".into(),
+            span: None,
+            symbol: None,
+            message: "token".into(),
+            evidence: serde_json::json!({}),
+            suggested_action: None,
+            disposition: "fix".into(),
+        });
+        let value: Value = serde_json::from_str(&to_sarif(&card)).unwrap();
+        let uri = |index: usize| {
+            value["runs"][0]["results"][index]["locations"][0]["physicalLocation"]
+                ["artifactLocation"]["uri"]
+                .clone()
+        };
+        assert_eq!(uri(0), "src/my%20file.rs");
+        assert_eq!(uri(1), "src/100%25%23%C3%BC.rs");
     }
 
     #[test]
