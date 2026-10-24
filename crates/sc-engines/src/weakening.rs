@@ -315,7 +315,7 @@ fn strip_diff_path(path: Option<&str>) -> Option<String> {
 fn parse_hunk_header(header: &str) -> Hunk {
     let new_start = header
         .split_whitespace()
-        .nth(2)
+        .nth(1)
         .and_then(|part| part.split(',').next())
         .and_then(|num| num.trim_start_matches('+').parse().ok())
         .unwrap_or(1);
@@ -380,6 +380,36 @@ diff --git a/tests/smoke.rs b/tests/smoke.rs
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule, "test_value.weakening");
         assert_eq!(findings[0].evidence["kind"], "assert_loosened");
+    }
+
+    #[test]
+    fn finding_uses_the_hunk_new_file_start_line() {
+        let patch = r"diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1 +1 @@
+-pub fn add(a: i32, b: i32) -> i32 { a + b }
++pub fn add(a: i32, b: i32) -> i32 { a + b + 1 }
+diff --git a/tests/smoke.rs b/tests/smoke.rs
+--- a/tests/smoke.rs
++++ b/tests/smoke.rs
+@@ -29,5 +31,5 @@
+ use rt::add;
+ #[test]
+ fn adds() {
+-    assert_eq!(add(1, 2), 3);
++    assert!(add(1, 2) > 0);
+ }
+";
+        let files = parse_unified_diff(patch);
+        let test_file = files
+            .iter()
+            .find(|file| file.path == "tests/smoke.rs")
+            .unwrap();
+        assert_eq!(test_file.hunks[0].new_start, 31);
+        let findings = scan_hunk(&test_file.path, &test_file.hunks[0], 0);
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].span.as_ref().unwrap().start_line, 31);
     }
 
     #[test]
