@@ -82,6 +82,43 @@ pub struct WalkOptions {
     pub root_directory_excludes: bool,
     /// Read generated files while preserving directory and path exclusions.
     pub include_generated_files: bool,
+    /// Yield macOS AppleDouble (`._*`) and `.DS_Store` files, which are skipped by default.
+    pub include_os_metadata: bool,
+}
+
+/// True for the macOS metadata files a copy to a non-HFS volume leaves behind.
+pub fn is_os_metadata_file(name: &str) -> bool {
+    name == ".DS_Store" || name.starts_with("._")
+}
+
+/// Project-relative paths of macOS metadata files that `walk` skips.
+pub fn os_metadata_files(
+    root: &Path,
+    exclude: &[String],
+    include_generated: &[String],
+) -> Vec<String> {
+    let options = WalkOptions {
+        include_os_metadata: true,
+        ..WalkOptions::default()
+    };
+    let mut found: Vec<String> =
+        walk_with_options(root, root, exclude, include_generated, None, options)
+            .filter_map(|item| match item {
+                WalkItem::Entry(entry)
+                    if entry.kind == WalkKind::File
+                        && entry
+                            .path
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .is_some_and(is_os_metadata_file) =>
+                {
+                    Some(relative_path(root, &entry.path))
+                }
+                _ => None,
+            })
+            .collect();
+    found.sort();
+    found
 }
 
 /// Walk a project subtree with the shared defaults, nested `.gitignore`
@@ -134,6 +171,7 @@ pub fn walk_with_options(
     let filter_includes = includes.clone();
     let include_hidden_directories = options.include_hidden_directories;
     let root_directory_excludes = options.root_directory_excludes;
+    let include_os_metadata = options.include_os_metadata;
     builder.filter_entry(move |entry| {
         let rel = relative_path(&filter_root, entry.path());
         if rel.is_empty() {
@@ -143,6 +181,12 @@ pub fn walk_with_options(
             return false;
         }
         let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
+        if !is_dir
+            && !include_os_metadata
+            && is_os_metadata_file(&entry.file_name().to_string_lossy())
+        {
+            return false;
+        }
         !is_dir || !skip_directory(&rel, &filter_includes, include_hidden_directories)
     });
     Walk {
@@ -528,6 +572,21 @@ mod tests {
             .collect();
         paths.sort();
         paths
+    }
+
+    #[test]
+    fn walk_skips_os_metadata_and_lists_it_on_request() {
+        let root = temp("os-metadata");
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/lib.rs"), "fn kept() {}\n").unwrap();
+        fs::write(root.join("src/._lib.rs"), [0u8, 5, 0x16, 7]).unwrap();
+        fs::write(root.join(".DS_Store"), [0u8, 0, 0, 1]).unwrap();
+        fs::write(root.join("src/.dotfile"), "x\n").unwrap();
+        assert_eq!(paths(&root, &[]), vec!["src/.dotfile", "src/lib.rs"]);
+        assert_eq!(
+            os_metadata_files(&root, &[], &[]),
+            vec![".DS_Store", "src/._lib.rs"]
+        );
     }
 
     #[test]

@@ -48,12 +48,13 @@ pub use discover::{
 };
 pub use imports::{imports_in_file, local_names_in_file, ImportHit};
 pub use perf::{
-    cfg_test_coverage, is_cfg_test_only, module_subtree_prefix, out_of_line_cfg_test_paths,
-    out_of_line_cfg_test_paths_from_source, perf_in_file, PerfHit,
+    cfg_test_coverage, cfg_test_line_ranges_from_source, is_cfg_test_only, module_subtree_prefix,
+    out_of_line_cfg_test_paths, out_of_line_cfg_test_paths_from_source, perf_in_file, PerfHit,
 };
 pub use pubs::{pub_items_in_file, PubItem};
 pub use walk::{
-    analyzed_generated_files, filter_paths, git_secrets_paths, secrets_scan_includes_path,
-    source_walk_skips_path, walk, walk_files, walk_with_options, GitSecretsPaths, Walk, WalkEntry,
-    WalkItem, WalkKind, WalkOptions, GENERATED_SKIP_DIRS,
+    analyzed_generated_files, filter_paths, git_secrets_paths, is_os_metadata_file,
+    os_metadata_files, secrets_scan_includes_path, source_walk_skips_path, walk, walk_files,
+    walk_with_options, GitSecretsPaths, Walk, WalkEntry, WalkItem, WalkKind, WalkOptions,
+    GENERATED_SKIP_DIRS,
 };

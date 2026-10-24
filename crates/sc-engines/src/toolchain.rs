@@ -299,7 +299,14 @@ pub fn force_image(script: &str) -> String {
 }
 
 pub fn host_has(name: &str) -> bool {
-    which(name)
+    #[cfg(windows)]
+    {
+        windows_which(name)
+    }
+    #[cfg(not(windows))]
+    {
+        which(name)
+    }
 }
 
 pub fn run_script(
@@ -334,6 +341,39 @@ fn docker_host(cmd: &mut Command) {
     if let Some(sock) = desktop_socket() {
         cmd.env("DOCKER_HOST", format!("unix://{sock}"));
     }
+}
+
+#[cfg(windows)]
+fn windows_which(name: &str) -> bool {
+    use std::env;
+    use std::ffi::{OsStr, OsString};
+    use std::path::Path;
+
+    let Some(path) = env::var_os("PATH") else {
+        return false;
+    };
+    let extensions =
+        env::var_os("PATHEXT").unwrap_or_else(|| OsString::from(".COM;.EXE;.BAT;.CMD"));
+    let extensions: Vec<OsString> = extensions
+        .to_string_lossy()
+        .split(';')
+        .filter(|ext| !ext.is_empty())
+        .map(OsString::from)
+        .collect();
+    let name = OsStr::new(name);
+    let has_extension = Path::new(name).extension().is_some();
+
+    env::split_paths(&path).any(|directory| {
+        if has_extension {
+            return directory.join(name).is_file();
+        }
+
+        extensions.iter().any(|extension| {
+            let mut candidate = OsString::from(name);
+            candidate.push(extension);
+            directory.join(candidate).is_file()
+        }) || directory.join(name).is_file()
+    })
 }
 
 pub(crate) fn which(name: &str) -> bool {

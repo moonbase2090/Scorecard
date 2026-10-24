@@ -218,6 +218,8 @@ pub fn text_secrets_with_generated(
                 include_hidden_directories: true,
                 root_directory_excludes: true,
                 include_generated_files: true,
+                // The Git path scans these by name too; a text secret in `._x` must not hide.
+                include_os_metadata: true,
             },
         ) {
             match item {
@@ -792,8 +794,8 @@ mod tests {
             "{files:?}"
         );
         assert!(
-            files.iter().any(|file| file.ends_with("tests/leak.rs")),
-            "{files:?}"
+            !files.iter().any(|file| file.ends_with("tests/leak.rs")),
+            "test fixture secrets should not fail the secrets gate: {files:?}"
         );
         assert!(
             files.iter().any(|file| file.ends_with("b/leak.py")),

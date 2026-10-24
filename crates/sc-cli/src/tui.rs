@@ -1,18 +1,21 @@
 // SPDX-License-Identifier: MIT
 //! Read-only browser for the last completed analysis.
 
-use std::io::{self, IsTerminal};
-use std::path::Path;
+use std::io::{self, IsTerminal, Write};
+use std::path::{Path, PathBuf};
 
-use lunatui_core::{ClusterTable, Grid, Rect, Style};
-use lunatui_runtime::{is_quit, App, ControlFlow, RunOptions};
-use lunatui_term::{Event, KeyCode, KeyKind};
+use lunatui_core::{clip_display_prefix, ClusterTable, Color, Grid, Rect, Style, UnderlineStyle};
+use lunatui_runtime::{is_quit, App, ControlFlow, Input};
+use lunatui_term::{ColorMode, Encoder, Event, KeyCode, KeyKind, Session};
 use lunatui_theme::{Theme, Token, Variant};
 use lunatui_widgets::{Block, RenderCx, StatusBar, Tabs, Widget};
-use sc_core::Scorecard;
+use sc_core::{Finding, Scorecard};
 
-pub(super) fn run(project: &Path) -> i32 {
-    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+mod output;
+use output::{file_link, inline_summary, Link};
+
+pub(super) fn run(project: &Path, inline: bool) -> i32 {
+    if !inline && (!io::stdin().is_terminal() || !io::stdout().is_terminal()) {
         eprintln!("sc tui requires an interactive terminal. For redirected output, run: sc analyze --format json");
         return 2;
     }
@@ -23,18 +26,78 @@ pub(super) fn run(project: &Path) -> i32 {
     {
         Ok(card) => card,
         Err(error) => {
-            eprintln!("Cannot open saved scorecard {}: {error}. Run sc analyze in the project directory, then retry sc tui.", path.display());
+            eprintln!("Cannot open saved scorecard {}: {error}. Run sc analyze in the project directory, then retry sc tui.", clean(&path.display().to_string()));
             return 2;
         }
     };
+    let root = match project.canonicalize() {
+        Ok(root) => root,
+        Err(error) => {
+            eprintln!("Cannot resolve project directory: {error}. Retry sc tui with an existing project path.");
+            return 2;
+        }
+    };
+    if inline {
+        let stdout = io::stdout();
+        let links = stdout.is_terminal() && std::env::var_os("TERM").is_some_and(|t| t != "dumb");
+        return match stdout
+            .lock()
+            .write_all(inline_summary(&card, &root, links).as_bytes())
+        {
+            Ok(()) => 0,
+            Err(error) => {
+                eprintln!("Cannot write saved summary: {error}. Retry sc tui --inline with a writable output.");
+                2
+            }
+        };
+    }
     let (width, height) = terminal_size::terminal_size()
         .map(|(w, h)| (w.0, h.0))
         .unwrap_or((80, 24));
-    match lunatui_runtime::run(Browser::new(card), RunOptions::new(width, height)) {
+    match browse(Browser::with_root(card, root), width, height) {
         Ok(()) => 0,
         Err(error) => {
             eprintln!("Cannot run sc tui: {error}. Retry in an interactive terminal, or run sc analyze --format json.");
             2
+        }
+    }
+}
+
+fn browse(mut browser: Browser, width: u16, height: u16) -> io::Result<()> {
+    let mut input = Input::open()?;
+    let mut session = Session::enter(io::stdout())?;
+    let mut previous = Grid::new(width, height);
+    let mut encoder = Encoder::new();
+    let mut previous_links: Vec<Link> = Vec::new();
+    let mut clusters = ClusterTable::new();
+    let area = Rect::new(0, 0, width, height);
+    loop {
+        let mut grid = Grid::new(width, height);
+        grid.fill(area, Style::new().bg(Color::Default), ' ', &mut clusters);
+        browser.render(&mut grid, area, &mut clusters);
+        let mut bytes = Vec::new();
+        for link in &previous_links {
+            link.append_plain_to(&mut bytes);
+        }
+        bytes.extend_from_slice(encoder.encode_diff(
+            &previous,
+            &grid,
+            &clusters,
+            ColorMode::TrueColor,
+        ));
+        for link in &browser.links {
+            link.append_to(&mut bytes);
+        }
+        session.present_frame(&bytes)?;
+        previous = grid;
+        previous_links = std::mem::take(&mut browser.links);
+        let Some(events) = input.next_frame()? else {
+            return Ok(());
+        };
+        for event in events {
+            if browser.update(&event) == ControlFlow::Break {
+                return Ok(());
+            }
         }
     }
 }
@@ -44,13 +107,26 @@ struct Browser {
     gate: usize,
     tab: usize,
     theme: Theme,
+    finding: usize,
+    page_size: usize,
+    root: PathBuf,
+    links: Vec<Link>,
 }
 
 impl Browser {
+    #[cfg(test)]
     fn new(card: Scorecard) -> Self {
+        Self::with_root(card, PathBuf::from("/demo"))
+    }
+
+    fn with_root(card: Scorecard, root: PathBuf) -> Self {
         Self {
             card,
             gate: 0,
+            finding: 0,
+            page_size: 1,
+            root,
+            links: Vec::new(),
             tab: 0,
             theme: Theme::builtin(Variant::Dark),
         }
@@ -79,14 +155,6 @@ impl Browser {
                 }
                 lines
             }
-            1 => vec![if self.card.sections.findings.is_empty() {
-                "No findings in this report".into()
-            } else {
-                format!(
-                    "Recorded findings: {}. Use sc analyze --format pretty to read them.",
-                    self.card.sections.findings.len()
-                )
-            }],
             _ => vec![
                 format!("Ran: {}", list(&self.card.engines.engines_run)),
                 format!("Skipped: {}", list(&self.card.engines.engines_skipped)),
@@ -96,12 +164,7 @@ impl Browser {
 }
 
 fn line(text: impl AsRef<str>) -> StatusBar {
-    StatusBar::new(
-        text.as_ref()
-            .chars()
-            .map(|c| if c.is_control() { ' ' } else { c })
-            .collect::<String>(),
-    )
+    StatusBar::new(clean(text.as_ref()))
 }
 
 fn list(items: &[String]) -> String {
@@ -131,25 +194,31 @@ impl App for Browser {
         if is_quit(event) || (key.code == KeyCode::Char('c') && key.modifiers.is_control()) {
             return ControlFlow::Break;
         }
+        let (selected, len) = if self.tab == 1 {
+            (&mut self.finding, self.card.sections.findings.len())
+        } else {
+            (&mut self.gate, self.card.measures.gates.len())
+        };
+        let last = len.saturating_sub(1);
         match key.code {
-            KeyCode::Down | KeyCode::Char('j') => {
-                self.gate = self
-                    .gate
-                    .saturating_add(1)
-                    .min(self.card.measures.gates.len().saturating_sub(1));
+            KeyCode::Down | KeyCode::Char('j') => *selected = selected.saturating_add(1).min(last),
+            KeyCode::Up | KeyCode::Char('k') => *selected = selected.saturating_sub(1),
+            KeyCode::PageDown if self.tab == 1 => {
+                *selected = selected.saturating_add(self.page_size).min(last)
             }
-            KeyCode::Up | KeyCode::Char('k') => self.gate = self.gate.saturating_sub(1),
+            KeyCode::PageUp if self.tab == 1 => *selected = selected.saturating_sub(self.page_size),
+            KeyCode::Home => *selected = 0,
+            KeyCode::End => *selected = last,
             KeyCode::Tab if key.modifiers.is_shift() => self.tab = (self.tab + 2) % 3,
             KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => self.tab = (self.tab + 1) % 3,
             KeyCode::Left | KeyCode::Char('h') => self.tab = (self.tab + 2) % 3,
-            KeyCode::Home => self.gate = 0,
-            KeyCode::End => self.gate = self.card.measures.gates.len().saturating_sub(1),
             _ => {}
         }
         ControlFlow::Continue
     }
 
     fn render(&mut self, grid: &mut Grid, area: Rect, clusters: &mut ClusterTable) {
+        self.links.clear();
         let mut cx = RenderCx::new(grid, clusters, &self.theme);
         let base = Style::new()
             .fg(cx.token(Token::TextPrimary))
@@ -215,26 +284,145 @@ impl App for Browser {
         .style(base)
         .highlight_style(accent)
         .render(Rect::new(content.x, content.y, content.width, 1), &mut cx);
-        for (row, body_line) in self
-            .body()
-            .into_iter()
-            .take(usize::from(content.height.saturating_sub(2)))
-            .enumerate()
-        {
-            line(body_line).style(base).render(
-                Rect::new(content.x, content.y + 2 + row as u16, content.width, 1),
+        let body_area = Rect::new(
+            content.x,
+            content.y + 2,
+            content.width,
+            content.height.saturating_sub(2),
+        );
+        if self.tab == 1 {
+            self.page_size = usize::from(body_area.height.saturating_sub(3)).max(1);
+            render_findings(
+                &self.card.sections.findings,
+                self.finding,
+                &self.root,
+                body_area,
+                &mut self.links,
+                (base, accent),
                 &mut cx,
             );
+        } else {
+            for (row, body_line) in self
+                .body()
+                .into_iter()
+                .take(usize::from(body_area.height))
+                .enumerate()
+            {
+                line(body_line).style(base).render(
+                    Rect::new(body_area.x, body_area.y + row as u16, body_area.width, 1),
+                    &mut cx,
+                );
+            }
         }
         let status = format!(
-            "{} | {} gates | j/k gates | Tab tabs | q quit | saved report",
+            "{} | {} gates | j/k {} | Tab tabs | q quit | saved report",
             self.card.verdict.to_uppercase(),
-            self.card.measures.gates.len()
+            self.card.measures.gates.len(),
+            if self.tab == 1 { "findings" } else { "gates" }
         );
         line(status).style(accent).render(
             Rect::new(area.x, area.y + area.height - 1, area.width, 1),
             &mut cx,
         );
+    }
+}
+
+fn render_findings(
+    findings: &[Finding],
+    selected: usize,
+    root: &Path,
+    area: Rect,
+    links: &mut Vec<Link>,
+    styles: (Style, Style),
+    cx: &mut RenderCx<'_>,
+) {
+    let (base, accent) = styles;
+    if findings.is_empty() {
+        line("No findings in this report")
+            .style(base)
+            .render(area, cx);
+        return;
+    }
+    let visible = usize::from(area.height.saturating_sub(3));
+    let offset = selected.saturating_sub(visible.saturating_sub(1));
+    let location_width = (area.width / 2).max(1);
+    line(format!(
+        "{:<10}{:<width$}Rule",
+        "Severity",
+        "File:line",
+        width = usize::from(location_width)
+    ))
+    .style(accent)
+    .render(Rect::new(area.x, area.y, area.width, 1), cx);
+    for (row, finding) in findings.iter().enumerate().skip(offset).take(visible) {
+        let y = area.y + 1 + (row - offset) as u16;
+        let style = if row == selected { accent } else { base };
+        let severity = clean(&finding.severity);
+        line(format!(
+            "{} {}",
+            if row == selected { ">" } else { " " },
+            severity
+        ))
+        .style(style)
+        .render(Rect::new(area.x, y, 10, 1), cx);
+        let label = location_label(finding);
+        let label = clip_display_prefix(&label, location_width).to_string();
+        let uri = file_link(root, finding);
+        let label_style = if uri.is_some() {
+            style.with_attrs(style.attrs.set_underline(UnderlineStyle::Single))
+        } else {
+            style
+        };
+        line(&label)
+            .style(label_style)
+            .render(Rect::new(area.x + 10, y, location_width, 1), cx);
+        if let Some(uri) = uri {
+            links.push(Link {
+                x: area.x + 10,
+                y,
+                label,
+                uri,
+                style: label_style,
+            });
+        }
+        let x = area.x + 10 + location_width;
+        line(&finding.rule).style(style).render(
+            Rect::new(x, y, area.width.saturating_sub(10 + location_width), 1),
+            cx,
+        );
+    }
+    let detail = &findings[selected];
+    line(format!(
+        "{}/{} | PgUp/PgDn Home/End",
+        selected + 1,
+        findings.len()
+    ))
+    .style(accent)
+    .render(
+        Rect::new(area.x, area.y + area.height - 2, area.width, 1),
+        cx,
+    );
+    line(&detail.message).style(base).render(
+        Rect::new(area.x, area.y + area.height - 1, area.width, 1),
+        cx,
+    );
+}
+
+fn clean(text: &str) -> String {
+    text.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
+}
+
+fn location_label(finding: &Finding) -> String {
+    let file = if finding.file.is_empty() {
+        "(no file)"
+    } else {
+        &finding.file
+    };
+    match finding.span.as_ref().filter(|s| s.start_line > 0) {
+        Some(span) => format!("{}:{}", clean(file), span.start_line),
+        None => clean(file),
     }
 }
 
@@ -291,6 +479,80 @@ mod tests {
         assert!(grid
             .display_text(&clusters)
             .contains("Selected gate: types"));
+    }
+
+    fn findings_card() -> Scorecard {
+        let mut card = Scorecard::skeleton("demo", 30);
+        card.sections.findings = (0..6)
+            .map(|index| Finding {
+                id: format!("finding-{index}"),
+                rule: "lint.failed".into(),
+                engine: "lint".into(),
+                severity: "warning".into(),
+                file: format!("src/{index}.rs"),
+                span: None,
+                symbol: None,
+                message: format!("Message {index}"),
+                evidence: serde_json::Value::Null,
+                suggested_action: None,
+                disposition: "ask".into(),
+            })
+            .collect();
+        card
+    }
+
+    fn findings_snapshot(browser: &mut Browser) -> Vec<String> {
+        let (grid, clusters) = render_once(browser, 100, 12);
+        grid.display_text(&clusters)
+            .lines()
+            .skip(3)
+            .take(7)
+            .map(|line| {
+                line.chars()
+                    .skip(25)
+                    .take(74)
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn findings_viewport_snapshot_at_start_and_end() {
+        let mut browser = Browser::new(findings_card());
+        browser.update(&Event::Key(KeyEvent::press(KeyCode::Tab)));
+        assert_eq!(
+            findings_snapshot(&mut browser),
+            [
+                "Severity  File:line                            Rule",
+                "> warning src/0.rs                             lint.failed",
+                "  warning src/1.rs                             lint.failed",
+                "  warning src/2.rs                             lint.failed",
+                "  warning src/3.rs                             lint.failed",
+                "1/6 | PgUp/PgDn Home/End",
+                "Message 0",
+            ]
+        );
+        browser.update(&Event::Key(KeyEvent::press(KeyCode::End)));
+        assert_eq!(
+            findings_snapshot(&mut browser),
+            [
+                "Severity  File:line                            Rule",
+                "  warning src/2.rs                             lint.failed",
+                "  warning src/3.rs                             lint.failed",
+                "  warning src/4.rs                             lint.failed",
+                "> warning src/5.rs                             lint.failed",
+                "6/6 | PgUp/PgDn Home/End",
+                "Message 5",
+            ]
+        );
+        browser.update(&Event::Key(KeyEvent::press(KeyCode::Tab)));
+        browser.update(&Event::Key(KeyEvent::press(KeyCode::Tab)));
+        let (grid, clusters) = render_once(&mut browser, 100, 12);
+        assert!(grid
+            .display_text(&clusters)
+            .contains("No gates in this report"));
     }
 
     #[test]

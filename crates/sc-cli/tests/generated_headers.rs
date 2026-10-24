@@ -96,10 +96,11 @@ fn issue_237_repros_and_real_headers_cannot_hide_secrets() {
                 card["generated_files_warning"]["files"],
                 serde_json::json!([])
             );
-            assert!(card["generated_files_warning"]["suggested_action"]
+            let action = card["generated_files_warning"]["suggested_action"]
                 .as_str()
-                .unwrap()
-                .contains("scope.include_generated"));
+                .unwrap();
+            assert!(action.contains("include_generated = ["), "{action}");
+            assert!(!action.contains("scope.include_generated"), "{action}");
         }
         std::fs::write(
             root.join("analyzer.toml"),
