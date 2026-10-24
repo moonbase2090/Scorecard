@@ -4,6 +4,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `sc doctor` lists the tools the project's language pack needs, marks the missing ones, and prints each install command. It exits 1 when a required tool is missing. A finding for a missing tool now points to it.
+
 ### Fixed
 
 - `sc analyze` ignores macOS AppleDouble (`._*`) and `.DS_Store` files and prints one stderr warning with the command that deletes them. Test runners and build tools can still read these files and fail. The secrets scan still reads them, with or without Git.

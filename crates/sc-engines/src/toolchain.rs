@@ -434,7 +434,9 @@ fn unavailable(engine: &str, message: &str) -> Finding {
         symbol: None,
         message: message.into(),
         evidence: serde_json::json!({}),
-        suggested_action: Some("Install the tool and re-run".into()),
+        suggested_action: Some(
+            "Install the tool and re-run, or run `sc doctor` to list every missing tool".into(),
+        ),
         disposition: String::new(),
     }
 }

@@ -386,7 +386,8 @@ fn is_diff_test(rel: &str) -> bool {
     name.ends_with(".py") && (name.starts_with("test_") || name.ends_with("_test.py"))
 }
 
-fn has_tests(root: &Path) -> bool {
+/// True when the tree has a pytest suite, as `sc analyze` decides it.
+pub fn has_tests(root: &Path) -> bool {
     root.join("tests").is_dir()
         || root.join("test").is_dir()
         || root_test_file(root)
@@ -545,11 +546,7 @@ fn record_pytest_output(
     }
     if let Some(message) = missing_runner(command, stderr, stdout) {
         skipped.push("tests".into());
-        let mut finding = unavailable("tests", message);
-        if message == "uv is not installed" {
-            finding.suggested_action = Some("Install uv and re-run.".into());
-        }
-        findings.push(finding);
+        findings.push(missing_tool("tests", message));
         return (true, false, message.into());
     }
     ran.push("tests".into());
@@ -763,7 +760,7 @@ fn run_ruff(
         crate::toolchain::force_image(&ruff_check_command("ruff", py_only))
     } else {
         skipped.push("lint".into());
-        findings.push(unavailable("lint", "ruff is not installed"));
+        findings.push(missing_tool("lint", "ruff is not installed"));
         return (false, "ruff is not installed".into());
     };
     match shell(root, &command, deadline) {
@@ -780,7 +777,7 @@ fn run_ruff(
                 (true, String::new())
             } else if tool_missing(&captured.stderr, &captured.stdout) {
                 skipped.push("lint".into());
-                findings.push(unavailable("lint", "ruff is not installed"));
+                findings.push(missing_tool("lint", "ruff is not installed"));
                 (false, "ruff is not installed".into())
             } else {
                 ran.push("lint".into());
@@ -1326,6 +1323,13 @@ fn note(
     });
 }
 
+fn missing_tool(engine: &str, message: &str) -> Finding {
+    let mut finding = unavailable(engine, message);
+    finding.suggested_action =
+        Some("Install the tool and re-run, or run `sc doctor` to list every missing tool".into());
+    finding
+}
+
 fn unavailable(engine: &str, message: &str) -> Finding {
     Finding {
         id: format!("{engine}:unavailable"),
@@ -1337,7 +1341,7 @@ fn unavailable(engine: &str, message: &str) -> Finding {
         symbol: None,
         message: message.into(),
         evidence: serde_json::json!({}),
-        suggested_action: Some("Install the tool and re-run".into()),
+        suggested_action: Some("Inspect the command error and re-run `sc analyze`".into()),
         disposition: String::new(),
     }
 }
@@ -2577,7 +2581,7 @@ dev = ["pytest>=8"]
         assert_eq!(skipped, ["tests"]);
         assert_eq!(
             findings[0].suggested_action.as_deref(),
-            Some("Install uv and re-run.")
+            Some("Install the tool and re-run, or run `sc doctor` to list every missing tool")
         );
 
         findings.clear();
@@ -2600,7 +2604,7 @@ dev = ["pytest>=8"]
         assert_eq!(findings[0].rule, "engine.unavailable");
         assert_eq!(
             findings[0].suggested_action.as_deref(),
-            Some("Install the tool and re-run")
+            Some("Install the tool and re-run, or run `sc doctor` to list every missing tool")
         );
 
         findings.clear();
@@ -2616,6 +2620,26 @@ dev = ["pytest>=8"]
         assert_eq!(reason, "pytest did not run");
         assert_eq!(skipped, ["tests"]);
         assert!(findings[0].message.contains("timed out"));
+        assert!(!findings[0]
+            .suggested_action
+            .as_deref()
+            .unwrap()
+            .contains("sc doctor"));
+
+        findings.clear();
+        record_pytest_spawn_error(
+            &mut findings,
+            &mut runs,
+            &mut skipped,
+            "python3 -m pytest -q",
+            &CommandError::Spawn("permission denied".into()),
+        );
+        assert!(findings[0].message.contains("permission denied"));
+        assert!(!findings[0]
+            .suggested_action
+            .as_deref()
+            .unwrap()
+            .contains("sc doctor"));
     }
 
     fn symbols(findings: &[Finding]) -> Vec<String> {

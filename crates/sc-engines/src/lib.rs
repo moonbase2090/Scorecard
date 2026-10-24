@@ -27,8 +27,11 @@ mod toolchain;
 mod toolchain_plans;
 mod weakening;
 
+pub use pack::detected_pack_names;
 pub use pipeline::{
     analyze, analyze_with_generated_paths, AnalyzeOutput, AnalyzeRequest, ProgressCallback,
     RunStatus,
 };
+pub use python::has_tests as has_pytest_suite;
 pub use scope::os_metadata_warning;
+pub use toolchain_plans::c_family_present;

@@ -1,16 +1,16 @@
 # Troubleshooting
 
-Each section starts with what the report says.
+Each section starts with what the report says. For a tool that is not installed, run `sc doctor` in the project: it lists every missing tool with its install command.
 
 ## `tests: pytest is not installed`
 
-When the project has `uv.lock` or a `.venv` directory, `sc` runs `uv run --extra dev --with pytest-cov pytest`. If `uv` itself is not installed, the finding says `uv is not installed`. Install `uv`, then create the environment once:
+When the project has `uv.lock` or a `.venv` directory, `sc` runs `uv run --extra dev --with pytest-cov pytest`. If `uv` itself is not installed, the finding says `uv is not installed`. Run `sc doctor` to check the runner. If uv is missing, install it with `python3 -m pip install uv`, then create the environment once:
 
 ```bash
 uv venv && uv pip install -e ".[dev]"
 ```
 
-or activate your own virtualenv, with pytest installed, before running `sc`.
+For projects without `uv.lock` or `.venv`, install pytest with `python3 -m pip install pytest`.
 
 ## Coverage not measured
 
@@ -19,7 +19,7 @@ The `crap` gate shows `advisory` with `some functions have no coverage record an
 | Pack | Install |
 |---|---|
 | Rust | `rustup component add llvm-tools && cargo install cargo-llvm-cov` |
-| Python | `pytest-cov` (added automatically when `sc` runs tests through `uv`) |
+| Python | `python3 -m pip install pytest-cov` or `python3 -m pip install coverage`; uv supplies coverage tools automatically for uv projects. `sc doctor` checks these when a suite exists and coverage is enabled. |
 | Node | `c8` |
 | Go | nothing; uses `go test -coverprofile` |
 | Bash | `kcov` |
