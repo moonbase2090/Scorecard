@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- On Windows, pretty output enables console VT processing and reads the console width when `COLUMNS` is unset, so ANSI color works in a console and width no longer falls through to 80. Color stays off when VT is rejected unless `CLICOLOR_FORCE` is set.
 - SARIF output names the published SARIF 2.1.0 schema, and artifact URIs are percent-encoded, so paths with spaces or reserved characters are valid SARIF and upload to code scanning.
 - A timed-out step now says which command ran, how long it ran against the budget left for it, and the last lines of its stderr, instead of only "timed out". When earlier steps used the whole budget, the message says the command did not run.
 - `test_value.weakening` findings report the hunk's new-file start line in `span.start_line` instead of line 1 (#236).

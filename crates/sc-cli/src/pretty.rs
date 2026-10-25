@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 //! Human-readable scorecard for a terminal.
 //!
-//! Color follows `NO_COLOR`, `CLICOLOR_FORCE`, and whether stdout is a TTY.
-//! The plain style uses ASCII so a captured transcript stays readable.
+//! Color follows `NO_COLOR`, `CLICOLOR_FORCE`, and whether stdout is a TTY
+//! that accepted console VT mode (always on Unix). The plain style uses ASCII
+//! so a captured transcript stays readable.
 
 use crate::report::Outcome;
 use anstyle::{AnsiColor, Color, Style};
@@ -60,7 +61,7 @@ pub fn term_width() -> usize {
             }
         }
     }
-    unix_cols().unwrap_or(80)
+    crate::console::native_cols(MIN_WIDTH).unwrap_or(80)
 }
 
 pub fn to_pretty(card: &Scorecard, opts: &PrettyOpts) -> String {
@@ -533,27 +534,6 @@ fn severity_style(severity: &str) -> Style {
             .fg_color(Some(Color::Ansi(AnsiColor::Yellow))),
         _ => Style::new().bold(),
     }
-}
-
-fn unix_cols() -> Option<usize> {
-    #[cfg(unix)]
-    {
-        unsafe {
-            // SAFETY: winsize is a plain C struct and the pointer is only
-            // read by this ioctl for the life of the call.
-            let mut size = libc::winsize {
-                ws_row: 0,
-                ws_col: 0,
-                ws_xpixel: 0,
-                ws_ypixel: 0,
-            };
-            let rc = libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut size);
-            if rc == 0 && size.ws_col as usize >= MIN_WIDTH {
-                return Some(size.ws_col as usize);
-            }
-        }
-    }
-    None
 }
 
 #[cfg(test)]

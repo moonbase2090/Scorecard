@@ -3,6 +3,7 @@
 //!
 //! User-facing analyze output is the scorecard, rendered as JSON and/or Markdown.
 
+mod console;
 mod doctor;
 mod format;
 mod pretty;
@@ -163,6 +164,9 @@ fn stdout_body_format(stdout_format: &str, has_out: bool, _tty: bool) -> &str {
 }
 
 pub fn run() -> i32 {
+    // Enable VT sequences before any pretty / spinner output. Pipes and
+    // rejected consoles return false; color then stays plain unless forced.
+    let _vt = console::enable_console_vt();
     let cli = Cli::parse();
     match cli.command {
         Commands::Doctor { path, pack } => doctor::run(path, pack),
@@ -176,11 +180,11 @@ pub fn run() -> i32 {
             ConfigCmd::Path => user_config::run_path(),
             ConfigCmd::Init { force } => user_config::run_init(force),
         },
-        Commands::Analyze(args) => analyze_cmd(args),
+        Commands::Analyze(args) => analyze_cmd(args, _vt),
     }
 }
 
-fn analyze_cmd(args: AnalyzeArgs) -> i32 {
+fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
     let AnalyzeArgs {
         path,
         format,
@@ -201,11 +205,14 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
     let tty = io::IsTerminal::is_terminal(&io::stdout());
     let stdout_format = pretty::stdout_format(format.as_deref(), tty);
     let file_format = format.unwrap_or_else(|| "json".to_string());
+    // Color needs a TTY that accepted VT (Unix always accepts). CLICOLOR_FORCE
+    // still wins inside use_color when set to something other than "0".
+    let color_tty = tty && vt_ready;
     let view = View {
         stdout_format,
         file_format: &file_format,
         color: pretty::use_color(
-            tty,
+            color_tty,
             std::env::var_os("NO_COLOR").is_some(),
             std::env::var("CLICOLOR_FORCE").ok().as_deref(),
             std::env::var("CLICOLOR").ok().as_deref(),

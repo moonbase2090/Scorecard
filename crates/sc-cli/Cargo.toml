@@ -36,6 +36,12 @@ clap.workspace = true
 libc = "0.2.189"
 serde_json.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Console",
+] }
+
 [dev-dependencies]
 insta = { version = "1.43", default-features = false }
 lunatui-test = { git = "https://github.com/moonbase2090/lunatui", rev = "dbf6f6d6575b4caf45c40b39c7567103a1a185f0" }

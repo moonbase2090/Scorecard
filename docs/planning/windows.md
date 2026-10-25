@@ -54,7 +54,7 @@ Verify on the PC before changing it: CRLF-ended ignore files, patterns written w
 
 Pretty output uses `anstyle` ANSI sequences (`crates/sc-cli/src/pretty.rs`). Color follows `NO_COLOR`, `CLICOLOR_FORCE`, `CLICOLOR`, and whether stdout is a terminal. A Windows console prints those sequences as text until `ENABLE_VIRTUAL_TERMINAL_PROCESSING` is set.
 
-Use the same fix Prismattyc uses in `enable_console_vt` (`prismattyc-mux` `platform.rs`): `GetConsoleMode` / `SetConsoleMode` on stdout and stderr with output processing and `DISABLE_NEWLINE_AUTO_RETURN`. Color stays off when the console rejects the mode, unless `CLICOLOR_FORCE` is set to something other than `0`. A pipe or a file stays plain, as it does now.
+Use the same fix Prismattyc uses in `enable_console_vt` (`prismattyc-mux` `platform.rs`): `GetConsoleMode` / `SetConsoleMode` on stdout and stderr with `ENABLE_VIRTUAL_TERMINAL_PROCESSING`, clearing `DISABLE_NEWLINE_AUTO_RETURN` so a newline returns to column 0 (line-oriented CLI mode). Color stays off when the console rejects the mode, unless `CLICOLOR_FORCE` is set to something other than `0`. A pipe or a file stays plain, as it does now.
 
 Width: when `COLUMNS` is unset, read the console window with `GetConsoleScreenBufferInfo` instead of falling through to 80. Keep the 40-column minimum.
 
