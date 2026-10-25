@@ -8,18 +8,22 @@
 //! `GetConsoleScreenBufferInfo` when `COLUMNS` is unset.
 
 /// `ENABLE_VIRTUAL_TERMINAL_PROCESSING`.
+#[cfg(any(windows, test))]
 pub const VT_OUTPUT_PROCESSING: u32 = 0x0004;
 /// `DISABLE_NEWLINE_AUTO_RETURN`.
+#[cfg(any(windows, test))]
 pub const VT_DISABLE_NEWLINE_AUTO_RETURN: u32 = 0x0008;
 
 /// Line-oriented CLI output mode: VT processing on, auto-return kept so a
 /// newline lands in column 0 (Prismattyc `cli_console_output_mode`).
+#[cfg(any(windows, test))]
 pub fn cli_console_output_mode(mode: u32) -> u32 {
     (mode | VT_OUTPUT_PROCESSING) & !VT_DISABLE_NEWLINE_AUTO_RETURN
 }
 
 /// Color follows stdout. Enabling stderr must not make a rejected stdout
 /// look ready.
+#[cfg(any(windows, test))]
 pub fn stdout_vt_ready(stdout_accepted: bool, _stderr_accepted: bool) -> bool {
     stdout_accepted
 }
@@ -29,6 +33,7 @@ pub fn stdout_vt_ready(stdout_accepted: bool, _stderr_accepted: bool) -> bool {
 /// - `accepted`: console accepted the updated mode
 /// - `rejected`: console handle exists but `SetConsoleMode` failed
 /// - `pipe`: not a console (`GetConsoleMode` failed / invalid handle)
+#[cfg(any(windows, test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VtDecision {
     Accepted,
@@ -36,6 +41,7 @@ pub enum VtDecision {
     Pipe,
 }
 
+#[cfg(any(windows, test))]
 impl VtDecision {
     pub fn from_apply(got_mode: bool, set_ok: bool) -> Self {
         if !got_mode {
