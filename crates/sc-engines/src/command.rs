@@ -9,6 +9,9 @@ use std::time::{Duration, Instant};
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 
+#[cfg(windows)]
+mod windows;
+
 #[derive(Debug)]
 pub struct Captured {
     pub status: ExitStatus,
@@ -214,6 +217,11 @@ pub fn run_cmd_input(
     {
         cmd.process_group(0);
     }
+    #[cfg(windows)]
+    let job = windows::Job::new()
+        .map_err(|err| CommandError::Spawn(format!("create process job: {err}")))?;
+    #[cfg(windows)]
+    windows::suspend_on_spawn(cmd);
     let mut child = match cmd.spawn() {
         Ok(child) => child,
         Err(err)
@@ -224,6 +232,11 @@ pub fn run_cmd_input(
         }
         Err(err) => return Err(CommandError::Spawn(err.to_string())),
     };
+    #[cfg(windows)]
+    if let Err(err) = job.assign_and_resume(&child) {
+        stop_tree(&mut child);
+        return Err(CommandError::Spawn(format!("contain process tree: {err}")));
+    }
     let mut stdout = child
         .stdout
         .take()
@@ -253,6 +266,8 @@ pub fn run_cmd_input(
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if start.elapsed() >= timeout => {
+                #[cfg(windows)]
+                drop(job);
                 stop_tree(&mut child);
                 let _ = drain(out_handle);
                 let stderr = drain(err_handle);
@@ -264,6 +279,8 @@ pub fn run_cmd_input(
             }
             Ok(None) => thread::sleep(Duration::from_millis(20)),
             Err(err) => {
+                #[cfg(windows)]
+                drop(job);
                 stop_tree(&mut child);
                 let _ = drain(out_handle);
                 let _ = drain(err_handle);
@@ -272,6 +289,8 @@ pub fn run_cmd_input(
         }
     };
 
+    #[cfg(windows)]
+    drop(job);
     let stdout = out_handle.join().unwrap_or_default();
     let stderr = err_handle.join().unwrap_or_default();
     Ok(Captured {
