@@ -1,0 +1,6 @@
+- id: sc
+  name: Scorecard analysis
+  entry: sc analyze . --diff HEAD --format pretty
+  language: system
+  always_run: true
+  pass_filenames: false
