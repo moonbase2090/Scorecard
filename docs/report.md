@@ -95,11 +95,13 @@ Top-level fields of `.sc/last-scorecard.json` and `--format json`:
 | `crap` | Threshold and worst functions with `cc`, `coverage`, and `crap` |
 | `mutation` | `status`, `score`, `killed`, `survived`, `timeout`, `unviable` when `--mutation` is not `off` |
 | `test_value` | Present when `--mutation` is not `off` or when `--diff` runs the test-weakening engine; mirrors `mutation` and reports `weakening` (see `docs/design/test-value.md`) |
-| `findings` | `rule`, `engine`, `severity`, `file`, `span`, `symbol`, `message`, `suggested_action`, `disposition`, `evidence` |
+| `findings` | `id`, `fingerprint`, `rule`, `engine`, `severity`, `file`, `span`, `symbol`, `message`, `suggested_action`, `disposition`, `evidence` |
 | `engines_run`, `engines_skipped` | As in the terminal footer |
 | `runs` | Every command `sc` ran, with exit code and duration |
 
 `verdict` is `fail` when any enforced gate fails. The `fail_on` list selects the process exit code; it does not hide failures from enforced gates. SARIF stores the selected list in `runs[0].properties.fail_on`.
+
+`fingerprint` is a SHA-256 value derived from the rule, normalized project-relative path, optional symbol, and whitespace-normalized finding message. It excludes source line numbers, so moving a finding within a file does not change its fingerprint. The same value appears in MCP scorecards and SARIF results as `partialFingerprints.primaryLocationLineHash`.
 
 List the findings an agent should fix:
 
