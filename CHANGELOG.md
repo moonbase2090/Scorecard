@@ -4,6 +4,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `sc doctor` lists the tools the project's language pack needs, marks the missing ones, and prints each install command. It exits 1 when a required tool is missing. A finding for a missing tool now points to it.
+
 ### Fixed
 
 - A timed-out step now says which command ran, how long it ran against the budget left for it, and the last lines of its stderr, instead of only "timed out". When earlier steps used the whole budget, the message says the command did not run.

@@ -347,6 +347,18 @@ pub(crate) fn php_plan(root: &Path, exclude: &[String], include_generated: &[Str
     ]
 }
 
+/// Whether the tree has C files and whether it has C++ files, which decide
+/// the compilers the C and C++ pack runs.
+pub fn c_family_present(
+    root: &Path,
+    exclude: &[String],
+    include_generated: &[String],
+) -> (bool, bool) {
+    let files = list_files(root, &["c", "cc", "cpp", "cxx"], exclude, include_generated);
+    let (c_files, cxx_files) = split_c_family(&files);
+    (!c_files.is_empty(), !cxx_files.is_empty())
+}
+
 pub(crate) fn cpp_plan_with_generated(
     root: &Path,
     exclude: &[String],
