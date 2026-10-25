@@ -166,11 +166,13 @@ fn scan_hunk(path: &str, hunk: &Hunk, finding_index: usize) -> Vec<Finding> {
             ));
         }
     }
+    let mut assert_loosened = false;
     if removed.iter().any(|line| line.contains("assert_eq!"))
         && added
             .iter()
             .any(|line| line.contains("assert!(") && !line.contains("assert_eq!"))
     {
+        assert_loosened = true;
         out.push(weakening_finding(
             path,
             hunk.new_start,
@@ -184,6 +186,7 @@ fn scan_hunk(path: &str, hunk: &Hunk, finding_index: usize) -> Vec<Finding> {
             .iter()
             .any(|line| line.contains(".contains(") || line.contains("contains(&"))
     {
+        assert_loosened = true;
         out.push(weakening_finding(
             path,
             hunk.new_start,
@@ -192,7 +195,32 @@ fn scan_hunk(path: &str, hunk: &Hunk, finding_index: usize) -> Vec<Finding> {
             "An exact assert_eq! was replaced with a substring or contains check",
         ));
     }
+    // Pure deletion of an assertion (no replacement assertion in the same hunk) is
+    // weakening — a test that no longer asserts anything matches the design purpose.
+    if !assert_loosened
+        && removed.iter().any(|line| looks_like_assertion(line))
+        && !added.iter().any(|line| looks_like_assertion(line))
+    {
+        out.push(weakening_finding(
+            path,
+            hunk.new_start,
+            finding_index + out.len(),
+            "assertion_removed",
+            "A test assertion was deleted in the same diff as product code changes",
+        ));
+    }
     out
+}
+
+fn looks_like_assertion(line: &str) -> bool {
+    let line = line.trim_start();
+    line.contains("assert_eq!")
+        || line.contains("assert_ne!")
+        || line.contains("assert_matches!")
+        || line.contains("assert!(")
+        || line.contains("debug_assert_eq!")
+        || line.contains("debug_assert_ne!")
+        || line.contains("debug_assert!(")
 }
 
 fn deleted_test_file_finding(path: &str, index: usize) -> Finding {
@@ -364,6 +392,22 @@ diff --git a/tests/smoke.rs b/tests/smoke.rs
  }
 ";
 
+    const ASSERTION_DELETED: &str = r"diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,3 +1,3 @@
+-pub fn add(a: i32, b: i32) -> i32 { a + b }
++pub fn add(a: i32, b: i32) -> i32 { a + b + 1 }
+diff --git a/tests/smoke.rs b/tests/smoke.rs
+--- a/tests/smoke.rs
++++ b/tests/smoke.rs
+@@ -4,7 +4,6 @@ use good_crate::add;
+ #[test]
+ fn adds() {
+-    assert_eq!(add(1, 2), 3);
+ }
+";
+
     #[test]
     fn flags_assert_eq_replaced_with_assert() {
         let files = parse_unified_diff(ASSERT_LOOSENED);
@@ -425,6 +469,24 @@ diff --git a/tests/smoke.rs b/tests/smoke.rs
             }
         }
         assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn flags_deleted_assertion_as_weakening() {
+        let files = parse_unified_diff(ASSERTION_DELETED);
+        assert!(files.iter().any(is_product_rust_path));
+        let mut findings = Vec::new();
+        for file in &files {
+            if !file_touches_tests(file) {
+                continue;
+            }
+            for hunk in &file.hunks {
+                findings.extend(scan_hunk(&file.path, hunk, findings.len()));
+            }
+        }
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].rule, "test_value.weakening");
+        assert_eq!(findings[0].evidence["kind"], "assertion_removed");
     }
 
     #[test]
