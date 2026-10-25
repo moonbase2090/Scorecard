@@ -13,17 +13,25 @@ chmod +x .git/hooks/pre-commit
 
 The analysis hook blocks a commit when an enforced gate fails. Its diff scope includes working files. Use the formatting hook below to check staged contents.
 
-For the [pre-commit](https://pre-commit.com) framework, add a local hook to `.pre-commit-config.yaml`:
+For the [pre-commit](https://pre-commit.com) framework, use Scorecard's published hook in `.pre-commit-config.yaml`:
 
 ```yaml
 repos:
-  - repo: local
+  - repo: https://github.com/moonbase2090/Scorecard
+    rev: develop
     hooks:
       - id: sc
-        name: sc
-        entry: sc analyze . --diff HEAD --format pretty
-        language: system
-        pass_filenames: false
+```
+
+Both examples require `sc` on `PATH` and run the same analysis command as the manual hook above. For pre-commit, install the Git hook with `pre-commit install`. For repeatable installs, replace `develop` with a release tag that includes this hook.
+
+For [Lefthook](https://lefthook.dev), add this to `lefthook.yml` and run `lefthook install`:
+
+```yaml
+pre-commit:
+  commands:
+    scorecard:
+      run: sc analyze . --diff HEAD --format pretty
 ```
 
 ## Check staged formatting
