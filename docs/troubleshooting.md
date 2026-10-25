@@ -12,6 +12,15 @@ uv venv && uv pip install -e ".[dev]"
 
 For projects without `uv.lock` or `.venv`, install pytest with `python3 -m pip install pytest`.
 
+## `test.failed` names a missing library, font, or tool
+
+The test failed because its runner environment did not provide a dependency. Install
+that dependency in CI. For a platform-specific test, mark it with `#[ignore]` or
+gate it behind a feature, then run it in a dedicated job on a runner that provides
+the dependency. Scorecard keeps the failure visible and points the suggested action
+at the test environment when the panic says a dependency could not be loaded, is
+not installed, or must be provided.
+
 ## Coverage not measured
 
 The `crap` gate shows `advisory` with `some functions have no coverage record and were not scored`, and the worst-CRAP table is empty (`(none)`). A `coverage.missing` warning says coverage was not measured and how to collect it. Tests did not run, or the coverage tool for the pack is missing:
