@@ -6,7 +6,7 @@
 
 1. `--config PATH`, if given.
 2. `analyzer.toml` in the analyzed directory (the `PATH` given to `sc analyze`). Parent and sub-directories are not searched.
-3. `~/.config/sc/analyzer.toml`.
+3. `~/.config/sc/analyzer.toml`. On Windows this is `%APPDATA%\sc\analyzer.toml`, or `<profile>\AppData\Roaming\sc\analyzer.toml` when `APPDATA` is not set. The profile is `HOME`, then `USERPROFILE`.
 
 Only the first file found is read. Command-line flags override the matching keys. Unknown keys are ignored without a warning, so check spelling against the tables below.
 

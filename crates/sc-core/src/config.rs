@@ -2,8 +2,9 @@
 //! `analyzer.toml` loading.
 //!
 //! Search order: `--config`, then `./analyzer.toml` in the project, then
-//! `~/.config/sc/analyzer.toml`.
+//! `~/.config/sc/analyzer.toml` (`%APPDATA%\sc\analyzer.toml` on Windows).
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -256,12 +257,60 @@ pub fn resolve_config_path(explicit: Option<&Path>, project_root: &Path) -> Opti
     None
 }
 
-pub fn user_config_file(home: &Path) -> PathBuf {
-    home.join(".config").join("sc").join("analyzer.toml")
+/// Shared text for the "no profile directory" error.
+pub const PROFILE_UNSET: &str = if cfg!(windows) {
+    "Neither HOME nor USERPROFILE is set."
+} else {
+    "HOME is not set."
+};
+
+/// The user's profile directory: `HOME`, then `USERPROFILE` on Windows.
+pub fn user_profile_dir() -> Option<PathBuf> {
+    profile_dir(
+        std::env::var_os("HOME"),
+        std::env::var_os("USERPROFILE"),
+        cfg!(windows),
+    )
+}
+
+fn profile_dir(
+    home: Option<OsString>,
+    userprofile: Option<OsString>,
+    windows: bool,
+) -> Option<PathBuf> {
+    let set = |value: Option<OsString>| value.filter(|value| !value.is_empty());
+    set(home)
+        .or_else(|| set(userprofile).filter(|_| windows))
+        .map(PathBuf::from)
+}
+
+/// Directory for `analyzer.toml` and the agent skill version stamp:
+/// `<profile>/.config/sc`, or `%APPDATA%\sc` on Windows.
+pub fn user_config_dir(profile: &Path) -> PathBuf {
+    config_dir(
+        profile,
+        std::env::var_os("APPDATA").as_deref().map(Path::new),
+        cfg!(windows),
+    )
+}
+
+fn config_dir(profile: &Path, appdata: Option<&Path>, windows: bool) -> PathBuf {
+    if !windows {
+        return profile.join(".config").join("sc");
+    }
+    appdata
+        .filter(|path| !path.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| profile.join("AppData").join("Roaming"))
+        .join("sc")
+}
+
+pub fn user_config_file(profile: &Path) -> PathBuf {
+    user_config_dir(profile).join("analyzer.toml")
 }
 
 pub fn user_config_path() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|home| user_config_file(Path::new(&home)))
+    user_profile_dir().map(|profile| user_config_file(&profile))
 }
 
 pub fn load_config_file(path: Option<&Path>) -> Result<Config, String> {
@@ -279,6 +328,36 @@ pub fn load_config_file(path: Option<&Path>) -> Result<Config, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn config_dir_is_dot_config_off_windows_and_appdata_on_windows() {
+        let profile = Path::new("/u/me");
+        assert_eq!(
+            config_dir(profile, Some(Path::new("/ignored")), false),
+            Path::new("/u/me/.config/sc")
+        );
+        assert_eq!(
+            config_dir(profile, Some(Path::new("/roam")), true),
+            Path::new("/roam/sc")
+        );
+        assert_eq!(
+            config_dir(profile, None, true),
+            Path::new("/u/me/AppData/Roaming/sc")
+        );
+        assert_eq!(
+            config_dir(profile, Some(Path::new("")), true),
+            Path::new("/u/me/AppData/Roaming/sc")
+        );
+    }
+
+    #[test]
+    fn profile_prefers_home_and_falls_back_to_userprofile_only_on_windows() {
+        let os = |text: &str| Some(OsString::from(text));
+        assert_eq!(profile_dir(os("/h"), os("/p"), true), Some("/h".into()));
+        assert_eq!(profile_dir(None, os("/p"), true), Some("/p".into()));
+        assert_eq!(profile_dir(os(""), os("/p"), true), Some("/p".into()));
+        assert_eq!(profile_dir(None, os("/p"), false), None);
+        assert_eq!(profile_dir(None, None, true), None);
+    }
 
     #[test]
     fn toolchain_from_analyzer_toml() {
