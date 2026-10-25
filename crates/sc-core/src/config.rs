@@ -286,12 +286,14 @@ fn profile_dir(
 
 /// Directory for `analyzer.toml` and the agent skill version stamp:
 /// `<profile>/.config/sc`, or `%APPDATA%\sc` on Windows.
+///
+/// `APPDATA` belongs to the signed-in user, so it applies only when `profile`
+/// is that user's profile. Any other profile (a test home, say) gets the
+/// `<profile>\AppData\Roaming` default and never touches the real folder.
 pub fn user_config_dir(profile: &Path) -> PathBuf {
-    config_dir(
-        profile,
-        std::env::var_os("APPDATA").as_deref().map(Path::new),
-        cfg!(windows),
-    )
+    let appdata = std::env::var_os("APPDATA")
+        .filter(|_| user_profile_dir().is_some_and(|real| real == profile));
+    config_dir(profile, appdata.as_deref().map(Path::new), cfg!(windows))
 }
 
 fn config_dir(profile: &Path, appdata: Option<&Path>, windows: bool) -> PathBuf {
