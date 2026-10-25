@@ -680,7 +680,7 @@ mod tests {
         let mut files: Vec<&str> = functions.iter().map(|item| item.file.as_str()).collect();
         files.sort();
         assert_eq!(files, ["src/latest.js", "src/pick.js"]);
-        assert!(functions.iter().all(|item| item.cc >= 6), "{functions:?}");
+        assert!(functions.iter().all(|item| item.cc == 6), "{functions:?}");
 
         let coverage = crate::coverage::CoverageData {
             functions: ["src/pick.js", "tests/helpers.js"]
