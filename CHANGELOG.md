@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - SARIF output names the published SARIF 2.1.0 schema, and artifact URIs are percent-encoded, so paths with spaces or reserved characters are valid SARIF and upload to code scanning.
 - A timed-out step now says which command ran, how long it ran against the budget left for it, and the last lines of its stderr, instead of only "timed out". When earlier steps used the whole budget, the message says the command did not run.
 - `test_value.weakening` findings report the hunk's new-file start line in `span.start_line` instead of line 1 (#236).
+- Deleting a test assertion (with no replacement assertion in the same hunk) is reported as `test_value.weakening` (#240).
 - `sc analyze` ignores macOS AppleDouble (`._*`) and `.DS_Store` files and prints one stderr warning with the command that deletes them. Test runners and build tools can still read these files and fail. The secrets scan still reads them, with or without Git.
 
 ## [0.1.10] - 2026-10-15
