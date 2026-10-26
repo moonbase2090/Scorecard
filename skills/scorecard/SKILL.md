@@ -73,6 +73,26 @@ Command flags override matching config settings. Every run writes `.sc/last-scor
 
 `codex` installs in both `~/.codex/skills/scorecard` and shared `~/.agents/skills/scorecard`; `all` includes both. `detected` selects agents whose config directory exists or whose CLI is on `PATH`; it does not create config directories for undetected agents. For Codex it uses existing `.codex` and `.agents` directories, and creates `.codex` only when the Codex CLI is detected and neither directory exists. Existing copies that differ from the embedded skill are preserved unless `--force` is explicit. Automatic install is enabled by default and can be disabled with `install_agent_skills = false` in `~/.config/sc/analyzer.toml` or `SCORECARD_NO_AGENT_SKILLS=1`. Explicit agent targets are manual requests and ignore these automatic-install opt-outs.
 
+## Do not game the gates
+
+A passing gate must mean the code is better, not that the check was dodged. `sc` flags some of this (`test_value.weakening` on a diff), but not all of it.
+
+Do:
+
+- Fix the cause. For a CRAP offender, add tests that exercise the function's branches, or split the function so each part is simpler.
+- Keep every assertion a test had. If behavior changed on purpose, change the expected value and say why in the commit message.
+- Write tests that can fail: assert on a specific result from the code under test.
+- When a finding is a false positive, say so in your report and leave the code alone, or narrow the scope as described below.
+
+Do not:
+
+- Delete tests, remove assertions, or loosen `assert_eq!` to `assert!` or a `contains` check to lower CRAP or turn a gate green.
+- Add tests that assert nothing or only restate the code (`assert!(true)`, comparing a value to itself, mirroring the implementation).
+- Raise `crap_threshold`, shrink `fail_on`, or pass `--fail-on none` to hide a failure. Those change what is enforced, not what is wrong.
+- Exclude source files from scanning to remove offenders.
+
+The one supported suppression is a path in `[scope] exclude` in `analyzer.toml`, for files that are not your code, such as committed test certificates or vendored files (`exclude = ["tests/certs/**"]`). There is no per-finding or inline suppression. Name every exclusion and the reason in your report so a reviewer can accept or reject it.
+
 ## Configuration
 
 Config resolution is `--config PATH`, then `analyzer.toml` in the analyzed directory, then `~/.config/sc/analyzer.toml`. Only the first existing file is used. The complete starter is `analyzer.toml.example` in the repository.
