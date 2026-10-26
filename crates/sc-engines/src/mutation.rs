@@ -403,7 +403,7 @@ mod tests {
                 Ok(captured(true, "", ""))
             }
         });
-        assert!(calls >= 2);
+        assert_eq!(calls, 2);
         assert_eq!(outcome.section.survived, 1);
         assert_eq!(outcome.findings[0].rule, "mutation.survivor");
         let too_many = execute_with(&root, None, 0, Duration::from_secs(5), |_, args, _| {
