@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - The agent skill has a "Do not game the gates" section: keep assertions, write tests that can fail, do not weaken thresholds or gates, and use `[scope] exclude` only for files that are not your code.
+- For reports with more than eight findings, pretty output groups actionable findings by rule and suggested action, then shows the five most frequent fix types first.
 - `sc doctor` lists the tools the project's language pack needs, marks the missing ones, and prints each install command. It exits 1 when a required tool is missing. A finding for a missing tool now points to it.
 
 ### Fixed

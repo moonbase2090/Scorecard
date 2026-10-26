@@ -78,6 +78,8 @@ sc analyze testdata/good_crate --format md
 
 That fixture typechecks and its tests pass. The [readme sample](../README.md#sample) is the verbatim Markdown from that command on commit `0afc676`.
 
+On a larger first run with more than eight findings, the terminal report groups actionable findings by rule and suggested action, then lists the five most frequent fix types before the findings. Read `.sc/last-scorecard.json` for every finding.
+
 ## Failing fixture
 
 ```bash
