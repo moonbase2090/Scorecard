@@ -180,9 +180,14 @@ fn finding_from(root: &Path, failure: TestFailure) -> Finding {
 
 fn names_missing_environment_dependency(detail: &str) -> bool {
     let detail = detail.to_ascii_lowercase();
-    ["could not be loaded", "not installed", "must provide"]
-        .iter()
-        .any(|phrase| detail.contains(phrase))
+    [
+        "could not be loaded",
+        "not installed",
+        "must provide",
+        "must be provided",
+    ]
+    .iter()
+    .any(|phrase| detail.contains(phrase))
 }
 
 fn panic_outside_project(root: &Path, file: &str) -> bool {
@@ -511,6 +516,7 @@ boom
             "Library libfoo.so could not be loaded",
             "cargo-llvm-cov is not installed",
             "test environment must provide a CJK face",
+            "a CJK face must be provided by the test environment",
         ];
         for detail in cases {
             let output = format!(
