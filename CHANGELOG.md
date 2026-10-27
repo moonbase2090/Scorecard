@@ -4,6 +4,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-10-27
+
+### Fixed
+
+- The Windows release binaries no longer embed the build runner's Cargo home path, so the release-text check passes on the Windows zip. v0.1.11 was tagged but its publish stopped at that check, so no v0.1.11 release was published.
+
 ## [0.1.11] - 2026-10-26
 
 ### Added
