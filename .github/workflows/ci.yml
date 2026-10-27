@@ -25,6 +25,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Manual proof lane for the Windows release zip. This dispatch uses no tag
+  # and does not call the release workflow's publish job.
+  check-windows-release:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/windows-zip'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Build
+        shell: bash
+        run: cargo build --release --locked -p sc-cli -p sc-mcp --target x86_64-pc-windows-msvc
+      - name: Package and verify
+        shell: bash
+        run: |
+          version="$(cargo pkgid -p sc-cli | sed 's/.*@//')"
+          bash scripts/package-windows-release.sh "$version"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-release-proof
+          path: dist/*.zip
+          if-no-files-found: error
+
   # Every PR update runs here only (macOS runners bill 10x on this repo).
   check-ubuntu:
     runs-on: ubuntu-latest
