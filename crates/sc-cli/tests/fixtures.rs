@@ -1185,7 +1185,14 @@ fn config_init_writes_a_starter_and_does_not_overwrite() {
     let home = std::env::temp_dir().join(format!("sc-user-cfg-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&home);
     std::fs::create_dir_all(&home).unwrap();
-    let cfg = home.join(".config/sc/analyzer.toml");
+    // Documented location: ~/.config/sc on Unix, and %APPDATA%\sc on Windows.
+    // A HOME override has no APPDATA of its own, so Windows uses the profile's
+    // AppData\Roaming default.
+    let cfg = if cfg!(windows) {
+        home.join("AppData/Roaming/sc/analyzer.toml")
+    } else {
+        home.join(".config/sc/analyzer.toml")
+    };
     let path_out = sc_with_home(&home, &["config", "path"]);
     assert_eq!(path_out.0, 0, "{}", path_out.2);
     assert_eq!(path_out.1.trim(), cfg.display().to_string());

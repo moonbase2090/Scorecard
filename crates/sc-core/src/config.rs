@@ -291,9 +291,27 @@ fn profile_dir(
 /// is that user's profile. Any other profile (a test home, say) gets the
 /// `<profile>\AppData\Roaming` default and never touches the real folder.
 pub fn user_config_dir(profile: &Path) -> PathBuf {
-    let appdata = std::env::var_os("APPDATA")
-        .filter(|_| user_profile_dir().is_some_and(|real| real == profile));
-    config_dir(profile, appdata.as_deref().map(Path::new), cfg!(windows))
+    let appdata = appdata_for_profile(
+        profile,
+        std::env::var_os("APPDATA"),
+        std::env::var_os("USERPROFILE"),
+    );
+    config_dir(profile, appdata.as_deref(), cfg!(windows))
+}
+
+/// `APPDATA` is the signed-in user's folder, so it applies only when `profile`
+/// is that user's `USERPROFILE`. A `HOME` override (a test home, say) keeps the
+/// `<profile>\AppData\Roaming` default.
+fn appdata_for_profile(
+    profile: &Path,
+    appdata: Option<OsString>,
+    userprofile: Option<OsString>,
+) -> Option<PathBuf> {
+    let native = userprofile.filter(|value| !value.is_empty())?;
+    if Path::new(&native) != profile {
+        return None;
+    }
+    appdata.filter(|value| !value.is_empty()).map(PathBuf::from)
 }
 
 fn config_dir(profile: &Path, appdata: Option<&Path>, windows: bool) -> PathBuf {
@@ -349,6 +367,22 @@ mod tests {
             config_dir(profile, Some(Path::new("")), true),
             Path::new("/u/me/AppData/Roaming/sc")
         );
+    }
+
+    #[test]
+    fn appdata_applies_only_to_the_native_profile() {
+        let os = |text: &str| Some(OsString::from(text));
+        let native = Path::new("/u/me");
+        assert_eq!(
+            appdata_for_profile(native, os("/roam"), os("/u/me")),
+            Some(PathBuf::from("/roam"))
+        );
+        assert_eq!(
+            appdata_for_profile(Path::new("/tmp/home"), os("/roam"), os("/u/me")),
+            None
+        );
+        assert_eq!(appdata_for_profile(native, None, os("/u/me")), None);
+        assert_eq!(appdata_for_profile(native, os("/roam"), None), None);
     }
 
     #[test]
