@@ -1,1 +1,2 @@
 crates/sc-cli/src/tui/snapshots/*.snap whitespace=-blank-at-eol
+crates/sc-cli/testdata/reports/*.html text eol=lf
