@@ -25,6 +25,24 @@ BOT_TRAILER = re.compile(
     r"<49699333\+dependabot\[bot\]@users\.noreply\.github\.com>[ \t]*$",
     re.IGNORECASE,
 )
+# Historical commits on develop that predate this rule and cannot be rewritten.
+# Dependabot merges are not listed: their bot co-author trailer is allowed by
+# BOT_TRAILER, so they need no exemption.
+# Each exemption is one exact, immutable commit; a message change produces a
+# different SHA and is checked normally. Do not add entries for new work.
+HISTORICAL_EXEMPT = {
+    "06819e233e76748bd1f9328f852ef75283917a39": "agents-bot squash merge: owner co-author trailer from merge tooling: Add staged Rust formatting hook (#274)",
+    "10a64591c70afeb9e527d31fb8a045639d4f59d6": "agents-bot squash merge: owner co-author trailer from merge tooling: Gate terminal browser snapshots and frame times (#310)",
+    "4f3b58e46ea25853b8c5de4e48490582955f66f0": "agents-bot squash merge: owner co-author trailer from merge tooling: Add an opt-in saved-report terminal browser (#290)",
+    "6106a2d51a7bacaa805a6e3c106ee8c8708c556e": "agents-bot squash merge: owner co-author trailer from merge tooling: Report environment-caused test failures accurately (#315)",
+    "83fcc64e3af7be4033899954b538b43b9c987018": "agents-bot squash merge: owner co-author trailer from merge tooling: Flag deleted test assertions as test_value.weakening (#313)",
+    "858a515964e4c689c858edc87fcec396360f462d": "agents-bot squash merge: owner co-author trailer from merge tooling: Enable Windows console VT mode and width for pretty output (",
+    "9399cea094e68552525a0b1a6d3f7de0d0bd84e3": "agents-bot squash merge: owner co-author trailer from merge tooling: Recognize Rust library target names in SCA (#284)",
+    "aefbaff5f6fdecf4b892e33f40863db9046b6226": "agents-bot squash merge: owner co-author trailer from merge tooling: Add stable finding fingerprints (#316)",
+    "b000c2463be0399584264fe679eca8e1a2438ea3": "agents-bot squash merge: owner co-author trailer from merge tooling: Summarize fixes in large reports (#322)",
+    "cd2058a4b5efe2eccc24b438ea9c4538fb60bbd3": "agents-bot squash merge: owner co-author trailer from merge tooling: Report command timeout details and exhausted analysis budget",
+    "f3232fe173f5057f0a3a70831e271e0793de5625": "agents-bot squash merge: owner co-author trailer from merge tooling: Stop Windows command descendants with job objects (#312)",
+}
 SHA = re.compile(r"[0-9a-f]{40}")
 REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 
@@ -124,7 +142,8 @@ def check_pr(repository, number, expected_head):
             if oid in seen or not isinstance(message, str):
                 raise CheckError("duplicate commit or missing message; retry the check")
             seen.add(oid)
-            check_message(message, f"commit {oid}", allow_bot_trailer=True)
+            if oid not in HISTORICAL_EXEMPT:
+                check_message(message, f"commit {oid}", allow_bot_trailer=True)
     if len(seen) != count or head not in seen:
         raise CheckError("incomplete commit pagination; rerun the check")
     if snapshot(api(endpoint), expected_head) != before:
