@@ -4,6 +4,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-10-26
+
 ### Added
 
 - The agent skill has a "Do not game the gates" section: keep assertions, write tests that can fail, do not weaken thresholds or gates, and use `[scope] exclude` only for files that are not your code.
