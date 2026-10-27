@@ -532,6 +532,15 @@ fn token_ats<'a>(
 mod tests {
     use super::*;
 
+    // Assertion messages print rule names only: a finding's evidence can hold
+    // the fixture key itself, and CI logs must not carry it.
+    fn rule_names(findings: &[Finding]) -> Vec<&str> {
+        findings
+            .iter()
+            .map(|finding| finding.rule.as_str())
+            .collect()
+    }
+
     fn mixed_tail(len: usize) -> String {
         let parts = ["Ab", "3k", "Qm", "9Z", "nR", "4p", "Lx", "7w"];
         parts.iter().cycle().take(len / 2).copied().collect()
@@ -544,7 +553,7 @@ mod tests {
             "const PRODUCT_KEY: &str = \"{key}\";\n#[cfg(test)]\nmod tests {{\n    const FIXTURE_KEY: &str = \"{key}\";\n}}\n"
         );
         let findings = secrets_in_text(&source, "src/lib.rs");
-        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings.len(), 1, "{:?}", rule_names(&findings));
         assert_eq!(findings[0].rule, "secrets.aws_access_key");
         assert_eq!(findings[0].span.as_ref().unwrap().start_line, 1);
         assert!(secrets_in_text(&format!("key = \"{key}\"\n"), "testdata/aws.rs").is_empty());
@@ -555,7 +564,7 @@ mod tests {
         let token = format!("ghp_{}", mixed_tail(36));
         let text = format!("const KEY: &str = \"{token}\";\nconst NOTE: &str = \"ghp_short\";\n");
         let findings = secrets_in_text(&text, "src/lib.rs");
-        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings.len(), 1, "{:?}", rule_names(&findings));
         assert_eq!(findings[0].rule, "secrets.github_token");
         assert_eq!(findings[0].span.as_ref().unwrap().start_line, 1);
     }
@@ -614,7 +623,7 @@ mod tests {
         let line =
             format!("SLACK_WEBHOOK=https://hooks.slack.com/services/T04827361/B07719283/{body}");
         let findings = secrets_in_text(&line, "config.env");
-        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings.len(), 1, "{:?}", rule_names(&findings));
         assert_eq!(findings[0].rule, "secrets.slack_webhook");
         assert!(findings[0].message.contains("revoke the webhook in Slack"));
         assert!(findings[0]
@@ -652,7 +661,7 @@ mod tests {
         assert_eq!(body.len(), 36, "{body}");
         let token = format!("ghp_{body}");
         let findings = secrets_in_text(&format!("TOKEN = \"{token}\"\n"), "app.py");
-        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings.len(), 1, "{:?}", rule_names(&findings));
         assert_eq!(findings[0].rule, "secrets.github_token");
     }
 
@@ -664,7 +673,7 @@ mod tests {
         assert!(body.contains("placeholder"));
         let token = format!("ghp_{body}");
         let findings = secrets_in_text(&format!("TOKEN = \"{token}\"\n"), "app.py");
-        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings.len(), 1, "{:?}", rule_names(&findings));
         assert_eq!(findings[0].rule, "secrets.github_token");
     }
 
@@ -712,7 +721,7 @@ mod tests {
         assert!(shannon(&key) >= 3.0);
         let text = format!("aws_secret_access_key = \"{key}\"\n");
         let findings = secrets_in_text(&text, "app.py");
-        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings.len(), 1, "{:?}", rule_names(&findings));
         assert_eq!(findings[0].rule, "secrets.aws_secret_key");
         assert!(findings[0].message.contains("AWS secret access key"));
         assert!(findings[0].message.contains("rotate"));
@@ -736,7 +745,7 @@ mod tests {
         let key = sample_secret();
         let text = format!("provider \"aws\" {{ secret_key = \"{key}\" }}\n");
         let findings = secrets_in_text(&text, "main.tf");
-        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings.len(), 1, "{:?}", rule_names(&findings));
         assert_eq!(findings[0].rule, "secrets.aws_secret_key");
         assert!(findings[0].message.contains("AWS secret access key"));
 
@@ -791,7 +800,7 @@ mod tests {
             super::pem_end()
         );
         let findings = secrets_in_text(&inline, "src/lib.rs");
-        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings.len(), 1, "{:?}", rule_names(&findings));
         assert_eq!(findings[0].rule, "secrets.private_key");
 
         let body = [
@@ -805,7 +814,7 @@ mod tests {
             super::pem_end()
         );
         let findings = secrets_in_text(&multiline, "key.pem");
-        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings.len(), 1, "{:?}", rule_names(&findings));
         assert_eq!(findings[0].rule, "secrets.private_key");
         assert_eq!(findings[0].span.as_ref().unwrap().start_line, 1);
 
@@ -834,7 +843,7 @@ mod tests {
             super::pem_end()
         );
         let findings = secrets_in_text(&text, "id_rsa");
-        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings.len(), 1, "{:?}", rule_names(&findings));
         assert_eq!(findings[0].rule, "secrets.private_key");
         assert_eq!(findings[0].span.as_ref().unwrap().start_line, 1);
     }
@@ -853,7 +862,7 @@ mod tests {
             super::pem_end()
         );
         let findings = secrets_in_text(&text, "src/config.py");
-        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings.len(), 1, "{:?}", rule_names(&findings));
         assert_eq!(findings[0].rule, "secrets.private_key");
         assert_eq!(findings[0].span.as_ref().unwrap().start_line, 2);
     }
@@ -872,7 +881,7 @@ mod tests {
             super::pem_end()
         );
         let findings = secrets_in_text(&text, "src/key.js");
-        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings.len(), 1, "{:?}", rule_names(&findings));
         assert_eq!(findings[0].rule, "secrets.private_key");
         assert_eq!(findings[0].span.as_ref().unwrap().start_line, 2);
     }
@@ -890,7 +899,7 @@ mod tests {
             super::pem_end()
         );
         let findings = secrets_in_text(&text, "src/key.go");
-        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings.len(), 1, "{:?}", rule_names(&findings));
         assert_eq!(findings[0].rule, "secrets.private_key");
     }
 
@@ -907,7 +916,7 @@ mod tests {
             super::pem_end()
         );
         let findings = secrets_in_text(&text, "src/Key.java");
-        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings.len(), 1, "{:?}", rule_names(&findings));
         assert_eq!(findings[0].rule, "secrets.private_key");
     }
 
@@ -924,7 +933,7 @@ mod tests {
             super::pem_end()
         );
         let findings = secrets_in_text(&text, "src/key.js");
-        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings.len(), 1, "{:?}", rule_names(&findings));
         assert_eq!(findings[0].rule, "secrets.private_key");
     }
 
@@ -971,7 +980,7 @@ mod tests {
         ];
         for text in variants {
             let findings = secrets_in_text(&text, "config/keys.yml");
-            assert_eq!(findings.len(), 1, "{findings:?}");
+            assert_eq!(findings.len(), 1, "{:?}", rule_names(&findings));
             assert_eq!(findings[0].rule, "secrets.private_key");
         }
     }
@@ -989,7 +998,7 @@ mod tests {
             super::pem_end()
         );
         let findings = secrets_in_text(&text, "src/key.py");
-        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings.len(), 1, "{:?}", rule_names(&findings));
         assert_eq!(findings[0].rule, "secrets.private_key");
     }
 }
