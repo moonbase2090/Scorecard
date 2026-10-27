@@ -132,6 +132,27 @@ jobs:
           ruff --version
           cargo test --workspace --locked --lib
 
+  # Report-only: this job never gates a merge and stays out of branch
+  # protection. The Windows run on a real PC is the gate. Runs on pushes to
+  # develop and manual dispatch, not PRs (Windows runners bill at 2x).
+  check-windows:
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    continue-on-error: true
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: fmt
+        run: cargo fmt --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test
+        run: cargo test --workspace --locked
+
   # Supply chain and MSRV stay Ubuntu-only and cached, like everything else.
   deny:
     runs-on: ubuntu-latest
