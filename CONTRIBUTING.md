@@ -13,10 +13,20 @@
 
 Keep pull requests small and focused. One commit per logical change.
 
+Every PR update also runs the optional TUI checks and the `tui-perf` maximum-frame
+budget. See [TUI verification](docs/how-to/tui.md) for local commands and timing scope.
+
 Every PR update runs `check-ubuntu` (fmt, clippy, the full fixture test
 suite), `deny`, and `msrv`. The macOS core tests, the LLVM coverage job,
 and the self-analysis dogfood run on pushes to `develop`, so a green PR
 still gets checked again at merge time. The macOS library tests require `cargo-llvm-cov`, the Rust `llvm-tools-preview` component, and `ruff`; CI installs them before `test core`.
+
+Run `sh scripts/install-hooks.sh` once per clone to enable formatting checks for
+staged Rust and web files. Rust checks only staged `.rs` files; web files use
+Biome 2.6.2 with staged configuration. Install Rust with rustfmt and Node.js with
+npm. The first web check downloads Biome through `npx`. The hook preserves working
+files and the index. See the [pre-commit guide](docs/how-to/pre-commit.md) for
+formatting commands and partial staging.
 
 ## Before you push
 
@@ -37,7 +47,10 @@ same value in the dogfood job).
 
 - Use a short imperative subject line (e.g. `Add SARIF output for findings`).
 - Sign as `MB2090 <322824348+mb2090@users.noreply.github.com>`.
-- No `Co-authored-by` or other attribution trailers.
+- No `Co-authored-by` or other attribution trailers. Check a proposed message with
+  `python3 scripts/check-attribution.py message commit-message.txt`.
+- PR checks inspect every commit and current PR text. The owner validates the exact
+  merge payload before submitting it. See [commit and merge-message attribution](docs/how-to/commit-attribution.md).
 
 ## Issues
 

@@ -218,6 +218,8 @@ pub fn text_secrets_with_generated(
                 include_hidden_directories: true,
                 root_directory_excludes: true,
                 include_generated_files: true,
+                // The Git path scans these by name too; a text secret in `._x` must not hide.
+                include_os_metadata: true,
             },
         ) {
             match item {
@@ -507,6 +509,16 @@ pub fn detect_with_generated(
     Ok(resolve_markers(root, found, include_generated))
 }
 
+/// Names of the packs `sc analyze` would consider for `root`: one when the
+/// pack is decided, several when markers conflict, none when nothing matches.
+pub fn detected_pack_names(root: &Path, override_pack: &str) -> Result<Vec<&'static str>, String> {
+    Ok(match detect_with_generated(root, override_pack, &[])? {
+        Detected::Pack(id) => vec![id.as_str()],
+        Detected::Ambiguous(ids) => ids.into_iter().map(PackId::as_str).collect(),
+        Detected::Unknown => Vec::new(),
+    })
+}
+
 #[cfg(test)]
 pub(crate) fn detect(root: &Path, override_pack: &str) -> Result<Detected, String> {
     detect_with_generated(root, override_pack, &[])
@@ -744,6 +756,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)] // creates symlinks
     fn secrets_walk_reaches_deep_files_dotenv_and_honors_exclude() {
         let key = planted_access_key();
         let root = temp("secrets-walk");
@@ -792,8 +805,8 @@ mod tests {
             "{files:?}"
         );
         assert!(
-            files.iter().any(|file| file.ends_with("tests/leak.rs")),
-            "{files:?}"
+            !files.iter().any(|file| file.ends_with("tests/leak.rs")),
+            "test fixture secrets should not fail the secrets gate: {files:?}"
         );
         assert!(
             files.iter().any(|file| file.ends_with("b/leak.py")),
@@ -1246,6 +1259,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)] // relies on mode bits
     fn an_unreadable_directory_fails_the_secrets_gate() {
         use std::os::unix::fs::PermissionsExt;
         let root = temp("secrets-unreadable");
@@ -1276,6 +1290,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)] // creates symlinks
     fn symlinks_are_not_followed_and_testdata_exclude_hides_fixtures() {
         let key = planted_access_key();
         let root = temp("secrets-cycle");

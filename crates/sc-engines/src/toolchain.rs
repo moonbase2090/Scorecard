@@ -218,10 +218,19 @@ fn apply(root: &Path, deadline: Instant, step: Step, report: &mut ToolReport) {
         }
         Err(err) => {
             report.skipped.push(step.engine.into());
-            let message = err.message(step.engine);
+            let budget_error = matches!(
+                err,
+                CommandError::Timeout { .. } | CommandError::BudgetExhausted
+            );
+            let what = if budget_error {
+                command.as_str()
+            } else {
+                step.engine
+            };
+            let message = err.message(what);
             let mut finding = unavailable(step.engine, &message);
-            if matches!(err, CommandError::Timeout) {
-                finding.suggested_action = Some(crate::command::TIMEOUT_FIX.into());
+            if budget_error {
+                finding.suggested_action = Some(err.timeout_fix(what));
             }
             report.findings.push(finding);
             report.gates.push(reported(step.gate, &message));
@@ -290,7 +299,14 @@ pub fn force_image(script: &str) -> String {
 }
 
 pub fn host_has(name: &str) -> bool {
-    which(name)
+    #[cfg(windows)]
+    {
+        windows_which(name)
+    }
+    #[cfg(not(windows))]
+    {
+        which(name)
+    }
 }
 
 pub fn run_script(
@@ -325,6 +341,39 @@ fn docker_host(cmd: &mut Command) {
     if let Some(sock) = desktop_socket() {
         cmd.env("DOCKER_HOST", format!("unix://{sock}"));
     }
+}
+
+#[cfg(windows)]
+fn windows_which(name: &str) -> bool {
+    use std::env;
+    use std::ffi::{OsStr, OsString};
+    use std::path::Path;
+
+    let Some(path) = env::var_os("PATH") else {
+        return false;
+    };
+    let extensions =
+        env::var_os("PATHEXT").unwrap_or_else(|| OsString::from(".COM;.EXE;.BAT;.CMD"));
+    let extensions: Vec<OsString> = extensions
+        .to_string_lossy()
+        .split(';')
+        .filter(|ext| !ext.is_empty())
+        .map(OsString::from)
+        .collect();
+    let name = OsStr::new(name);
+    let has_extension = Path::new(name).extension().is_some();
+
+    env::split_paths(&path).any(|directory| {
+        if has_extension {
+            return directory.join(name).is_file();
+        }
+
+        extensions.iter().any(|extension| {
+            let mut candidate = OsString::from(name);
+            candidate.push(extension);
+            directory.join(candidate).is_file()
+        }) || directory.join(name).is_file()
+    })
 }
 
 pub(crate) fn which(name: &str) -> bool {
@@ -394,7 +443,9 @@ fn unavailable(engine: &str, message: &str) -> Finding {
         symbol: None,
         message: message.into(),
         evidence: serde_json::json!({}),
-        suggested_action: Some("Install the tool and re-run".into()),
+        suggested_action: Some(
+            "Install the tool and re-run, or run `sc doctor` to list every missing tool".into(),
+        ),
         disposition: String::new(),
     }
 }

@@ -126,9 +126,9 @@ fn interpret_list(
         ),
         Ok(_) => Ok(0),
         Err(CommandError::NotFound) => Err(Box::new(unavailable_outcome("cargo is not installed"))),
-        Err(CommandError::Timeout) => Err(Box::new(unavailable_outcome(
-            "cargo mutants --list timed out",
-        ))),
+        Err(err @ (CommandError::Timeout { .. } | CommandError::BudgetExhausted)) => Err(Box::new(
+            unavailable_outcome(&err.message("cargo mutants --list")),
+        )),
         Err(CommandError::Spawn(err)) => Err(Box::new(unavailable_outcome(&err))),
     }
 }
@@ -143,7 +143,7 @@ fn finish_mutants(
             unavailable_outcome("cargo-mutants is not installed")
         }
         Ok(_) => read_outcomes(root),
-        Err(CommandError::Timeout) => {
+        Err(err @ CommandError::Timeout { .. }) => {
             let mut section = read_outcomes(root).section;
             section.status = "timeout".into();
             section.timeout = section.timeout.max(1);
@@ -151,8 +151,11 @@ fn finish_mutants(
                 section,
                 findings: Vec::new(),
                 ran: false,
-                unavailable: Some("cargo mutants timed out".into()),
+                unavailable: Some(err.message("cargo mutants")),
             }
+        }
+        Err(err @ CommandError::BudgetExhausted) => {
+            unavailable_outcome(&err.message("cargo mutants"))
         }
         Err(CommandError::NotFound) => unavailable_outcome("cargo is not installed"),
         Err(CommandError::Spawn(err)) => unavailable_outcome(&err),
@@ -400,7 +403,7 @@ mod tests {
                 Ok(captured(true, "", ""))
             }
         });
-        assert!(calls >= 2);
+        assert_eq!(calls, 2);
         assert_eq!(outcome.section.survived, 1);
         assert_eq!(outcome.findings[0].rule, "mutation.survivor");
         let too_many = execute_with(&root, None, 0, Duration::from_secs(5), |_, args, _| {
@@ -416,7 +419,7 @@ mod tests {
         });
         assert!(missing.unavailable.unwrap().contains("not installed"));
         let timed = execute_with(&root, None, 10, Duration::ZERO, |_, _, _| {
-            Err(CommandError::Timeout)
+            Err(CommandError::spent())
         });
         assert_eq!(timed.section.status, "unavailable");
         let patch = root.join("change.diff");
@@ -434,12 +437,23 @@ mod tests {
                 if args.iter().any(|arg| arg == "--list") {
                     Ok(captured(true, "[]", ""))
                 } else {
-                    Err(CommandError::Timeout)
+                    Err(CommandError::Timeout {
+                        elapsed: Duration::from_secs(5),
+                        limit: Duration::from_secs(5),
+                        stderr: "waiting for tests".into(),
+                    })
                 }
             },
         );
         assert!(saw_diff);
         assert_eq!(ran_timeout.section.status, "timeout");
+        let exhausted = finish_mutants(&root, Err(CommandError::BudgetExhausted));
+        assert_eq!(exhausted.section.status, "unavailable");
+        assert_eq!(exhausted.section.timeout, 0);
+        assert_eq!(
+            exhausted.unavailable.as_deref(),
+            Some("cargo mutants did not run: earlier steps used the whole analysis budget")
+        );
         let missing_cargo = execute_with(&root, None, 10, Duration::from_secs(5), |_, _, _| {
             Err(CommandError::NotFound)
         });

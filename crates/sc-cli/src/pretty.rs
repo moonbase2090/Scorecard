@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: MIT
 //! Human-readable scorecard for a terminal.
 //!
-//! Color follows `NO_COLOR`, `CLICOLOR_FORCE`, and whether stdout is a TTY.
-//! The plain style uses ASCII so a captured transcript stays readable.
+//! Color follows `NO_COLOR`, `CLICOLOR_FORCE`, and whether stdout is a TTY
+//! that accepted console VT mode (always on Unix). The plain style uses ASCII
+//! so a captured transcript stays readable.
 
 use crate::report::Outcome;
 use anstyle::{AnsiColor, Color, Style};
 use sc_core::{CrapFunction, Finding, Gate, Scorecard};
+use std::collections::BTreeMap;
 
 const FINDING_LIMIT: usize = 8;
+const TOP_FIX_LIMIT: usize = 5;
 const MIN_WIDTH: usize = 40;
 
 pub struct PrettyOpts {
@@ -60,7 +63,7 @@ pub fn term_width() -> usize {
             }
         }
     }
-    unix_cols().unwrap_or(80)
+    crate::console::native_cols(MIN_WIDTH).unwrap_or(80)
 }
 
 pub fn to_pretty(card: &Scorecard, opts: &PrettyOpts) -> String {
@@ -73,6 +76,7 @@ pub fn to_pretty(card: &Scorecard, opts: &PrettyOpts) -> String {
     push_crap(&mut out, card, opts, width);
     push_test_value(&mut out, card, opts, width);
     push_generated_files(&mut out, card, opts, width);
+    push_fix_summary(&mut out, card, opts, width);
     push_findings(&mut out, card, opts, width);
     push_llm(&mut out, card, opts, width);
     push_footer(&mut out, card, opts);
@@ -290,6 +294,52 @@ fn push_crap(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize
         );
         out.push_str(&fit(&line, width, opts.color));
         out.push('\n');
+    }
+    out.push('\n');
+}
+
+fn push_fix_summary(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize) {
+    if card.sections.findings.len() <= FINDING_LIMIT {
+        return;
+    }
+
+    let mut groups = BTreeMap::<(&str, &str), usize>::new();
+    for finding in card
+        .sections
+        .findings
+        .iter()
+        .filter(|finding| finding.disposition == "fix")
+    {
+        let Some(action) = finding
+            .suggested_action
+            .as_deref()
+            .filter(|action| !action.is_empty())
+        else {
+            continue;
+        };
+        *groups.entry((&finding.rule, action)).or_default() += 1;
+    }
+    if groups.is_empty() {
+        return;
+    }
+
+    let mut ranked: Vec<_> = groups.into_iter().collect();
+    ranked.sort_by(|(a, count_a), (b, count_b)| count_b.cmp(count_a).then_with(|| a.cmp(b)));
+    out.push_str("start with these fixes\n");
+    for ((rule, action), count) in ranked.iter().take(TOP_FIX_LIMIT) {
+        let line = if *count == 1 {
+            format!("  {rule}: {action}")
+        } else {
+            format!("  {count} findings, {rule}: {action}")
+        };
+        out.push_str(&fit(&line, width, opts.color));
+        out.push('\n');
+    }
+    if ranked.len() > TOP_FIX_LIMIT {
+        out.push_str(&format!(
+            "  {} more fix types in .sc/last-scorecard.json\n",
+            ranked.len() - TOP_FIX_LIMIT
+        ));
     }
     out.push('\n');
 }
@@ -533,27 +583,6 @@ fn severity_style(severity: &str) -> Style {
             .fg_color(Some(Color::Ansi(AnsiColor::Yellow))),
         _ => Style::new().bold(),
     }
-}
-
-fn unix_cols() -> Option<usize> {
-    #[cfg(unix)]
-    {
-        unsafe {
-            // SAFETY: winsize is a plain C struct and the pointer is only
-            // read by this ioctl for the life of the call.
-            let mut size = libc::winsize {
-                ws_row: 0,
-                ws_col: 0,
-                ws_xpixel: 0,
-                ws_ypixel: 0,
-            };
-            let rc = libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut size);
-            if rc == 0 && size.ws_col as usize >= MIN_WIDTH {
-                return Some(size.ws_col as usize);
-            }
-        }
-    }
-    None
 }
 
 #[cfg(test)]

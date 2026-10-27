@@ -25,7 +25,7 @@ Install the skill for an agent with `sc skills install --agent codex`; see [Skil
 
 ## Commands
 
-The top-level commands are `sc analyze`, `sc config`, `sc setup`, `sc skills`, and `sc help [COMMAND]`.
+The top-level commands are `sc analyze`, `sc config`, `sc doctor`, `sc setup`, `sc skills`, and `sc help [COMMAND]`. Builds with the optional `tui` Cargo feature also provide `sc tui [PATH]` for interactive browsing of `PATH/.sc/last-scorecard.json`. On Findings, use Up/Down, PageUp/PageDown, and Home/End to browse rows. Existing files inside the project have OSC 8 file-and-line links. `sc tui [PATH] --inline` prints up to eight gates and five findings without entering the alternate screen. Redirected inline output is plain text. Use `sc analyze --format json` for automation.
 
 ### `sc analyze [PATH] [OPTIONS]`
 
@@ -55,6 +55,10 @@ Command flags override matching config settings. Every run writes `.sc/last-scor
 - `sc config init` creates the user config directory and writes the starter config only when no file exists.
 - `sc config init --force` replaces the user config.
 
+### `sc doctor`
+
+`sc doctor [PATH] [--pack PACK]` lists the tools the project's language pack needs and the install command for each missing one. It exits 1 when a required tool is missing and 2 when no pack matches or several do. Run it when a finding says a tool is not installed.
+
 ### `sc setup`
 
 `sc setup` installs the skill to `~/.grok/skills/scorecard`, `~/.claude/skills/scorecard`, `~/.cursor/skills/scorecard`, and `~/.agents/skills/scorecard`. When `sc-mcp` is available, it registers the server in `~/.grok/config.toml`, `~/.cursor/mcp.json`, and `~/.claude.json`. It takes no flags and leaves existing skill files unchanged.
@@ -68,6 +72,26 @@ Command flags override matching config settings. Every run writes `.sc/last-scor
 - `--force`: replace existing files, including edits made by a user. It cannot be combined with `--check`.
 
 `codex` installs in both `~/.codex/skills/scorecard` and shared `~/.agents/skills/scorecard`; `all` includes both. `detected` selects agents whose config directory exists or whose CLI is on `PATH`; it does not create config directories for undetected agents. For Codex it uses existing `.codex` and `.agents` directories, and creates `.codex` only when the Codex CLI is detected and neither directory exists. Existing copies that differ from the embedded skill are preserved unless `--force` is explicit. Automatic install is enabled by default and can be disabled with `install_agent_skills = false` in `~/.config/sc/analyzer.toml` or `SCORECARD_NO_AGENT_SKILLS=1`. Explicit agent targets are manual requests and ignore these automatic-install opt-outs.
+
+## Do not game the gates
+
+A passing gate must mean the code is better, not that the check was dodged. `sc` flags some of this (`test_value.weakening` on a diff), but not all of it.
+
+Do:
+
+- Fix the cause. For a CRAP offender, add tests that exercise the function's branches, or split the function so each part is simpler.
+- Keep every assertion a test had. If behavior changed on purpose, change the expected value and say why in the commit message.
+- Write tests that can fail: assert on a specific result from the code under test.
+- When a finding is a false positive, say so in your report and leave the code alone, or narrow the scope as described below.
+
+Do not:
+
+- Delete tests, remove assertions, or loosen `assert_eq!` to `assert!` or a `contains` check to lower CRAP or turn a gate green.
+- Add tests that assert nothing or only restate the code (`assert!(true)`, comparing a value to itself, mirroring the implementation).
+- Raise `crap_threshold`, shrink `fail_on`, or pass `--fail-on none` to hide a failure. Those change what is enforced, not what is wrong.
+- Exclude source files from scanning to remove offenders.
+
+The one supported suppression is a path in `[scope] exclude` in `analyzer.toml`, for files that are not your code, such as committed test certificates or vendored files (`exclude = ["tests/certs/**"]`). There is no per-finding or inline suppression. Name every exclusion and the reason in your report so a reviewer can accept or reject it.
 
 ## Configuration
 
@@ -89,7 +113,7 @@ Unknown config keys are ignored. Check spelling against the config reference bef
 
 ## Environment variables
 
-- `HOME` locates user config and agent skill destinations.
+- `HOME` locates user config and agent skill destinations. On Windows, `USERPROFILE` is used when `HOME` is not set, and user config and the skill version stamp live in `%APPDATA%\sc` (`<profile>\AppData\Roaming\sc` when `APPDATA` is not set).
 - `XDG_CONFIG_HOME` locates Muse configuration for Muse detection; defaults to `~/.config`.
 - `PATH` is used to detect agent CLIs and project tools.
 - `SCORECARD_NO_AGENT_SKILLS=1` disables automatic detected-agent installation.
@@ -145,3 +169,13 @@ Publish `scorecard.sarif` to the CI code-scanning service when configured. Use a
 - Do not put API keys in `analyzer.toml`, command output, or committed files.
 - Do not use `--force` on a skill install unless the user wants the existing copy replaced.
 - Do not claim checks ran when the report marks an engine skipped or unavailable.
+
+## Verify TUI source changes
+
+For changes to the optional browser, run `bash scripts/verify-tui.sh` for styled
+snapshots, the encoder oracle, real-binary termlens flows, and feature-enabled clippy.
+Run `bash scripts/verify-tui-perf.sh` on macOS or Linux for the release-build frame gate.
+Every measured frame must be at most 16 ms. Review snapshot text and style changes
+individually before accepting them. See `docs/how-to/tui.md` for the measured scope.
+Record both commands and their results at the PR head; a passing default-feature
+workspace test does not cover the browser.

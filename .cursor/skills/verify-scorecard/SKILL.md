@@ -104,8 +104,30 @@ test -s "$sc_evidence/sc-version.txt"
 find "$sc_evidence" -type f -print
 ```
 
+## Commit hook
+
+For hook or installer changes, run `python3 scripts/test-pre-commit.py` with Git,
+Python 3, Rust with rustfmt, and Node.js with npm. The first web check downloads
+Biome 2.6.2. Require all ten real-commit cases to pass: installer reuse, Rust and
+web partial staging in both directions, unusual names, unstaged child modules,
+staged Biome configuration, web rename/deletion, and unrelated commits. Verify
+rejections preserve HEAD, index blobs, and working files; accepted commits contain
+the staged blobs and preserve unstaged edits. Rust files outside Cargo targets
+must still be checked. Repeat this script from the exact source archive in the
+allocated clean macOS guest and retain its output.
+
 ## Helpers and maintenance
 
 `sc_cleanup`, `sc_doctor`, and `sc_run` above are shell helpers, not installed commands. They use Bash, Python 3.11 or newer, Git, and the built binaries. The web recipes need no language-pack services or credentials. The scope recipe uses Rust and needs `cargo-llvm-cov` plus `llvm-tools-preview`; see the pack prerequisites before that drive.
 
 Run `/maintain-verification-skill` when a PR changes build commands, runtime behavior, test prerequisites, or a mapped entry point. Its source review and live pass cover every feature file. Add a feature recipe when a change introduces another user-facing path.
+
+### Windows process-tree cleanup
+
+For changes to Windows command containment, run on a native Windows checkout:
+
+```powershell
+py scripts/verify-windows-process-tree.py
+```
+
+The driver requires each named test to execute and pass. It checks that a running grandchild is stopped on timeout, timeout stderr is retained, and a grandchild cannot keep output pipes open after its parent succeeds. Save the exact revision and output. Unix regression proof is `cargo test --locked -p sc-engines command::tests`. Cross-compilation is supplemental; native Windows runtime proof remains a release gate.

@@ -78,6 +78,8 @@ sc analyze testdata/good_crate --format md
 
 That fixture typechecks and its tests pass. The [readme sample](../README.md#sample) is the verbatim Markdown from that command on commit `0afc676`.
 
+On a larger first run with more than eight findings, the terminal report groups actionable findings by rule and suggested action, then lists the five most frequent fix types before the findings. Read `.sc/last-scorecard.json` for every finding.
+
 ## Failing fixture
 
 ```bash
@@ -101,6 +103,16 @@ test.failed | warning
 ```
 
 The failing test is level `warning` in SARIF, so GitHub code scanning does not count it as a security vulnerability. Only `secrets.*` findings are level `error`. The JSON report still gives `test.failed` severity `error`, and the tests gate still fails the run.
+
+## Finding fingerprints
+
+JSON findings and MCP scorecards include a stable fingerprint. SARIF results expose the same value as `partialFingerprints.primaryLocationLineHash`:
+
+```bash
+sc analyze testdata/failing_test --format sarif | jq -r '.runs[0].results[] | "\(.ruleId) | \(.partialFingerprints.primaryLocationLineHash)"'
+```
+
+The SHA-256 value uses the rule, normalized project-relative path, optional symbol, and whitespace-normalized finding message. It does not include source line numbers.
 
 ## PEM keys in source files
 

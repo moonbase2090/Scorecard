@@ -10,12 +10,20 @@ The secrets scan checks files up to 64 MiB even when they contain NUL bytes. It 
 
 The secrets gate recognizes Slack incoming webhooks, Stripe restricted live keys (`rk_live_`), and AWS provider secret keys in Terraform, alongside the existing token and key formats.
 
+## Browse a saved analysis
+
+The optional `tui` Cargo feature adds `sc tui [PATH]`, a keyboard browser for
+`PATH/.sc/last-scorecard.json`. Build with `cargo build --release -p sc-cli --features tui`,
+run `sc analyze` in your project, then open `sc tui`. Use the gate rail, badge tabs,
+and virtualized Findings table to inspect the last completed analysis. Print a compact
+summary to scrollback or a pipe with `sc tui --inline`. See [Browse a saved analysis](docs/how-to/tui.md).
+
 ## Quickstart
 
 Download `sc` for your platform and run it on a project:
 
 ```bash doctest network
-VERSION=v0.1.6
+VERSION=v0.1.10
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64) TARGET=aarch64-apple-darwin ;;
   Darwin-x86_64) TARGET=x86_64-apple-darwin ;;
@@ -49,10 +57,12 @@ sc analyze .
 
 While analysis runs, an interactive terminal shows the current step and elapsed time on stderr, including with `NO_COLOR=1`. Use `--quiet` to hide progress.
 
+`sc analyze` skips macOS AppleDouble (`._*`) and `.DS_Store` files in every engine's file walk and writes one stderr line with the count, the first file, and the `find` command that deletes them ([troubleshooting](docs/troubleshooting.md#ignoring-n-macos-metadata-files)). Test runners and build tools can still read these files and fail.
+
 In a terminal the report looks like this (from `testdata/good_crate`):
 
 ```text
-sc 0.1.10  testdata/good_crate  rust  5ac851c clean  scope tree
+sc 0.1.12  testdata/good_crate  rust  5ac851c clean  scope tree
 
 PASS
 
@@ -85,9 +95,13 @@ exit 0: enforced gates passed
 
 Exit status: `1` a gate selected by `--fail-on` failed; `0` none did; `2` `sc` could not run. Use `--fail-on none` to return 0 for every gate while keeping failures in the report. If an enforced gate fails while the exit code is 0, `sc` writes one stderr warning with the failed gate names. An empty or blank `--fail-on` selection is invalid. Omit the option to use the default gates. [Reading the report](docs/report.md) explains every section.
 
+For reports with more than eight findings, the terminal output puts the five most frequent fix types before the findings list. The full report stays in `.sc/last-scorecard.json`.
+
 If the configured scope selects no files for secrets scanning, the report contains `secrets.empty_scope` and the secrets gate fails. Check the project path and exclusions before rerunning.
 
 A dirty report lists up to three changed paths. JSON includes every path in `git.dirty_paths`. Scorecard's saved report, cache and coverage files under `.sc/`, and files selected by `--out` do not make a clean checkout dirty.
+
+Each finding has a SHA-256 `fingerprint` based on its rule, normalized project-relative path, optional symbol, and whitespace-normalized message. The fingerprint ignores line-number changes and appears in JSON, MCP results, and SARIF `partialFingerprints.primaryLocationLineHash`.
 
 `sc analyze . --diff BASE` scores only what changed against that git ref. Python compiles, lints, and checks imports only in changed `.py` files, and runs pytest only on changed `test_*.py` and `*_test.py` files. When the project is a subdirectory of a larger repository, the changed paths are still relative to the project (`src/a.rs`). A bare `--diff` picks the base automatically (`HEAD~1`, else `main`, else `master`) and skips a candidate that is the same commit as `HEAD`. A shallow clone, a single-commit branch, a depth-1 clone of `main` or `master`, or a missing explicit base exits 2 with verdict `fail` and one stderr line that names `fetch-depth: 0`. An explicit `--diff HEAD` still works.
 
@@ -111,6 +125,7 @@ Next:
 
 - Put `sc` on your `PATH` (the quickstart installs to `~/.local/bin`), or see [Install](#install).
 - Add `.sc/` to `.gitignore`. `sc` keeps its last report and caches there.
+- Run `sc doctor` to see which tools your language pack needs and how to install any that are missing. Python projects with a test suite require `uv` when `uv.lock` or `.venv` exists; other Python suites need pytest and, with coverage enabled, `pytest-cov` or `coverage.py`.
 - Run `sc setup` so coding agents on this machine can use `sc` ([agents](docs/how-to/agents.md)).
 - Install just the agent instructions with `sc skills install --agent detected`; see [skill installation](docs/how-to/agents.md#install-the-skill).
 - Write a user config with `sc config init`, or put `analyzer.toml` at the project root ([configure](docs/how-to/config.md)).
@@ -134,20 +149,20 @@ The secrets scan also finds PEM private keys split across source string literals
 
 ## Install
 
-Published release [v0.1.6](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.6). Each `.tar.gz` holds a top-level directory `sc-v<version>-<target>/` with `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md` (v0.1.6 archives use a flat layout; the GitHub Action accepts both).
+Published release [v0.1.10](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.10). Each `.tar.gz` holds a top-level directory `sc-v<version>-<target>/` with `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md`.
 
 | Platform | Asset |
 |---|---|
-| macOS, Apple silicon | `sc-v0.1.6-aarch64-apple-darwin.tar.gz` |
-| macOS, Intel | `sc-v0.1.6-x86_64-apple-darwin.tar.gz` |
-| macOS installer | `sc-v0.1.6-macos.pkg`, or `sc-v0.1.6-universal-apple-darwin.dmg`. Installs `sc` and `sc-mcp` to `/usr/local/bin` |
-| Linux, arm64 | `sc-v0.1.6-aarch64-unknown-linux-gnu.tar.gz` |
-| Linux, x86_64 | `sc-v0.1.6-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS, Apple silicon | `sc-v0.1.10-aarch64-apple-darwin.tar.gz` |
+| macOS, Intel | `sc-v0.1.10-x86_64-apple-darwin.tar.gz` |
+| macOS installer | `sc-v0.1.10-macos.pkg`, or `sc-v0.1.10-universal-apple-darwin.dmg`. Installs `sc` and `sc-mcp` to `/usr/local/bin` |
+| Linux, arm64 | `sc-v0.1.10-aarch64-unknown-linux-gnu.tar.gz` |
+| Linux, x86_64 | `sc-v0.1.10-x86_64-unknown-linux-gnu.tar.gz` |
 
 To check a download, fetch `SHA256SUMS` into the same directory and verify only the files you have:
 
 ```bash
-curl -fsSLO https://github.com/moonbase2090/Scorecard/releases/download/v0.1.6/SHA256SUMS
+curl -fsSLO https://github.com/moonbase2090/Scorecard/releases/download/v0.1.10/SHA256SUMS
 shasum -a 256 -c --ignore-missing SHA256SUMS   # Linux: sha256sum -c --ignore-missing SHA256SUMS
 ```
 

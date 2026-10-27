@@ -54,7 +54,7 @@ Verify on the PC before changing it: CRLF-ended ignore files, patterns written w
 
 Pretty output uses `anstyle` ANSI sequences (`crates/sc-cli/src/pretty.rs`). Color follows `NO_COLOR`, `CLICOLOR_FORCE`, `CLICOLOR`, and whether stdout is a terminal. A Windows console prints those sequences as text until `ENABLE_VIRTUAL_TERMINAL_PROCESSING` is set.
 
-Use the same fix Prismattyc uses in `enable_console_vt` (`prismattyc-mux` `platform.rs`): `GetConsoleMode` / `SetConsoleMode` on stdout and stderr with output processing and `DISABLE_NEWLINE_AUTO_RETURN`. Color stays off when the console rejects the mode, unless `CLICOLOR_FORCE` is set to something other than `0`. A pipe or a file stays plain, as it does now.
+Use the same fix Prismattyc uses in `enable_console_vt` (`prismattyc-mux` `platform.rs`): `GetConsoleMode` / `SetConsoleMode` on stdout and stderr with `ENABLE_VIRTUAL_TERMINAL_PROCESSING`, clearing `DISABLE_NEWLINE_AUTO_RETURN` so a newline returns to column 0 (line-oriented CLI mode). Color stays off when the console rejects the mode, unless `CLICOLOR_FORCE` is set to something other than `0`. A pipe or a file stays plain, as it does now.
 
 Width: when `COLUMNS` is unset, read the console window with `GetConsoleScreenBufferInfo` instead of falling through to 80. Keep the 40-column minimum.
 
@@ -165,7 +165,7 @@ Each leaf is its own PR into `develop`, labeled `leaf`. None of them edit the RE
 
 1. Compile and test. `#[cfg(unix)]` on the Unix-only tests named above, plus any further compile break the PC build shows. `cargo test --workspace --locked` passes on the PC. Ubuntu CI stays required and unchanged.
 2. Tool lookup and the Rust pack. `PATH`/`PATHEXT` lookup so `host_has("cargo")` is true without `sh`. `sc analyze` on `testdata/good_crate` completes check and test through `cargo.exe`. Lint and other `sh -c` engines report `engine.unavailable` with one clear line when `sh` is absent.
-3. Process-tree timeout. Job object kill, with a test that a grandchild does not outlive the deadline.
+3. Process-tree timeout. Windows commands start suspended, join a job object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, then resume. Closing the job on timeout kills descendants; closing it after normal parent exit also releases inherited output pipes. Job setup failures stop the child and report a spawn error. Unix retains process-group cleanup. On the PC, run `py scripts/verify-windows-process-tree.py` to verify both a running grandchild at the deadline and a finished parent whose grandchild holds output open. These tests use the Rust test executable as their subprocess, without a POSIX shell. Native Windows runtime proof remains a release gate; cross-compilation alone is not that proof.
 4. Console. VT mode and console width, covered by a unit test of the mode decision (accepted, rejected, pipe).
 5. Config and skills. `%APPDATA%\sc` and profile fallback, plus `sc-mcp.exe` discovery.
 6. CI. The report-only `check-windows` job.

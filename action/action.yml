@@ -17,7 +17,11 @@ inputs:
     required: false
     default: off
   format:
-    description: json, md, sarif, html, or all
+    description: >-
+      Upload selection: sarif uploads code scanning results on public repositories;
+      html uploads all report files as an artifact; all does both; json and md skip
+      uploads. All report formats, finding annotations, and the Markdown job summary
+      are generated for every selection.
     required: false
     default: sarif
   diff:
@@ -25,7 +29,7 @@ inputs:
     required: false
     default: ""
   version:
-    description: Release to install, such as 0.1.10. Empty uses the action ref when it is a v* tag, otherwise the latest release.
+    description: Release to install, such as 0.1.12. Empty uses the action ref when it is a v* tag, otherwise the latest release.
     required: false
     default: ""
   budget-seconds:
@@ -126,22 +130,17 @@ runs:
           install_from_source
         fi
     - name: Analyze
+      id: analyze
+      continue-on-error: true
       shell: bash
       env:
-        SC_FORMAT: ${{ inputs.format }}
         SC_FAIL_ON: ${{ inputs.fail-on }}
         SC_MUTATION: ${{ inputs.mutation }}
         SC_SPEC: ${{ inputs.spec }}
         SC_DIFF: ${{ inputs.diff }}
         SC_BUDGET: ${{ inputs.budget-seconds }}
       run: |
-        case "$SC_FORMAT" in
-          md) out=sc-results.md ;;
-          json) out=sc-results.json ;;
-          sarif) out=sc-results.sarif ;;
-          *) out=sc-results.html ;;
-        esac
-        args=(analyze . --format "$SC_FORMAT" --out "$out" --fail-on "$SC_FAIL_ON" --mutation "$SC_MUTATION" --budget-seconds "$SC_BUDGET")
+        args=(analyze . --format all --out sc-results --fail-on "$SC_FAIL_ON" --mutation "$SC_MUTATION" --budget-seconds "$SC_BUDGET")
         if [ -n "$SC_SPEC" ]; then
           args+=(--spec "$SC_SPEC")
         fi
@@ -149,6 +148,63 @@ runs:
           args+=(--diff "$SC_DIFF")
         fi
         sc "${args[@]}"
+    - name: Annotate findings and write job summary
+      if: always()
+      shell: bash
+      run: |
+        python3 - <<'PY'
+        import json
+        import os
+        from pathlib import Path
+
+        report = Path("sc-results.json")
+        if report.is_file():
+            try:
+                with report.open(encoding="utf-8") as stream:
+                    data = json.load(stream)
+            except (OSError, json.JSONDecodeError):
+                print("::warning::Scorecard JSON report is unreadable; annotations were skipped.")
+                data = None
+            findings = data.get("findings", []) if isinstance(data, dict) else []
+            if not findings and isinstance(data, dict):
+                sections = data.get("sections", {})
+                findings = sections.get("findings", []) if isinstance(sections, dict) else []
+            for finding in findings if isinstance(findings, list) else []:
+                if not isinstance(finding, dict):
+                    continue
+                severity = finding.get("severity", "")
+                severity = severity.lower() if isinstance(severity, str) else ""
+                level = {"error": "error", "warning": "warning"}.get(severity, "notice")
+
+                def escape_data(value):
+                    return str(value).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+                def escape_property(value):
+                    return escape_data(value).replace(":", "%3A").replace(",", "%2C")
+
+                properties = [f"title={escape_property(finding.get('rule', 'scorecard'))}"]
+                path = finding.get("file")
+                if path:
+                    properties.append(f"file={escape_property(path)}")
+                span = finding.get("span") or {}
+                for key, field in (("line", "start_line"), ("col", "start_col")):
+                    if span.get(field):
+                        properties.append(f"{key}={span[field]}")
+                message = escape_data(finding.get("message", ""))
+                print(f"::{level} {','.join(properties)}::{message}")
+
+        summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
+        markdown = Path("sc-results.md")
+        with summary.open("a", encoding="utf-8") as stream:
+            if markdown.is_file():
+                stream.write(markdown.read_text(encoding="utf-8"))
+            else:
+                stream.write("# Scorecard\n\nAnalysis did not produce a report. Check the Analyze step for details.\n")
+        PY
+    - name: Propagate analysis failure
+      if: steps.analyze.outcome == 'failure'
+      shell: bash
+      run: exit 1
     - name: Upload report
       if: always() && (inputs.format == 'html' || inputs.format == 'all')
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

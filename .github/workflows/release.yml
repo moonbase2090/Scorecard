@@ -113,9 +113,41 @@ jobs:
           path: dist/*.tar.gz
           if-no-files-found: error
 
+  # The zip is unsigned. publish waits for this job but does not require it, so
+  # a billing skip or a Windows failure never blocks the Apple and Linux assets.
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Build
+        shell: bash
+        run: |
+          # Strip the runner's Cargo home and checkout paths from the binaries,
+          # as the Linux and macOS jobs do. Otherwise the panic-location strings
+          # embed C:\Users\runneradmin\.cargo and fail the release-text check.
+          cargo_home="${CARGO_HOME:-$USERPROFILE/.cargo}"
+          export RUSTFLAGS="--remap-path-prefix=$(cygpath -m "$cargo_home")=/cargo --remap-path-prefix=$(cygpath -w "$cargo_home")=/cargo --remap-path-prefix=$(cygpath -m "$GITHUB_WORKSPACE")=/src/scorecard --remap-path-prefix=$(cygpath -w "$GITHUB_WORKSPACE")=/src/scorecard"
+          cargo build --release --locked -p sc-cli -p sc-mcp --target x86_64-pc-windows-msvc
+      - name: Package
+        shell: bash
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          bash scripts/package-windows-release.sh "$ver"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-x86_64-pc-windows-msvc
+          path: dist/*.zip
+          if-no-files-found: error
+
   publish:
-    needs: [apple, linux]
-    if: needs.apple.outputs.signed == 'true'
+    needs: [apple, linux, windows]
+    if: ${{ !cancelled() && needs.apple.result == 'success' && needs.linux.result == 'success' && needs.apple.outputs.signed == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:

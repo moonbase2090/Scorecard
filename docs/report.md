@@ -95,11 +95,13 @@ Top-level fields of `.sc/last-scorecard.json` and `--format json`:
 | `crap` | Threshold and worst functions with `cc`, `coverage`, and `crap` |
 | `mutation` | `status`, `score`, `killed`, `survived`, `timeout`, `unviable` when `--mutation` is not `off` |
 | `test_value` | Present when `--mutation` is not `off` or when `--diff` runs the test-weakening engine; mirrors `mutation` and reports `weakening` (see `docs/design/test-value.md`) |
-| `findings` | `rule`, `engine`, `severity`, `file`, `span`, `symbol`, `message`, `suggested_action`, `disposition`, `evidence` |
+| `findings` | `id`, `fingerprint`, `rule`, `engine`, `severity`, `file`, `span`, `symbol`, `message`, `suggested_action`, `disposition`, `evidence` |
 | `engines_run`, `engines_skipped` | As in the terminal footer |
 | `runs` | Every command `sc` ran, with exit code and duration |
 
 `verdict` is `fail` when any enforced gate fails. The `fail_on` list selects the process exit code; it does not hide failures from enforced gates. SARIF stores the selected list in `runs[0].properties.fail_on`.
+
+`fingerprint` is a SHA-256 value derived from the rule, normalized project-relative path, optional symbol, and whitespace-normalized finding message. It excludes source line numbers, so moving a finding within a file does not change its fingerprint. The same value appears in MCP scorecards and SARIF results as `partialFingerprints.primaryLocationLineHash`.
 
 List the findings an agent should fix:
 
@@ -127,6 +129,6 @@ ls sc-report.json sc-report.md sc-report.sarif sc-report.html
 
 It is safe to delete. Add `.sc/` to `.gitignore`.
 
-Generated source files appear in `generated_files_warning.skipped_files` when their leading generator header excludes them from source analysis. The Markdown, HTML, and terminal reports list these paths under "Generated files skipped by source analysis" with the `scope.include_generated` setting needed to analyze them. Secrets scanning still checks these files. The existing `files` list identifies generated paths that source analysis included. SARIF carries this section in `runs[0].properties.generated_files_warning`.
+Generated source files appear in `generated_files_warning.skipped_files` when their leading generator header excludes them from source analysis. The Markdown, HTML, and terminal reports list these paths under "Generated files skipped by source analysis" with the `include_generated` key under `[scope]` needed to analyze them. The suggested snippet parses as written in `analyzer.toml`. Secrets scanning still checks these files. The existing `files` list identifies generated paths that source analysis included. SARIF carries this section in `runs[0].properties.generated_files_warning`.
 
 ![Report naming a generated file skipped by source analysis](images/generated-skipped-report.png)

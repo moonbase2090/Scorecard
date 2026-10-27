@@ -4,6 +4,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-10-27
+
+### Fixed
+
+- The Windows release binaries no longer embed the build runner's Cargo home path, so the release-text check passes on the Windows zip. v0.1.11 was tagged but its publish stopped at that check, so no v0.1.11 release was published.
+
+## [0.1.11] - 2026-10-26
+
+### Added
+
+- The agent skill has a "Do not game the gates" section: keep assertions, write tests that can fail, do not weaken thresholds or gates, and use `[scope] exclude` only for files that are not your code.
+- For reports with more than eight findings, pretty output groups actionable findings by rule and suggested action, then shows the five most frequent fix types first.
+- `sc doctor` lists the tools the project's language pack needs, marks the missing ones, and prints each install command. It exits 1 when a required tool is missing. A finding for a missing tool now points to it.
+
+### Fixed
+
+- On Windows, pretty output enables console VT processing and reads the console width when `COLUMNS` is unset, so ANSI color works in a console and width no longer falls through to 80. Color stays off when VT is rejected unless `CLICOLOR_FORCE` is set.
+- On Windows, `sc config`, `sc setup`, and `sc skills install` resolve the profile from `HOME` or `USERPROFILE`, keep user config and the skill version stamp in `%APPDATA%\sc`, and `sc setup` finds `sc-mcp.exe`. They previously failed with `HOME is not set`.
+- SARIF output names the published SARIF 2.1.0 schema, and artifact URIs are percent-encoded, so paths with spaces or reserved characters are valid SARIF and upload to code scanning.
+- A timed-out step now says which command ran, how long it ran against the budget left for it, and the last lines of its stderr, instead of only "timed out". When earlier steps used the whole budget, the message says the command did not run.
+- `test_value.weakening` findings report the hunk's new-file start line in `span.start_line` instead of line 1 (#236).
+- Deleting a test assertion (with no replacement assertion in the same hunk) is reported as `test_value.weakening` (#240).
+- `sc analyze` ignores macOS AppleDouble (`._*`) and `.DS_Store` files and prints one stderr warning with the command that deletes them. Test runners and build tools can still read these files and fail. The secrets scan still reads them, with or without Git.
+
 ## [0.1.10] - 2026-10-15
 
 ### Fixed

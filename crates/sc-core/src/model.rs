@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MIT
 //! JSON contract. Field names are part of the stable scorecard schema.
 
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Serialize, Serializer};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use crate::SCORECARD_VERSION;
 
@@ -14,7 +16,7 @@ pub struct Span {
     pub end_col: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Finding {
     pub id: String,
     pub rule: String,
@@ -29,6 +31,60 @@ pub struct Finding {
     /// `fix`, `ask`, or `ignore`. Empty until `apply_disposition`.
     #[serde(default)]
     pub disposition: String,
+}
+
+impl Serialize for Finding {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut finding = serializer.serialize_struct("Finding", 12)?;
+        finding.serialize_field("id", &self.id)?;
+        finding.serialize_field("fingerprint", &self.fingerprint())?;
+        finding.serialize_field("rule", &self.rule)?;
+        finding.serialize_field("engine", &self.engine)?;
+        finding.serialize_field("severity", &self.severity)?;
+        finding.serialize_field("file", &self.file)?;
+        finding.serialize_field("span", &self.span)?;
+        finding.serialize_field("symbol", &self.symbol)?;
+        finding.serialize_field("message", &self.message)?;
+        finding.serialize_field("evidence", &self.evidence)?;
+        finding.serialize_field("suggested_action", &self.suggested_action)?;
+        finding.serialize_field("disposition", &self.disposition)?;
+        finding.end()
+    }
+}
+
+impl Finding {
+    /// A SHA-256 fingerprint that ignores source line numbers and whitespace.
+    pub fn fingerprint(&self) -> String {
+        let path = normalize_finding_path(&self.file);
+        let snippet = self
+            .message
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let mut hash = Sha256::new();
+        hash.update(b"scorecard-finding-v1\0");
+        for part in [
+            self.rule.as_str(),
+            path.as_str(),
+            self.symbol.as_deref().unwrap_or(""),
+            snippet.as_str(),
+        ] {
+            hash.update((part.len() as u64).to_be_bytes());
+            hash.update(part.as_bytes());
+        }
+        format!("{:x}", hash.finalize())
+    }
+}
+
+fn normalize_finding_path(path: &str) -> String {
+    path.replace('\\', "/")
+        .split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 /// How an agent should treat a finding.
@@ -570,6 +626,67 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn finding_fingerprint_survives_line_moves_and_normalizes_formatting() {
+        let finding = Finding {
+            id: "first-id".into(),
+            rule: "lint.failed".into(),
+            engine: "lint".into(),
+            severity: "warning".into(),
+            file: "src/lib.rs".into(),
+            span: Some(Span {
+                start_line: 10,
+                start_col: 1,
+                end_line: 10,
+                end_col: 5,
+            }),
+            symbol: Some("check".into()),
+            message: "Found issue in function".into(),
+            evidence: json!({}),
+            suggested_action: None,
+            disposition: "ask".into(),
+        };
+        let moved = Finding {
+            id: "second-id".into(),
+            file: "./src\\lib.rs".into(),
+            span: Some(Span {
+                start_line: 40,
+                start_col: 1,
+                end_line: 40,
+                end_col: 5,
+            }),
+            message: " Found   issue\nin function ".into(),
+            ..finding.clone()
+        };
+
+        assert_eq!(finding.fingerprint(), moved.fingerprint());
+
+        let changed_rule = Finding {
+            rule: "crap.over_threshold".into(),
+            ..finding.clone()
+        };
+        assert_ne!(finding.fingerprint(), changed_rule.fingerprint());
+        let changed_path = Finding {
+            file: "src/main.rs".into(),
+            ..finding.clone()
+        };
+        assert_ne!(finding.fingerprint(), changed_path.fingerprint());
+        let changed_symbol = Finding {
+            symbol: Some("other".into()),
+            ..finding.clone()
+        };
+        assert_ne!(finding.fingerprint(), changed_symbol.fingerprint());
+        let changed_message = Finding {
+            message: "Different issue".into(),
+            ..finding.clone()
+        };
+        assert_ne!(finding.fingerprint(), changed_message.fingerprint());
+
+        let serialized = serde_json::to_value(&finding).unwrap();
+        assert_eq!(serialized["fingerprint"], finding.fingerprint());
+        assert_eq!(serialized["fingerprint"].as_str().unwrap().len(), 64);
+    }
+
+    #[test]
     fn scope_base_is_optional_and_omitted_when_absent() {
         let mut card = Scorecard::skeleton("demo", 30);
         let json = serde_json::to_value(&card).unwrap();
@@ -763,19 +880,20 @@ mod tests {
 
         assert_eq!(
             serde_json::to_string(&card).unwrap(),
-            include_str!("golden/scorecard-contract.json"),
+            include_str!("golden/scorecard-contract.compact.json.txt"),
             "compact scorecard JSON changed"
         );
         assert_eq!(
             serde_json::to_string_pretty(&card).unwrap(),
-            include_str!("golden/scorecard-contract.pretty.json"),
+            include_str!("golden/scorecard-contract.pretty.json.txt"),
             "pretty scorecard JSON changed"
         );
         let back: Scorecard =
-            serde_json::from_str(include_str!("golden/scorecard-contract.json")).unwrap();
+            serde_json::from_str(include_str!("golden/scorecard-contract.compact.json.txt"))
+                .unwrap();
         assert_eq!(
             serde_json::to_string(&back).unwrap(),
-            include_str!("golden/scorecard-contract.json"),
+            include_str!("golden/scorecard-contract.compact.json.txt"),
             "reloaded scorecard JSON changed"
         );
 
@@ -810,6 +928,7 @@ mod tests {
         let finding = &v["findings"][0];
         for key in [
             "id",
+            "fingerprint",
             "rule",
             "engine",
             "severity",

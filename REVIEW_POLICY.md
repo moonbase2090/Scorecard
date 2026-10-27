@@ -75,6 +75,10 @@ Every PR meets these. Reviewers block on any miss.
 ## 7. Merging
 
 - Merge commits only. No admin overrides.
+- Check all PR commit messages and the exact proposed merge title/body with
+  `scripts/check-attribution.py`. The owner uses the
+  [validated merge-payload procedure](docs/how-to/commit-attribution.md#owner-merge-procedure);
+  a head status cannot intercept later edits in GitHub's merge UI.
 - Code-scanning threads are resolved only when they are report-only or addressed, never just to unblock a merge.
 - Releases and tags need owner approval. Release text and artifacts must not reference private infrastructure, hostnames, personal paths, or internal tooling (`RELEASING.md`, `scripts/check-release-text.sh`).
 

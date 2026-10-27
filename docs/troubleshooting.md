@@ -1,16 +1,25 @@
 # Troubleshooting
 
-Each section starts with what the report says.
+Each section starts with what the report says. For a tool that is not installed, run `sc doctor` in the project: it lists every missing tool with its install command.
 
 ## `tests: pytest is not installed`
 
-When the project has `uv.lock` or a `.venv` directory, `sc` runs `uv run --extra dev --with pytest-cov pytest`. If `uv` itself is not installed, the finding says `uv is not installed`. Install `uv`, then create the environment once:
+When the project has `uv.lock` or a `.venv` directory, `sc` runs `uv run --extra dev --with pytest-cov pytest`. If `uv` itself is not installed, the finding says `uv is not installed`. Run `sc doctor` to check the runner. If uv is missing, install it with `python3 -m pip install uv`, then create the environment once:
 
 ```bash
 uv venv && uv pip install -e ".[dev]"
 ```
 
-or activate your own virtualenv, with pytest installed, before running `sc`.
+For projects without `uv.lock` or `.venv`, install pytest with `python3 -m pip install pytest`.
+
+## `test.failed` names a missing library, font, or tool
+
+The test failed because its runner environment did not provide a dependency. Install
+that dependency in CI. For a platform-specific test, mark it with `#[ignore]` or
+gate it behind a feature, then run it in a dedicated job on a runner that provides
+the dependency. Scorecard keeps the failure visible and points the suggested action
+at the test environment when the panic says a dependency could not be loaded, is
+not installed, or must be provided.
 
 ## Coverage not measured
 
@@ -19,7 +28,7 @@ The `crap` gate shows `advisory` with `some functions have no coverage record an
 | Pack | Install |
 |---|---|
 | Rust | `rustup component add llvm-tools && cargo install cargo-llvm-cov` |
-| Python | `pytest-cov` (added automatically when `sc` runs tests through `uv`) |
+| Python | `python3 -m pip install pytest-cov` or `python3 -m pip install coverage`; uv supplies coverage tools automatically for uv projects. `sc doctor` checks these when a suite exists and coverage is enabled. |
 | Node | `c8` |
 | Go | nothing; uses `go test -coverprofile` |
 | Bash | `kcov` |
@@ -36,6 +45,14 @@ When `analyzer.toml` sets `toolchain`, Cargo check, test, coverage, and lint use
 
 ```bash
 rustup default stable
+```
+
+## `ignoring N macOS metadata file(s)`
+
+Copying a project through a non-Mac volume or archive leaves AppleDouble (`._*`) and `.DS_Store` files. `sc` skips them, but `pytest`, `cargo`, and other tools can read them and fail or time out. Delete them:
+
+```bash
+find . \( -name '._*' -o -name .DS_Store \) -type f -delete
 ```
 
 ## `several language packs match (rust, node)`
@@ -75,7 +92,8 @@ The import is not declared in `pyproject.toml`, `requirements.txt`, `setup.cfg`,
 | `config.invalid` | Fix `analyzer.toml` at the path in the message, for example an unknown gate in `fail_on` |
 | Several language packs match | See [above](#several-language-packs-match-rust-node) |
 | A required toolchain is missing | Install the compiler for the pack, or use the `scorecard-tools` image ([packs](packs.md)) |
-| Compile or tests timed out | Raise `--budget-seconds` (default 120) |
+| `<command> timed out after Ns` | The finding names the command, how long it ran, and the last stderr lines. Run that command in the project to see what it waits on, then raise `--budget-seconds` (default 120) if it only needs more time |
+| `<command> did not run: earlier steps used the whole analysis budget` | The command never started. Check the report's runs for the earlier step that used the budget, then re-run with the larger `--budget-seconds` value suggested in the finding. No command duration or stderr is reported for an unstarted step |
 
 ## A config change has no effect
 

@@ -2,6 +2,8 @@
 
 ```text
 sc analyze [PATH] [OPTIONS]
+sc doctor [PATH] [--pack PACK]
+sc tui [PATH] [--inline]    # requires the tui Cargo feature
 sc config path
 sc config init [--force]
 sc setup
@@ -32,7 +34,40 @@ sc help [COMMAND]
 
 While analysis runs, a spinner with the current step and elapsed time animates on stderr when it is a terminal (silent when piped, in CI, with `TERM=dumb`, or from `sc-mcp`); stdout is unchanged, so JSON/SARIF pipes are unaffected. `NO_COLOR` preserves this uncolored progress display, including step and elapsed-time updates during tests and coverage. Use `--quiet` to hide progress.
 
+`sc analyze` skips macOS AppleDouble (`._*`) and `.DS_Store` files in every engine's file walk and writes one stderr line with the count, the first file, and the `find` command that deletes them ([troubleshooting](../troubleshooting.md#ignoring-n-macos-metadata-files)). Test runners and build tools can still read these files and fail.
+
+When a report has more than eight findings, pretty output groups findings that need a fix by rule and suggested action. It shows the five most frequent fix types first, then the findings list. The complete report remains in `.sc/last-scorecard.json` or the path passed to `--out`.
+
 Command-line flags override the matching config keys.
+
+## sc tui
+
+Available only in builds with the `tui` Cargo feature. `PATH` is a project directory,
+defaulting to `.`. Reads `PATH/.sc/last-scorecard.json` without running analysis or changing files.
+Full-screen mode requires interactive stdin and stdout. `--inline` prints a summary without
+entering the alternate screen or reading input. It shows up to eight gates and five findings,
+then counts the remaining items. Redirected output is plain text. Exits 0 after displaying
+the saved report, including a failing report. Exits 2 for a missing or invalid report,
+noninteractive full-screen input/output, terminal setup failure, or output failure.
+
+The gate rail shows PASS, FAIL, or REPORT for advisory failures. Tabs show the total
+findings count and the number of engines that ran. The status bar shows the saved verdict.
+The Findings table renders only visible rows and shows the selected finding message.
+Existing files inside the project have OSC 8 links with escaped `file:` URIs and `#L<line>`
+fragments when a positive line number is saved. Terminals decide how to open these links.
+Missing files, directories, control-character paths, and paths or symlinks outside the
+project stay plain text. Inline mode emits links only on a terminal with a non-dumb `TERM`.
+
+| Key | Action |
+|---|---|
+| Up/Down, `k`/`j` | Select a finding on Findings, otherwise a gate |
+| Home/End | Select the first/last finding or gate |
+| PageUp/PageDown | Move one visible page on Findings |
+| Tab/Shift+Tab, Right/Left, `l`/`h` | Cycle tabs |
+| `q`, Ctrl+C | Quit and restore the terminal |
+
+The initial terminal size sets the layout. Reopen after resizing. Below 60 columns or
+12 rows, the browser shows a size hint. See [Browse a saved analysis](../how-to/tui.md).
 
 ## sc config
 
@@ -43,6 +78,24 @@ Print or create `~/.config/sc/analyzer.toml`. See [Configure](../how-to/config.m
 | `sc config path` | Print the user config path. |
 | `sc config init` | Create `~/.config/sc` if needed and write a starter from `analyzer.toml.example`. Does not replace an existing file. |
 | `sc config init --force` | Replace an existing file. |
+
+## sc doctor
+
+Lists the tools the project's language pack needs, marks each `ok` or missing, and prints the install command for every missing one. A missing required tool is one an enforced gate cannot run without; a missing optional tool only disables an extra check. Requirements follow the tree: `cc` is required only with `.c` files and `g++` only with C++ files, `pytest` only with a pytest suite, and `uv` is required to run a pytest suite in a project with `uv.lock` or `.venv`, even when system pytest is installed. With a suite and coverage enabled, doctor also checks for `pytest-cov` or `coverage.py`; uv supplies these automatically for uv projects. Elsewhere, either installed coverage tool is enough. `uv` can also supply `ruff`. The pack comes from the same detection as `sc analyze`, including `pack` in `analyzer.toml`. When several manifests match, `sc doctor` stops like `sc analyze` does; pass `--pack`. Install commands use `brew` on macOS and `apt-get` where it exists; otherwise they give the Debian package name.
+
+| Exit | Meaning |
+|---|---|
+| `0` | Every required tool is present. |
+| `1` | A required tool is missing. |
+| `2` | No pack matches the path, several packs match, or `--pack` is unknown. |
+
+```text
+$ sc doctor
+rust pack
+  ok        cargo
+  MISSING   clippy (required, used for lint)
+            install: rustup component add clippy
+```
 
 ## sc setup
 

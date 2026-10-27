@@ -3,13 +3,14 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(not(windows))]
 use std::process::Command;
 
 pub fn run() -> i32 {
-    let home = match std::env::var_os("HOME") {
-        Some(home) => PathBuf::from(home),
+    let home = match sc_core::user_profile_dir() {
+        Some(home) => home,
         None => {
-            eprintln!("HOME is not set");
+            eprintln!("{}", sc_core::PROFILE_UNSET);
             return 2;
         }
     };
@@ -202,7 +203,11 @@ fn json_escape(text: &str) -> String {
 
 #[inline(never)]
 fn mcp_bin() -> Option<PathBuf> {
-    let name = "sc-mcp";
+    let name = if cfg!(windows) {
+        "sc-mcp.exe"
+    } else {
+        "sc-mcp"
+    };
     if let Some(path) = which(name) {
         return Some(path);
     }
@@ -212,8 +217,8 @@ fn mcp_bin() -> Option<PathBuf> {
             return Some(sibling);
         }
     }
-    if let Some(home) = std::env::var_os("HOME") {
-        let cargo = PathBuf::from(home).join(".cargo/bin").join(name);
+    if let Some(home) = sc_core::user_profile_dir() {
+        let cargo = home.join(".cargo/bin").join(name);
         if cargo.is_file() {
             return Some(cargo);
         }
@@ -221,6 +226,15 @@ fn mcp_bin() -> Option<PathBuf> {
     None
 }
 
+#[cfg(windows)]
+fn which(name: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(name))
+        .find(|candidate| candidate.is_file())
+}
+
+#[cfg(not(windows))]
 fn which(name: &str) -> Option<PathBuf> {
     let output = Command::new("sh")
         .args(["-c", &format!("command -v {name}")])

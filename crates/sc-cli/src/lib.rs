@@ -3,12 +3,16 @@
 //!
 //! User-facing analyze output is the scorecard, rendered as JSON and/or Markdown.
 
+mod console;
+mod doctor;
 mod format;
 mod pretty;
 mod progress;
 mod report;
 mod setup;
 mod skills;
+#[cfg(feature = "tui")]
+mod tui;
 mod user_config;
 
 use std::fs;
@@ -21,7 +25,7 @@ use sc_core::{
     apply_disposition, compute_scores, load_config_file, normalize_gates, resolve_config_path,
     Finding, Gate, Scorecard, SCORECARD_VERSION,
 };
-use sc_engines::{analyze_with_generated_paths, AnalyzeRequest, RunStatus};
+use sc_engines::{analyze_with_generated_paths, os_metadata_warning, AnalyzeRequest, RunStatus};
 
 pub use format::{to_json, to_markdown};
 use report::to_html;
@@ -106,8 +110,25 @@ enum ConfigCmd {
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum Commands {
+    /// Browse a saved scorecard in an interactive terminal.
+    #[cfg(feature = "tui")]
+    Tui {
+        /// Project directory containing .sc/last-scorecard.json. Defaults to `.`.
+        path: Option<PathBuf>,
+        /// Print a compact saved summary without entering the alternate screen.
+        #[arg(long)]
+        inline: bool,
+    },
     /// Analyze a project tree and print a scorecard.
     Analyze(AnalyzeArgs),
+    /// List the tools the project's language pack needs and how to install the missing ones.
+    Doctor {
+        /// Project directory. Defaults to `.`.
+        path: Option<PathBuf>,
+        /// Pack to check when several manifests match: rust, node, python, bash, go, java, csharp, php, cpp, or web.
+        #[arg(long, value_name = "PACK")]
+        pack: Option<String>,
+    },
     /// Print or create ~/.config/sc/analyzer.toml.
     Config {
         #[command(subcommand)]
@@ -143,19 +164,27 @@ fn stdout_body_format(stdout_format: &str, has_out: bool, _tty: bool) -> &str {
 }
 
 pub fn run() -> i32 {
+    // Enable VT sequences before any pretty / spinner output. Pipes and
+    // rejected consoles return false; color then stays plain unless forced.
+    let _vt = console::enable_console_vt();
     let cli = Cli::parse();
     match cli.command {
+        Commands::Doctor { path, pack } => doctor::run(path, pack),
+        #[cfg(feature = "tui")]
+        Commands::Tui { path, inline } => {
+            tui::run(path.as_deref().unwrap_or_else(|| Path::new(".")), inline)
+        }
         Commands::Setup => setup::run(),
         Commands::Skills { command } => skills::run(command),
         Commands::Config { command } => match command {
             ConfigCmd::Path => user_config::run_path(),
             ConfigCmd::Init { force } => user_config::run_init(force),
         },
-        Commands::Analyze(args) => analyze_cmd(args),
+        Commands::Analyze(args) => analyze_cmd(args, _vt),
     }
 }
 
-fn analyze_cmd(args: AnalyzeArgs) -> i32 {
+fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
     let AnalyzeArgs {
         path,
         format,
@@ -176,11 +205,14 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
     let tty = io::IsTerminal::is_terminal(&io::stdout());
     let stdout_format = pretty::stdout_format(format.as_deref(), tty);
     let file_format = format.unwrap_or_else(|| "json".to_string());
+    // Color needs a TTY that accepted VT (Unix always accepts). CLICOLOR_FORCE
+    // still wins inside use_color when set to something other than "0".
+    let color_tty = tty && vt_ready;
     let view = View {
         stdout_format,
         file_format: &file_format,
         color: pretty::use_color(
-            tty,
+            color_tty,
             std::env::var_os("NO_COLOR").is_some(),
             std::env::var("CLICOLOR_FORCE").ok().as_deref(),
             std::env::var("CLICOLOR").ok().as_deref(),
@@ -292,6 +324,13 @@ fn analyze_cmd(args: AnalyzeArgs) -> i32 {
         },
         None => Vec::new(),
     };
+    if let Some(warning) = os_metadata_warning(
+        &root,
+        &loaded.scope.exclude,
+        &loaded.scope.include_generated,
+    ) {
+        let _ = writeln!(io::stderr(), "{warning}");
+    }
     let generated_paths = generated_output_paths(&root, out.as_deref(), &file_format);
     // The spinner animates on stderr only; stdout stays byte-identical.
     // It starts just before the long analysis run and is cleared before
