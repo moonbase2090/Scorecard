@@ -127,7 +127,13 @@ jobs:
           targets: x86_64-pc-windows-msvc
       - name: Build
         shell: bash
-        run: cargo build --release --locked -p sc-cli -p sc-mcp --target x86_64-pc-windows-msvc
+        run: |
+          # Strip the runner's Cargo home and checkout paths from the binaries,
+          # as the Linux and macOS jobs do. Otherwise the panic-location strings
+          # embed C:\Users\runneradmin\.cargo and fail the release-text check.
+          cargo_home="${CARGO_HOME:-$USERPROFILE/.cargo}"
+          export RUSTFLAGS="--remap-path-prefix=$(cygpath -m "$cargo_home")=/cargo --remap-path-prefix=$(cygpath -w "$cargo_home")=/cargo --remap-path-prefix=$(cygpath -m "$GITHUB_WORKSPACE")=/src/scorecard --remap-path-prefix=$(cygpath -w "$GITHUB_WORKSPACE")=/src/scorecard"
+          cargo build --release --locked -p sc-cli -p sc-mcp --target x86_64-pc-windows-msvc
       - name: Package
         shell: bash
         run: |
