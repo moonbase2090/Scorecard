@@ -28,7 +28,7 @@ jobs:
   # Manual proof lane for the Windows release zip. This dispatch uses no tag
   # and does not call the release workflow's publish job.
   check-windows-release:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/windows-zip'
+    if: github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     timeout-minutes: 45
     permissions:
@@ -44,7 +44,7 @@ jobs:
       - name: Package and verify
         shell: bash
         run: |
-          version="$(cargo pkgid -p sc-cli | sed 's/.*@//')"
+          version="$(cargo pkgid -p sc-cli | sed 's/.*[#@]//')"
           bash scripts/package-windows-release.sh "$version"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
