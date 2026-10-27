@@ -76,6 +76,7 @@
   "findings": [
     {
       "id": "crap:src/parse.rs:parse_input",
+      "fingerprint": "7b1bf0c819bd34cb8d881e60d12bbfd0d56e9c901c9b6a2bc22678b2879a66c9",
       "rule": "crap.over_threshold",
       "engine": "crap",
       "severity": "error",

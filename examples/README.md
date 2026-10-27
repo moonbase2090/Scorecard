@@ -102,6 +102,16 @@ test.failed | warning
 
 The failing test is level `warning` in SARIF, so GitHub code scanning does not count it as a security vulnerability. Only `secrets.*` findings are level `error`. The JSON report still gives `test.failed` severity `error`, and the tests gate still fails the run.
 
+## Finding fingerprints
+
+JSON findings and MCP scorecards include a stable fingerprint. SARIF results expose the same value as `partialFingerprints.primaryLocationLineHash`:
+
+```bash
+sc analyze testdata/failing_test --format sarif | jq -r '.runs[0].results[] | "\(.ruleId) | \(.partialFingerprints.primaryLocationLineHash)"'
+```
+
+The SHA-256 value uses the rule, normalized project-relative path, optional symbol, and whitespace-normalized finding message. It does not include source line numbers.
+
 ## PEM keys in source files
 
 The secrets scan reports `secrets.private_key` when PEM markers and key material are split across string lines. It handles Go and Java concatenation, backtick strings, Python string prefixes, and YAML lists.

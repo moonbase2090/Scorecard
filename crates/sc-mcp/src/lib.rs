@@ -258,11 +258,13 @@ mod tests {
         std::fs::create_dir_all(dir.join(".sc")).unwrap();
         std::fs::write(
             dir.join(".sc/last-scorecard.json"),
-            r#"{"id":"abc","findings":[{"id":"f1","severity":"error","message":"boom","suggested_action":"fix"}]}"#,
+            r#"{"id":"abc","findings":[{"id":"f1","fingerprint":"stable-fingerprint","severity":"error","message":"boom","suggested_action":"fix"}]}"#,
         )
         .unwrap();
         let listed = list_findings(&dir, &json!({"severity": "error"})).unwrap();
         assert!(listed.contains("f1"));
+        let listed: Value = serde_json::from_str(&listed).unwrap();
+        assert_eq!(listed[0]["fingerprint"], "stable-fingerprint");
         let explained = explain(&dir, &json!({"finding_id": "f1"})).unwrap();
         assert!(explained.contains("boom"));
         assert!(list_findings(&dir, &json!({"scorecard_id": "nope"})).is_err());

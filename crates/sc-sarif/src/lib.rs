@@ -96,6 +96,9 @@ fn result(finding: &Finding) -> Value {
         "ruleId": finding.rule,
         "level": level,
         "message": {"text": finding.message},
+        "partialFingerprints": {
+            "primaryLocationLineHash": finding.fingerprint(),
+        },
         "locations": [location],
     })
 }
@@ -138,6 +141,12 @@ mod tests {
         let text = to_sarif(&card);
         assert!(text.contains("\"version\": \"2.1.0\""));
         assert!(text.contains("secrets.github_token"));
+        let value: Value = serde_json::from_str(&text).unwrap();
+        let fingerprint = value["runs"][0]["results"][0]["partialFingerprints"]
+            ["primaryLocationLineHash"]
+            .as_str()
+            .unwrap();
+        assert_eq!(fingerprint.len(), 64);
     }
 
     #[test]
