@@ -36,6 +36,8 @@ While analysis runs, a spinner with the current step and elapsed time animates o
 
 `sc analyze` skips macOS AppleDouble (`._*`) and `.DS_Store` files in every engine's file walk and writes one stderr line with the count, the first file, and the `find` command that deletes them ([troubleshooting](../troubleshooting.md#ignoring-n-macos-metadata-files)). Test runners and build tools can still read these files and fail.
 
+When a report has more than eight findings, pretty output groups findings that need a fix by rule and suggested action. It shows the five most frequent fix types first, then the findings list. The complete report remains in `.sc/last-scorecard.json` or the path passed to `--out`.
+
 Command-line flags override the matching config keys.
 
 ## sc tui
