@@ -11,6 +11,10 @@ import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
 CHECK = ROOT / "scripts/check-attribution.py"
+import importlib.util
+_spec = importlib.util.spec_from_file_location("check_attribution", CHECK)
+check = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(check)
 BASE = "a" * 40
 HEAD = "b" * 40
 MERGED = "c" * 40
@@ -145,6 +149,23 @@ class AttributionTests(unittest.TestCase):
         path.write_text("Bump serde_json\n\n" + allowed + "\n")
         result = self.run_cli("message", str(path))
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+
+    def test_historical_exemptions_cover_only_the_exact_commit(self):
+        exempt = next(iter(check.HISTORICAL_EXEMPT))
+        bad = "Fix a regression\n\nCo-authored-by: MB2090 <322824348+mb2090@users.noreply.github.com>"
+        self.data = fixture([commit(exempt, bad), commit(HEAD)])
+        result = self.pr()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        other = "c" * 40
+        self.data = fixture([commit(other, bad), commit(HEAD)])
+        result = self.pr()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("prohibited attribution", result.stderr)
+
+    def test_historical_exemption_list_is_exact_shas(self):
+        self.assertEqual(len(check.HISTORICAL_EXEMPT), 14)
+        for sha in check.HISTORICAL_EXEMPT:
+            self.assertRegex(sha, r"^[0-9a-f]{40}$")
 
     def test_historical_squash_message_is_rejected(self):
         result = self.run_cli("message", str(ROOT / "scripts/fixtures/attribution/squash-message.txt"))
