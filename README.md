@@ -62,7 +62,7 @@ While analysis runs, an interactive terminal shows the current step and elapsed 
 In a terminal the report looks like this (from `testdata/good_crate`):
 
 ```text
-sc 0.1.11  testdata/good_crate  rust  5ac851c clean  scope tree
+sc 0.1.12  testdata/good_crate  rust  5ac851c clean  scope tree
 
 PASS
 
