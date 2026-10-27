@@ -108,6 +108,44 @@ class AttributionTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("PASS: message", result.stdout)
 
+    def test_dependabot_bot_trailer_is_allowed_only_on_pr_commits(self):
+        allowed = "Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>"
+        self.data = fixture([commit(HEAD, "Bump serde_json\n\n" + allowed)])
+        result = self.pr()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        lookalikes = [
+            allowed.replace("49699333", "12345678"),
+            allowed.replace("dependabot[bot]", "dependabot[bot]x"),
+            allowed + " trailing words",
+            "Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.example.com>",
+            "Co-authored-by: someone <49699333+dependabot[bot]@users.noreply.github.com>",
+            "Co-authored-by: dependabot[bot]",
+        ]
+        for message in lookalikes:
+            with self.subTest(commit=message):
+                self.data = fixture([commit(HEAD, "Bump serde_json\n\n" + message)])
+                result = self.pr()
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("prohibited attribution", result.stderr)
+        for label, data in [
+            ("PR body", {"pr": {"body": allowed}}),
+            ("PR title", {"pr": {"title": allowed}}),
+        ]:
+            with self.subTest(surface=label):
+                self.data = fixture()
+                self.data["pr"].update(data["pr"])
+                result = self.pr()
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("prohibited attribution", result.stderr)
+        self.data = fixture()
+        result = self.merge(payload(commit_message=allowed))
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("prohibited attribution", result.stderr)
+        path = self.root / "message.txt"
+        path.write_text("Bump serde_json\n\n" + allowed + "\n")
+        result = self.run_cli("message", str(path))
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+
     def test_historical_squash_message_is_rejected(self):
         result = self.run_cli("message", str(ROOT / "scripts/fixtures/attribution/squash-message.txt"))
         self.assertEqual(result.returncode, 1, result.stderr)

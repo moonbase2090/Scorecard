@@ -18,6 +18,13 @@ CREDITS = re.compile(
     r"^[ \t]*(?:🤖[ \t]*)?(?:generated|written|authored|assisted)[ \t]+(?:by|with)\b",
     re.IGNORECASE,
 )
+# Dependabot's own co-author line on its merged commits. It names a bot
+# identity, not AI attribution, so this exact full-line shape is allowed.
+BOT_TRAILER = re.compile(
+    r"^[ \t]*co-authored-by:[ \t]*dependabot\[bot\] "
+    r"<49699333\+dependabot\[bot\]@users\.noreply\.github\.com>[ \t]*$",
+    re.IGNORECASE,
+)
 SHA = re.compile(r"[0-9a-f]{40}")
 REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 
@@ -26,8 +33,10 @@ class CheckError(Exception):
     pass
 
 
-def check_message(text, label):
+def check_message(text, label, allow_bot_trailer=False):
     for number, line in enumerate(text.splitlines(), 1):
+        if allow_bot_trailer and BOT_TRAILER.match(line):
+            continue
         if TRAILERS.match(line) or CREDITS.match(line):
             # Do not echo untrusted message text or workflow commands to logs.
             raise CheckError(
@@ -115,7 +124,7 @@ def check_pr(repository, number, expected_head):
             if oid in seen or not isinstance(message, str):
                 raise CheckError("duplicate commit or missing message; retry the check")
             seen.add(oid)
-            check_message(message, f"commit {oid}")
+            check_message(message, f"commit {oid}", allow_bot_trailer=True)
     if len(seen) != count or head not in seen:
         raise CheckError("incomplete commit pagination; rerun the check")
     if snapshot(api(endpoint), expected_head) != before:
