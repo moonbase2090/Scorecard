@@ -22,7 +22,7 @@ CREDITS = re.compile(
 # identity, not AI attribution, so this exact full-line shape is allowed.
 BOT_TRAILER = re.compile(
     r"^[ \t]*co-authored-by:[ \t]*dependabot\[bot\] "
-    r"<[0-9]+\+dependabot\[bot\]@users\.noreply\.github\.com>[ \t]*$",
+    r"<49699333\+dependabot\[bot\]@users\.noreply\.github\.com>[ \t]*$",
     re.IGNORECASE,
 )
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -33,9 +33,9 @@ class CheckError(Exception):
     pass
 
 
-def check_message(text, label):
+def check_message(text, label, allow_bot_trailer=False):
     for number, line in enumerate(text.splitlines(), 1):
-        if BOT_TRAILER.match(line):
+        if allow_bot_trailer and BOT_TRAILER.match(line):
             continue
         if TRAILERS.match(line) or CREDITS.match(line):
             # Do not echo untrusted message text or workflow commands to logs.
@@ -124,7 +124,7 @@ def check_pr(repository, number, expected_head):
             if oid in seen or not isinstance(message, str):
                 raise CheckError("duplicate commit or missing message; retry the check")
             seen.add(oid)
-            check_message(message, f"commit {oid}")
+            check_message(message, f"commit {oid}", allow_bot_trailer=True)
     if len(seen) != count or head not in seen:
         raise CheckError("incomplete commit pagination; rerun the check")
     if snapshot(api(endpoint), expected_head) != before:
