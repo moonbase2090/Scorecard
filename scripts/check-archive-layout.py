@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
-"""Fail if a release .tar.gz does not use the nested sc-vX.Y.Z-<target>/ layout."""
+"""Fail if a release .tar.gz or .zip does not use the nested sc-vX.Y.Z-<target>/ layout."""
 from __future__ import annotations
 
 import argparse
 import sys
 import tarfile
+import zipfile
 from pathlib import Path
 
 REQUIRED = frozenset({"sc", "sc-mcp", "LICENSE", "README.md"})
+REQUIRED_ZIP = frozenset({"sc.exe", "sc-mcp.exe", "LICENSE", "README.md"})
 
 
 def validate(archive: Path) -> tuple[bool, str]:
-    with tarfile.open(archive, "r:gz") as tf:
-        names = [n for n in tf.getnames() if n and n != "."]
+    if archive.suffix == ".zip":
+        required = REQUIRED_ZIP
+        with zipfile.ZipFile(archive) as zf:
+            names = [n.rstrip("/") for n in zf.namelist() if n.rstrip("/")]
+    else:
+        required = REQUIRED
+        with tarfile.open(archive, "r:gz") as tf:
+            names = [n for n in tf.getnames() if n and n != "."]
     if not names:
         return False, "archive is empty"
     prefix: str | None = None
@@ -42,7 +50,7 @@ def validate(archive: Path) -> tuple[bool, str]:
             found.add(parts[1])
     if prefix is None:
         return False, "no sc-v* bundle directory in archive"
-    missing = REQUIRED - found
+    missing = required - found
     if missing:
         return False, f"missing under {prefix}/: {', '.join(sorted(missing))}"
     return True, f"ok ({prefix}, {len(names)} entries)"
