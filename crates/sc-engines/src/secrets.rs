@@ -584,7 +584,8 @@ mod tests {
             let findings = secrets_in_text(text, "src/lib.rs");
             assert!(
                 findings.is_empty(),
-                "should ignore placeholder in {text:?}, got {findings:?}"
+                "should ignore placeholder, got {:?}",
+                rule_names(&findings)
             );
         }
     }
@@ -612,7 +613,7 @@ mod tests {
         ];
         for (text, rule) in cases {
             let findings = secrets_in_text(&text, "notes.txt");
-            assert_eq!(findings.len(), 1, "{text:?} got {findings:?}");
+            assert_eq!(findings.len(), 1, "got {:?}", rule_names(&findings));
             assert_eq!(findings[0].rule, rule);
         }
     }
@@ -683,7 +684,7 @@ mod tests {
             let token = format!("{prefix}{}", mixed_tail(36));
             let text = format!("TOKEN = \"{token}\"\n");
             let findings = secrets_in_text(&text, "app.py");
-            assert_eq!(findings.len(), 1, "{prefix} {findings:?}");
+            assert_eq!(findings.len(), 1, "{prefix} {:?}", rule_names(&findings));
             assert_eq!(findings[0].rule, "secrets.github_token");
             assert_eq!(findings[0].span.as_ref().unwrap().start_col, 10);
             let short = format!("{prefix}{}", mixed_tail(34));
@@ -701,7 +702,7 @@ mod tests {
             assert_eq!(id.len(), 20, "{prefix}");
             let text = format!("aws_access_key_id = \"{id}\"\n");
             let findings = secrets_in_text(&text, "config.env");
-            assert_eq!(findings.len(), 1, "{prefix} {findings:?}");
+            assert_eq!(findings.len(), 1, "{prefix} {:?}", rule_names(&findings));
             assert_eq!(findings[0].rule, "secrets.aws_access_key");
             assert!(findings[0].message.contains("AWS access key id"));
         }
@@ -768,7 +769,7 @@ mod tests {
             let body = mixed_tail(tail_len);
             let line = format!("STRIPE={prefix}{body}");
             let findings = secrets_in_text(&line, "config.env");
-            assert_eq!(findings.len(), 1, "{prefix} {findings:?}");
+            assert_eq!(findings.len(), 1, "{prefix} {:?}", rule_names(&findings));
             assert_eq!(findings[0].rule, "secrets.stripe_key");
             assert_eq!(
                 findings[0].span.as_ref().unwrap().start_col as usize,
@@ -951,7 +952,12 @@ mod tests {
                 super::pem_end()
             );
             let findings = secrets_in_text(&text, "src/key.py");
-            assert_eq!(findings.len(), 1, "prefix {prefix}: {findings:?}");
+            assert_eq!(
+                findings.len(),
+                1,
+                "prefix {prefix}: {:?}",
+                rule_names(&findings)
+            );
             assert_eq!(findings[0].rule, "secrets.private_key");
         }
     }
