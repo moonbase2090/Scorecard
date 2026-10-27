@@ -26,12 +26,11 @@ BOT_TRAILER = re.compile(
     re.IGNORECASE,
 )
 # Historical commits on develop that predate this rule and cannot be rewritten.
+# Dependabot merges are not listed: their bot co-author trailer is allowed by
+# BOT_TRAILER, so they need no exemption.
 # Each exemption is one exact, immutable commit; a message change produces a
 # different SHA and is checked normally. Do not add entries for new work.
 HISTORICAL_EXEMPT = {
-    "a79e0036d3a7b6ba21ba739fa8be47e450fb8981": "Dependabot merge: bot co-author trailer: chore(deps): bump serde_json from 1.0.151 to 1.0.154 in the ",
-    "b2d9abc29132d11d30d0d1711acf634a56850e59": "Dependabot merge: bot co-author trailer: chore(deps): bump the minor-patch group across 1 directory w",
-    "c9a22db4492978b0e8bef0e3c45e267ad3a0aa97": "Dependabot merge: bot co-author trailer: chore(deps): bump Swatinem/rust-cache from 2.9.2 to 2.9.3 in",
     "06819e233e76748bd1f9328f852ef75283917a39": "agents-bot squash merge: owner co-author trailer from merge tooling: Add staged Rust formatting hook (#274)",
     "10a64591c70afeb9e527d31fb8a045639d4f59d6": "agents-bot squash merge: owner co-author trailer from merge tooling: Gate terminal browser snapshots and frame times (#310)",
     "4f3b58e46ea25853b8c5de4e48490582955f66f0": "agents-bot squash merge: owner co-author trailer from merge tooling: Add an opt-in saved-report terminal browser (#290)",
