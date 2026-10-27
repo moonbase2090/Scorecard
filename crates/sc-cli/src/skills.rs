@@ -60,8 +60,8 @@ pub(crate) fn run(command: SkillsCommand) -> i32 {
 }
 
 fn run_install(args: InstallArgs) -> i32 {
-    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
-        eprintln!("HOME is not set; cannot resolve agent skill locations.");
+    let Some(home) = sc_core::user_profile_dir() else {
+        eprintln!("{}", sc_core::PROFILE_UNSET);
         return 2;
     };
     let config_home = config_home(&home);
@@ -271,7 +271,7 @@ fn automatic_install_opt_out(home: &Path, env_opt_out: bool) -> Option<String> {
 }
 
 fn version_file(home: &Path) -> PathBuf {
-    home.join(".config").join("sc").join(VERSION_FILE)
+    sc_core::user_config_dir(home).join(VERSION_FILE)
 }
 
 fn version_matches(path: &Path) -> bool {

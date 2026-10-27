@@ -113,7 +113,7 @@ Unknown config keys are ignored. Check spelling against the config reference bef
 
 ## Environment variables
 
-- `HOME` locates user config and agent skill destinations.
+- `HOME` locates user config and agent skill destinations. On Windows, `USERPROFILE` is used when `HOME` is not set, and user config and the skill version stamp live in `%APPDATA%\sc` (`<profile>\AppData\Roaming\sc` when `APPDATA` is not set).
 - `XDG_CONFIG_HOME` locates Muse configuration for Muse detection; defaults to `~/.config`.
 - `PATH` is used to detect agent CLIs and project tools.
 - `SCORECARD_NO_AGENT_SKILLS=1` disables automatic detected-agent installation.

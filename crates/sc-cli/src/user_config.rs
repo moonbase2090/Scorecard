@@ -42,7 +42,7 @@ pub fn run_path() -> i32 {
         }
         None => {
             eprintln!(
-                "HOME is not set, so ~/.config/sc/analyzer.toml cannot be resolved. Set HOME and re-run `sc config path`."
+                "{} So the user config path cannot be resolved. Set it and re-run `sc config path`.", sc_core::PROFILE_UNSET
             );
             1
         }
@@ -52,7 +52,8 @@ pub fn run_path() -> i32 {
 pub fn run_init(force: bool) -> i32 {
     let Some(path) = sc_core::user_config_path() else {
         eprintln!(
-            "HOME is not set, so ~/.config/sc/analyzer.toml cannot be created. Set HOME and re-run `sc config init`."
+            "{} So the user config cannot be created. Set it and re-run `sc config init`.",
+            sc_core::PROFILE_UNSET
         );
         return 1;
     };
