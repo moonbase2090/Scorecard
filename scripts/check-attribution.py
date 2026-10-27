@@ -18,6 +18,13 @@ CREDITS = re.compile(
     r"^[ \t]*(?:🤖[ \t]*)?(?:generated|written|authored|assisted)[ \t]+(?:by|with)\b",
     re.IGNORECASE,
 )
+# Dependabot's own co-author line on its merged commits. It names a bot
+# identity, not AI attribution, so this exact full-line shape is allowed.
+BOT_TRAILER = re.compile(
+    r"^[ \t]*co-authored-by:[ \t]*dependabot\[bot\] "
+    r"<[0-9]+\+dependabot\[bot\]@users\.noreply\.github\.com>[ \t]*$",
+    re.IGNORECASE,
+)
 SHA = re.compile(r"[0-9a-f]{40}")
 REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 
@@ -28,6 +35,8 @@ class CheckError(Exception):
 
 def check_message(text, label):
     for number, line in enumerate(text.splitlines(), 1):
+        if BOT_TRAILER.match(line):
+            continue
         if TRAILERS.match(line) or CREDITS.match(line):
             # Do not echo untrusted message text or workflow commands to logs.
             raise CheckError(
