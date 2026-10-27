@@ -158,6 +158,11 @@ fn finding_from(root: &Path, failure: TestFailure) -> Finding {
         Some(location) => serde_json::json!({ "test": name, "panic_at": location }),
         None => serde_json::json!({ "test": name }),
     };
+    let suggested_action = if names_missing_environment_dependency(&failure.detail) {
+        "Check the test environment for the missing library, font, or tool; install it in CI, or run the environment-dependent test in a dedicated job."
+    } else {
+        "Fix the failing test or the behavior it checks"
+    };
     Finding {
         id: format!("test:{file}:{name}"),
         rule: "test.failed".into(),
@@ -168,9 +173,21 @@ fn finding_from(root: &Path, failure: TestFailure) -> Finding {
         symbol: Some(name.clone()),
         message,
         evidence,
-        suggested_action: Some("Fix the failing test or the behavior it checks".into()),
+        suggested_action: Some(suggested_action.into()),
         disposition: String::new(),
     }
+}
+
+fn names_missing_environment_dependency(detail: &str) -> bool {
+    let detail = detail.to_ascii_lowercase();
+    [
+        "could not be loaded",
+        "not installed",
+        "must provide",
+        "must be provided",
+    ]
+    .iter()
+    .any(|phrase| detail.contains(phrase))
 }
 
 fn panic_outside_project(root: &Path, file: &str) -> bool {
@@ -491,5 +508,44 @@ boom
         assert!(!Path::new(&findings[0].file).is_absolute());
         assert_eq!(findings[0].evidence["panic_at"], registry);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn missing_environment_dependency_suggests_fixing_the_environment() {
+        let cases = [
+            "Library libfoo.so could not be loaded",
+            "cargo-llvm-cov is not installed",
+            "test environment must provide a CJK face",
+            "a CJK face must be provided by the test environment",
+        ];
+        for detail in cases {
+            let output = format!(
+                "test tests::needs_environment_dependency ... FAILED\n\n\
+                 thread 'tests::needs_environment_dependency' panicked at tests/fixture.rs:8:5:\n\
+                 {detail}\n"
+            );
+            let findings = test_findings(Path::new("."), &output, "", false);
+            assert_eq!(findings.len(), 1, "{output}");
+            assert_eq!(findings[0].rule, "test.failed", "{output}");
+            assert_eq!(
+                findings[0].suggested_action.as_deref(),
+                Some("Check the test environment for the missing library, font, or tool; install it in CI, or run the environment-dependent test in a dedicated job."),
+                "{output}"
+            );
+        }
+    }
+
+    #[test]
+    fn ordinary_test_failure_still_suggests_fixing_the_test() {
+        let output = "test tests::wrong_result ... FAILED\n\n\
+            thread 'tests::wrong_result' panicked at tests/fixture.rs:12:5:\n\
+            assertion `left == right` failed\n";
+        let findings = test_findings(Path::new("."), output, "", false);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].rule, "test.failed");
+        assert_eq!(
+            findings[0].suggested_action.as_deref(),
+            Some("Fix the failing test or the behavior it checks")
+        );
     }
 }
