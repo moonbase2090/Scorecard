@@ -133,7 +133,7 @@ Exit `0` means no selected gate failed. `--fail-on none` deliberately selects no
 
 Use `--format json` for automation, `--format pretty` for a terminal, `--format md` for a concise shareable report, `--format sarif` for GitHub code scanning, and `--format html --out report.html` for a self-contained browser report. Findings marked with disposition `fix` need attention; advisory findings may not affect the process exit.
 
-For MCP, `sc-mcp` exposes `analyze_paths`, `analyze_diff`, `list_findings`, and `explain`. After analysis, read `.sc/last-scorecard.json` or use the MCP report tools to inspect findings.
+For MCP, `sc-mcp` exposes `analyze_paths`, `analyze_diff`, `list_findings`, `explain`, `rerun_gate`, `doctor`, and `compare_to_baseline`. After analysis, read `.sc/last-scorecard.json` or use the MCP report tools to inspect findings.
 
 ## Workflows
 

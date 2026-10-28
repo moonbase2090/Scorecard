@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `sc-mcp` adds `rerun_gate` (one gate re-run with its findings), `doctor` (tools that could not run, with the fix), and `compare_to_baseline` (new and resolved findings against `.sc/baseline.json`) for agents (SC-39).
 - `sc export --waypoint` exports saved findings to Waypoint, grouped by file and symbol, with fingerprint-based retry deduplication.
 - On a terminal, `sc analyze` prints one line against the previous run: changed scores and new or resolved findings (SC-49).
 
