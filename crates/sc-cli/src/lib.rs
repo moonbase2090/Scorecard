@@ -25,6 +25,7 @@ use sc_core::{
     apply_disposition, compute_scores, load_config_file, normalize_gates, resolve_config_path,
     Finding, Gate, Scorecard, SCORECARD_VERSION,
 };
+use sc_core::{gates_failing_on_new_findings, Baseline, BASELINE_VERSION};
 use sc_engines::{analyze_with_generated_paths, os_metadata_warning, AnalyzeRequest, RunStatus};
 
 pub use format::{to_json, to_markdown};
@@ -58,6 +59,14 @@ struct AnalyzeArgs {
     /// Default: types,tests,crap,secrets,lint.
     #[arg(long, value_name = "LIST")]
     fail_on: Option<String>,
+    /// Write every finding's fingerprint to `.sc/baseline.json` in the project.
+    /// Run once on a clean or accepted state, then gate with `--baseline`.
+    #[arg(long, conflicts_with = "baseline")]
+    write_baseline: bool,
+    /// Exit 1 only when a failing gate fails on a finding not in `.sc/baseline.json`.
+    /// Known findings still appear in the report. Exits 2 when there is no baseline.
+    #[arg(long)]
+    baseline: bool,
     /// Pack override when several manifests match: rust, node, python, bash, go, java, csharp, php, cpp, web, or command.
     #[arg(long, value_name = "PACK")]
     pack: Option<String>,
@@ -149,6 +158,9 @@ struct View<'a> {
     color: bool,
     width: usize,
     tty: bool,
+    /// True when `--baseline` decides the exit code, so enforced failures
+    /// that the baseline covers are not reported as unexpected.
+    baseline: bool,
 }
 
 /// Pick what lands on stdout. With `--out`, print the short summary in
@@ -201,6 +213,8 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
         budget_seconds,
         config,
         quiet,
+        write_baseline,
+        baseline,
     } = args;
     let tty = io::IsTerminal::is_terminal(&io::stdout());
     let stdout_format = pretty::stdout_format(format.as_deref(), tty);
@@ -219,6 +233,7 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
         ),
         width: pretty::term_width(),
         tty,
+        baseline,
     };
     let path = path.unwrap_or_else(|| PathBuf::from("."));
     let repo = display_repo(&path);
@@ -259,6 +274,26 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
                 RunStatus::AnalyzerError,
             );
         }
+    };
+
+    let baseline_file = root.join(".sc").join("baseline.json");
+    let known = if baseline {
+        match read_baseline(&baseline_file) {
+            Ok(known) => Some(known),
+            Err(err) => {
+                let _ = writeln!(io::stderr(), "sc: {err}");
+                let card = early_card(&repo, "baseline.invalid", "baseline", &err);
+                return emit(
+                    &mut stdout,
+                    &view,
+                    out.as_deref(),
+                    &card,
+                    RunStatus::AnalyzerError,
+                );
+            }
+        }
+    } else {
+        None
     };
 
     let config_path = resolve_config_path(config.as_deref(), &root);
@@ -341,7 +376,7 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
     } else {
         None
     };
-    let output = analyze_with_generated_paths(
+    let mut output = analyze_with_generated_paths(
         AnalyzeRequest {
             root,
             repo,
@@ -361,6 +396,33 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
     );
     if let Some(spinner) = spinner {
         spinner.finish();
+    }
+    if write_baseline {
+        match write_baseline_file(&baseline_file, &output.scorecard.sections.findings) {
+            Ok(count) => {
+                let _ = writeln!(
+                    io::stderr(),
+                    "sc: wrote {count} finding fingerprints to {}",
+                    baseline_file.display()
+                );
+            }
+            Err(err) => {
+                let _ = writeln!(io::stderr(), "sc: {err}");
+                output.status = RunStatus::AnalyzerError;
+            }
+        }
+    }
+    if let Some(known) = &known {
+        if output.status == RunStatus::GateFailed
+            && gates_failing_on_new_findings(&output.scorecard, known).is_empty()
+        {
+            output.status = RunStatus::Passed;
+            let _ = writeln!(
+                io::stderr(),
+                "sc: exit 0: every failing gate fails only on findings in {}",
+                baseline_file.display()
+            );
+        }
     }
     emit(
         &mut stdout,
@@ -412,7 +474,7 @@ fn emit(
             .filter(|gate| gate.enforced && !gate.pass)
             .map(|gate| gate.id.as_str())
             .collect();
-        if !failed_enforced.is_empty() {
+        if !failed_enforced.is_empty() && !view.baseline {
             let _ = writeln!(
                 io::stderr(),
                 "sc: exit 0 although enforced gates failed: {} (not in --fail-on)",
@@ -448,6 +510,35 @@ fn note_unresolved_diff_base(card: &Scorecard, status: RunStatus) {
     };
     let line = finding.message.replace(['\n', '\r'], " ");
     let _ = writeln!(io::stderr(), "{line}");
+}
+
+fn read_baseline(path: &Path) -> Result<Baseline, String> {
+    let text = fs::read_to_string(path).map_err(|_| {
+        format!(
+            "no baseline at {}. Run `sc analyze --write-baseline` first.",
+            path.display()
+        )
+    })?;
+    let baseline: Baseline = serde_json::from_str(&text)
+        .map_err(|err| format!("cannot parse {}: {err}", path.display()))?;
+    if baseline.version != BASELINE_VERSION {
+        return Err(format!(
+            "{} is baseline version {}, expected {BASELINE_VERSION}. Run `sc analyze --write-baseline` again.",
+            path.display(),
+            baseline.version
+        ));
+    }
+    Ok(baseline)
+}
+
+fn write_baseline_file(path: &Path, findings: &[Finding]) -> Result<usize, String> {
+    let baseline = Baseline::from_findings(findings);
+    let text = serde_json::to_string_pretty(&baseline).map_err(|err| err.to_string())?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|err| format!("{}: {err}", parent.display()))?;
+    }
+    fs::write(path, format!("{text}\n")).map_err(|err| format!("{}: {err}", path.display()))?;
+    Ok(baseline.fingerprints.len())
 }
 
 fn write_reports(

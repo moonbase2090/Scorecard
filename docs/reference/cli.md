@@ -20,6 +20,8 @@ sc help [COMMAND]
 | `--format FORMAT` | `pretty` on a terminal, `json` otherwise | `json`, `pretty`, `md`, `sarif`, `html`, or `all`. See [Output](#output). |
 | `--out PATH` | none | Also write the report to `PATH`. Stdout prints the short summary, including when it is not a terminal. Without this flag, stdout is the chosen `--format`. |
 | `--fail-on LIST` | `types,tests,crap,secrets,lint` | Comma-separated [gates](gates.md) whose failures set exit 1. Use `none` by itself to suppress gate failures from the exit code. Empty or blank lists are invalid. Overrides `gates.fail_on`; already enforced failures remain in the report verdict. |
+| `--write-baseline` | off | Write each finding's fingerprint to `.sc/baseline.json` under the project. Run it once on the state you accept, then gate with `--baseline`. Cannot be combined with `--baseline`. |
+| `--baseline` | off | Exit 1 only when a failing gate fails on a finding not in `.sc/baseline.json`. Known findings stay in the report. Exits 2 with a fix hint when there is no baseline file. Does not gate on metric regressions yet. |
 | `--pack PACK` | detected | `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, `web`, or `command`. Needed when the tree has two markers. See [packs](../packs.md). |
 | `--diff [BASE]` | off | Score only what changed against git `BASE`. Paths are relative to the project directory, including when that directory sits inside a larger git repository. Python compiles, lints, and checks imports only in changed `.py` files, runs pytest only on changed `test_*.py` and `*_test.py` files, and drops secret findings on unchanged paths. Without `BASE` (AUTO): `HEAD~1`, else `main`, else `master`, skipping a candidate that is the same commit as `HEAD`. When none remain — a shallow clone, a single commit, or a depth-1 clone of `main` or `master` — the run exits 2 with verdict `fail` and one stderr line; fetch full history (`fetch-depth: 0`) or pass `--diff BASE`. A missing explicit base exits 2 the same way and names the ref. An explicit `--diff HEAD` still works. Uncommitted changes count. |
 | `--diff-head REV` | worktree | With `--diff`, compare `BASE` to commit `REV` instead of the worktree. |
@@ -142,7 +144,7 @@ Scorecard excludes its saved report, cache and coverage files under `.sc/`, and 
 
 | Status | Meaning |
 |---|---|
-| 0 | No selected gate failed. `--fail-on none` deliberately selects no gates. If an enforced gate failed, `sc` names it in one stderr warning and the report verdict remains `fail`. |
+| 0 | No selected gate failed. `--fail-on none` deliberately selects no gates. If an enforced gate failed, `sc` names it in one stderr warning and the report verdict remains `fail`. With `--baseline`, a failing gate that fails only on known findings exits 0 and the report verdict remains `fail`. |
 | 1 | A selected gate failed |
 | 2 | `sc` could not run: missing path, invalid config (including an empty `--fail-on` or `gates.fail_on`), a required toolchain missing, or compile or tests timed out |
 
