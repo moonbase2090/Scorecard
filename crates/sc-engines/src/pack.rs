@@ -740,6 +740,15 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    // Assertion messages name the file and rule only. A finding's evidence can
+    // hold a matched secret, and CI logs must not carry it.
+    fn finding_summary(findings: &[sc_core::Finding]) -> Vec<(&str, &str)> {
+        findings
+            .iter()
+            .map(|finding| (finding.file.as_str(), finding.rule.as_str()))
+            .collect()
+    }
+
     #[test]
     fn secrets_content_policy_in_tracked_files() {
         check_secrets_content_policy("tracked");
@@ -882,7 +891,8 @@ mod tests {
             findings.iter().any(
                 |finding| finding.file == "leak.py" && finding.rule == "secrets.aws_access_key"
             ),
-            "{findings:?}"
+            "{:?}",
+            finding_summary(&findings)
         );
         let _ = fs::remove_dir_all(&root);
     }
@@ -962,17 +972,20 @@ mod tests {
             findings.iter().any(|finding| {
                 finding.file == "package-lock.json" && finding.rule == "secrets.aws_access_key"
             }),
-            "{findings:?}"
+            "{:?}",
+            finding_summary(&findings)
         );
         assert!(
             !findings.iter().any(|finding| {
                 finding.file == "Cargo.lock" || finding.file.starts_with("build/")
             }),
-            "{findings:?}"
+            "{:?}",
+            finding_summary(&findings)
         );
         assert!(
             !findings.iter().any(|finding| finding.file == "go_pack"),
-            "{findings:?}"
+            "{:?}",
+            finding_summary(&findings)
         );
         let _ = fs::remove_dir_all(&root);
     }
@@ -990,7 +1003,8 @@ mod tests {
             findings.iter().any(|finding| {
                 finding.file == "config.js" && finding.rule == "secrets.aws_access_key"
             }),
-            "{findings:?}"
+            "{:?}",
+            finding_summary(&findings)
         );
         let _ = fs::remove_dir_all(&root);
     }
@@ -1041,7 +1055,8 @@ mod tests {
                 findings.iter().any(|finding| {
                     finding.file == file && finding.rule.starts_with("secrets.")
                 }),
-                "missing {file}: {findings:?}"
+                "missing {file}: {:?}",
+                finding_summary(&findings)
             );
         }
         let _ = fs::remove_dir_all(&root);
@@ -1069,7 +1084,8 @@ mod tests {
                     || finding.file.starts_with("target/")
                     || finding.file.starts_with("node_modules/")
             }),
-            "{findings:?}"
+            "{:?}",
+            finding_summary(&findings)
         );
         let _ = fs::remove_dir_all(&root);
     }
@@ -1094,17 +1110,20 @@ mod tests {
             !findings
                 .iter()
                 .any(|finding| finding.file.starts_with("dist/")),
-            "{findings:?}"
+            "{:?}",
+            finding_summary(&findings)
         );
         assert!(
             findings
                 .iter()
                 .any(|finding| finding.file == "vendor/dep/lib.js"),
-            "{findings:?}"
+            "{:?}",
+            finding_summary(&findings)
         );
         assert!(
             findings.iter().any(|finding| finding.file == "build/c.txt"),
-            "{findings:?}"
+            "{:?}",
+            finding_summary(&findings)
         );
         let _ = fs::remove_dir_all(&root);
     }
@@ -1164,13 +1183,15 @@ mod tests {
             !findings
                 .iter()
                 .any(|finding| finding.rule == "secrets.unreadable"),
-            "{findings:?}"
+            "{:?}",
+            finding_summary(&findings)
         );
         assert!(
             !findings.iter().any(|finding| {
                 finding.severity == "error" && finding.rule.starts_with("secrets.")
             }),
-            "{findings:?}"
+            "{:?}",
+            finding_summary(&findings)
         );
         let _ = fs::remove_dir_all(&root);
     }
@@ -1196,13 +1217,15 @@ mod tests {
                     && finding.severity == "error"
                     && finding.rule.starts_with("secrets.")
             }),
-            "{findings:?}"
+            "{:?}",
+            finding_summary(&findings)
         );
         assert!(
             findings
                 .iter()
                 .any(|finding| finding.file == "tool" && finding.rule == "secrets.skipped_object"),
-            "{findings:?}"
+            "{:?}",
+            finding_summary(&findings)
         );
         let _ = fs::remove_dir_all(&root);
     }
@@ -1221,13 +1244,15 @@ mod tests {
             !findings
                 .iter()
                 .any(|finding| finding.rule == "secrets.partial"),
-            "{findings:?}"
+            "{:?}",
+            finding_summary(&findings)
         );
         assert!(
             findings.iter().any(|finding| {
                 finding.file == "big" && finding.rule == "secrets.skipped_object"
             }),
-            "{findings:?}"
+            "{:?}",
+            finding_summary(&findings)
         );
         let _ = fs::remove_dir_all(&root);
     }
@@ -1247,13 +1272,15 @@ mod tests {
             findings.iter().any(|finding| {
                 finding.file == "assets.bin" && finding.rule == "secrets.aws_access_key"
             }),
-            "{findings:?}"
+            "{:?}",
+            finding_summary(&findings)
         );
         assert!(
             !findings
                 .iter()
                 .any(|finding| finding.rule == "secrets.partial"),
-            "under 64 MiB must be scanned, not partial: {findings:?}"
+            "under 64 MiB must be scanned, not partial: {:?}",
+            finding_summary(&findings)
         );
         let _ = fs::remove_dir_all(&root);
     }
@@ -1274,7 +1301,8 @@ mod tests {
             findings.iter().any(|finding| {
                 finding.rule == "secrets.unreadable" && finding.file == "private"
             }),
-            "{findings:?}"
+            "{:?}",
+            finding_summary(&findings)
         );
         let mut open = fs::metadata(&hidden).unwrap().permissions();
         open.set_mode(0o755);
