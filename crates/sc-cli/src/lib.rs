@@ -507,9 +507,12 @@ fn finish_baseline(output: &mut AnalyzeOutput, write: bool, known: Option<&Basel
         }
     }
     if let Some(known) = known {
-        if output.status == RunStatus::GateFailed
-            && gates_failing_on_new_findings(&output.scorecard, known).is_empty()
-        {
+        // Only gates that --fail-on selects can block; a new finding in an
+        // unselected gate is reported but does not change the exit code.
+        let blocking = gates_failing_on_new_findings(&output.scorecard, known)
+            .iter()
+            .any(|id| output.scorecard.fail_on.contains(id));
+        if output.status == RunStatus::GateFailed && !blocking {
             output.status = RunStatus::Passed;
             let _ = writeln!(
                 io::stderr(),
@@ -773,5 +776,84 @@ mod stdout_body_format_tests {
                 "format={format} has_out={has_out} tty={tty}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod baseline_gate_tests {
+    use super::*;
+    use sc_core::Gate;
+    use serde_json::json;
+
+    fn finding(engine: &str, message: &str) -> Finding {
+        Finding {
+            id: format!("{engine}-{message}"),
+            rule: format!("{engine}.rule"),
+            engine: engine.into(),
+            severity: "error".into(),
+            file: "src/lib.rs".into(),
+            span: None,
+            symbol: None,
+            message: message.into(),
+            evidence: json!({}),
+            suggested_action: None,
+            disposition: String::new(),
+        }
+    }
+
+    /// `tests` (selected by --fail-on) and `lint` (not selected) both fail.
+    /// The known finding is in the baseline; `new_engine` gets a new one.
+    fn outcome(new_engine: &str) -> AnalyzeOutput {
+        let known = finding("tests", "known failure");
+        let mut scorecard = Scorecard::skeleton("repo", 30);
+        scorecard.fail_on = vec!["tests".into()];
+        scorecard.measures.gates = ["tests", "lint"]
+            .iter()
+            .map(|id| Gate {
+                id: (*id).into(),
+                pass: false,
+                enforced: true,
+                reason: None,
+            })
+            .collect();
+        scorecard.sections.findings = vec![known.clone(), finding(new_engine, "new failure")];
+        AnalyzeOutput {
+            scorecard,
+            status: RunStatus::GateFailed,
+        }
+    }
+
+    fn baseline() -> Baseline {
+        Baseline::from_findings(&[finding("tests", "known failure")])
+    }
+
+    #[test]
+    fn a_new_finding_outside_fail_on_does_not_block() {
+        let mut out = outcome("lint");
+        finish_baseline(
+            &mut out,
+            false,
+            Some(&baseline()),
+            Path::new(".sc/baseline.json"),
+        );
+        assert!(
+            matches!(out.status, RunStatus::Passed),
+            "lint must not block"
+        );
+    }
+
+    #[test]
+    fn a_new_finding_in_a_selected_gate_blocks() {
+        let mut out = outcome("tests");
+        finish_baseline(
+            &mut out,
+            false,
+            Some(&baseline()),
+            Path::new(".sc/baseline.json"),
+        );
+        assert!(
+            matches!(out.status, RunStatus::GateFailed),
+            "tests must block"
+        );
     }
 }
