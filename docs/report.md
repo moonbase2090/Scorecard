@@ -69,6 +69,8 @@ exit 0: enforced gates passed
 
 Which checks ran, which did not, and the exit status. An engine is skipped when its tool is missing or when it is off by default (`mutation`, `llm`, `spec`). A skip caused by a missing tool also appears as an `engine.unavailable` finding with the reason.
 
+The Markdown report adds an **Engine timing** table after the header: time per engine, summed over its runs, and a total. Per-engine budgets are not available yet; `--budget-seconds` still applies to the whole run.
+
 ## Dispositions
 
 Each JSON finding has a `disposition` that tells an agent what to do:
