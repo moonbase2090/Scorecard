@@ -1240,7 +1240,9 @@ fn config_init_writes_a_starter_and_does_not_overwrite() {
         .unwrap();
     assert_ne!(missing.status.code(), Some(0));
     let err = String::from_utf8_lossy(&missing.stderr);
-    assert!(err.contains("is not set"), "{err}");
+    // The profile message differs by platform ("HOME is not set." on Unix, "Neither
+    // HOME nor USERPROFILE is set." on Windows); the shared part is what matters.
+    assert!(err.contains("cannot be created"), "{err}");
     assert!(err.contains("sc config init"), "{err}");
     let _ = std::fs::remove_dir_all(&home);
 }
