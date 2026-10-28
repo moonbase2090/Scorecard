@@ -41,27 +41,27 @@ fn engine_for_gate(gate: &str) -> &str {
 }
 
 /// Enforced gates that failed for a reason the baseline does not cover.
-///
-/// A failing gate is covered when every finding from its engine is in the
-/// baseline. A failing gate with no findings from its engine is never covered,
-/// because nothing in the baseline can explain it.
 pub fn gates_failing_on_new_findings(card: &Scorecard, baseline: &Baseline) -> Vec<String> {
     card.measures
         .gates
         .iter()
         .filter(|gate| gate.enforced && !gate.pass)
-        .filter(|gate| {
-            let engine = engine_for_gate(&gate.id);
-            let mut own = card
-                .sections
-                .findings
-                .iter()
-                .filter(|finding| finding.engine == engine)
-                .peekable();
-            own.peek().is_none() || own.any(|finding| !baseline.contains(finding))
-        })
+        .filter(|gate| has_new_finding(card, &gate.id, baseline))
         .map(|gate| gate.id.clone())
         .collect()
+}
+
+/// A failing gate is covered when every finding from its engine is in the
+/// baseline. A gate with no findings from its engine is never covered.
+fn has_new_finding(card: &Scorecard, gate: &str, baseline: &Baseline) -> bool {
+    let engine = engine_for_gate(gate);
+    let own: Vec<&Finding> = card
+        .sections
+        .findings
+        .iter()
+        .filter(|finding| finding.engine == engine)
+        .collect();
+    own.is_empty() || own.iter().any(|finding| !baseline.contains(finding))
 }
 
 #[cfg(test)]

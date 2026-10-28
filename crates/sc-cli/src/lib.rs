@@ -26,7 +26,9 @@ use sc_core::{
     Finding, Gate, Scorecard, SCORECARD_VERSION,
 };
 use sc_core::{gates_failing_on_new_findings, Baseline, BASELINE_VERSION};
-use sc_engines::{analyze_with_generated_paths, os_metadata_warning, AnalyzeRequest, RunStatus};
+use sc_engines::{
+    analyze_with_generated_paths, os_metadata_warning, AnalyzeOutput, AnalyzeRequest, RunStatus,
+};
 
 pub use format::{to_json, to_markdown};
 use report::to_html;
@@ -397,33 +399,7 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
     if let Some(spinner) = spinner {
         spinner.finish();
     }
-    if write_baseline {
-        match write_baseline_file(&baseline_file, &output.scorecard.sections.findings) {
-            Ok(count) => {
-                let _ = writeln!(
-                    io::stderr(),
-                    "sc: wrote {count} finding fingerprints to {}",
-                    baseline_file.display()
-                );
-            }
-            Err(err) => {
-                let _ = writeln!(io::stderr(), "sc: {err}");
-                output.status = RunStatus::AnalyzerError;
-            }
-        }
-    }
-    if let Some(known) = &known {
-        if output.status == RunStatus::GateFailed
-            && gates_failing_on_new_findings(&output.scorecard, known).is_empty()
-        {
-            output.status = RunStatus::Passed;
-            let _ = writeln!(
-                io::stderr(),
-                "sc: exit 0: every failing gate fails only on findings in {}",
-                baseline_file.display()
-            );
-        }
-    }
+    finish_baseline(&mut output, write_baseline, known.as_ref(), &baseline_file);
     emit(
         &mut stdout,
         &view,
@@ -510,6 +486,38 @@ fn note_unresolved_diff_base(card: &Scorecard, status: RunStatus) {
     };
     let line = finding.message.replace(['\n', '\r'], " ");
     let _ = writeln!(io::stderr(), "{line}");
+}
+
+/// Write or apply the baseline once the analysis has run. Writing never changes
+/// the outcome beyond an error; `known` can turn a gate failure into exit 0.
+fn finish_baseline(output: &mut AnalyzeOutput, write: bool, known: Option<&Baseline>, file: &Path) {
+    if write {
+        match write_baseline_file(file, &output.scorecard.sections.findings) {
+            Ok(count) => {
+                let _ = writeln!(
+                    io::stderr(),
+                    "sc: wrote {count} finding fingerprints to {}",
+                    file.display()
+                );
+            }
+            Err(err) => {
+                let _ = writeln!(io::stderr(), "sc: {err}");
+                output.status = RunStatus::AnalyzerError;
+            }
+        }
+    }
+    if let Some(known) = known {
+        if output.status == RunStatus::GateFailed
+            && gates_failing_on_new_findings(&output.scorecard, known).is_empty()
+        {
+            output.status = RunStatus::Passed;
+            let _ = writeln!(
+                io::stderr(),
+                "sc: exit 0: every failing gate fails only on findings in {}",
+                file.display()
+            );
+        }
+    }
 }
 
 fn read_baseline(path: &Path) -> Result<Baseline, String> {
