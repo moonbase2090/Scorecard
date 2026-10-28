@@ -5,8 +5,10 @@
 ## Common changes
 
 ```toml
-# Two language markers in one tree (for example Cargo.toml and package.json): pick one.
+# Two language markers in one root: pick one; automatic detection remains unchanged.
 pack = "rust"
+
+# For separate language-pack roots in a monorepo, use pack = "multi" instead.
 
 [gates]
 # Also fail on undeclared dependencies.

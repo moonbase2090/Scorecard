@@ -1,6 +1,11 @@
 # Packs
 
-`sc` detects one language pack from the tree.
+`sc` detects one language pack from the tree. For a monorepo with separate
+language-pack roots, opt in to sequential analysis with `pack = "multi"` in
+`analyzer.toml` or `sc analyze --pack multi`. Scorecard analyzes each discovered
+root in order, shares the run budget, and writes one root-relative report with
+`pack: "multi"`. Existing automatic detection remains unchanged. A project with
+one root can use `multi` too; it keeps that pack's normal workspace behavior.
 
 | Marker | Pack |
 |---|---|

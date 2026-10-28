@@ -180,6 +180,11 @@ For Python projects with a `src/` layout, `sc` prepends each source root to `PYT
 
 For a Cargo workspace, analyze the root to check every member. Analyze a member directory to check only that package and avoid sibling crates.
 
+For a monorepo with separate language pack roots, set `pack = "multi"` in
+`analyzer.toml` or run `sc analyze --pack multi`. Scorecard analyzes discovered
+roots in sequence and writes one combined report. Use `sc doctor` in each pack
+root to check its required tools.
+
 ## License
 
 Scorecard is licensed under the [MIT License](LICENSE).
