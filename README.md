@@ -23,7 +23,7 @@ summary to scrollback or a pipe with `sc tui --inline`. See [Browse a saved anal
 Download `sc` for your platform and run it on a project:
 
 ```bash doctest network
-VERSION=v0.1.12
+VERSION=v0.1.13
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64) TARGET=aarch64-apple-darwin ;;
   Darwin-x86_64) TARGET=x86_64-apple-darwin ;;
@@ -64,7 +64,7 @@ Export a saved report to Waypoint with `sc export --waypoint --project PROJECT`.
 In a terminal the report looks like this (from `testdata/good_crate`):
 
 ```text
-sc 0.1.13  testdata/good_crate  rust  5ac851c clean  scope tree
+sc 0.1.14  testdata/good_crate  rust  5ac851c clean  scope tree
 
 PASS
 
@@ -152,20 +152,20 @@ The secrets scan also finds PEM private keys split across source string literals
 
 ## Install
 
-Published release [v0.1.12](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.12). Each `.tar.gz` holds a top-level directory `sc-v<version>-<target>/` with `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md`.
+Published release [v0.1.13](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.13). Each `.tar.gz` holds a top-level directory `sc-v<version>-<target>/` with `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md`.
 
 | Platform | Asset |
 |---|---|
-| macOS, Apple silicon | `sc-v0.1.12-aarch64-apple-darwin.tar.gz` |
-| macOS, Intel | `sc-v0.1.12-x86_64-apple-darwin.tar.gz` |
-| macOS installer | `sc-v0.1.12-macos.pkg`, or `sc-v0.1.12-universal-apple-darwin.dmg`. Installs `sc` and `sc-mcp` to `/usr/local/bin` |
-| Linux, arm64 | `sc-v0.1.12-aarch64-unknown-linux-gnu.tar.gz` |
-| Linux, x86_64 | `sc-v0.1.12-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS, Apple silicon | `sc-v0.1.13-aarch64-apple-darwin.tar.gz` |
+| macOS, Intel | `sc-v0.1.13-x86_64-apple-darwin.tar.gz` |
+| macOS installer | `sc-v0.1.13-macos.pkg`, or `sc-v0.1.13-universal-apple-darwin.dmg`. Installs `sc` and `sc-mcp` to `/usr/local/bin` |
+| Linux, arm64 | `sc-v0.1.13-aarch64-unknown-linux-gnu.tar.gz` |
+| Linux, x86_64 | `sc-v0.1.13-x86_64-unknown-linux-gnu.tar.gz` |
 
 To check a download, fetch `SHA256SUMS` into the same directory and verify only the files you have:
 
 ```bash
-curl -fsSLO https://github.com/moonbase2090/Scorecard/releases/download/v0.1.12/SHA256SUMS
+curl -fsSLO https://github.com/moonbase2090/Scorecard/releases/download/v0.1.13/SHA256SUMS
 shasum -a 256 -c --ignore-missing SHA256SUMS   # Linux: sha256sum -c --ignore-missing SHA256SUMS
 ```
 
