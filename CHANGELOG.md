@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - The Markdown report has an Engine timing table: time per engine, summed over its runs, with a total (SC-41, part a).
 - `sc analyze --write-baseline` stores each finding's fingerprint in `.sc/baseline.json`, and `sc analyze --baseline` exits 1 only when a failing gate fails on a finding not in that file. Known findings stay in the report. Off by default. Metric regressions are not gated yet.
+- Rust analysis can run dependency and secrets scans alongside Cargo check, test, and coverage phases with `[engines] parallel = true`. Cargo commands remain sequential; the setting is off by default.
 
 ## [0.1.12] - 2026-10-27
 
