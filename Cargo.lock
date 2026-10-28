@@ -1259,9 +1259,12 @@ dependencies = [
  "sc-core",
  "sc-engines",
  "sc-sarif",
+ "serde",
  "serde_json",
+ "sha2",
  "terminal_size",
  "termlens",
+ "ureq",
  "url",
  "windows-sys 0.61.2",
 ]

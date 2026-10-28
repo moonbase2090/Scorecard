@@ -25,7 +25,7 @@ Install the skill for an agent with `sc skills install --agent codex`; see [Skil
 
 ## Commands
 
-The top-level commands are `sc analyze`, `sc config`, `sc doctor`, `sc setup`, `sc skills`, and `sc help [COMMAND]`. Builds with the optional `tui` Cargo feature also provide `sc tui [PATH]` for interactive browsing of `PATH/.sc/last-scorecard.json`. On Findings, use Up/Down, PageUp/PageDown, and Home/End to browse rows. Existing files inside the project have OSC 8 file-and-line links. `sc tui [PATH] --inline` prints up to eight gates and five findings without entering the alternate screen. Redirected inline output is plain text. Use `sc analyze --format json` for automation.
+The top-level commands are `sc analyze`, `sc config`, `sc doctor`, `sc export`, `sc setup`, `sc skills`, and `sc help [COMMAND]`. Builds with the optional `tui` Cargo feature also provide `sc tui [PATH]` for interactive browsing of `PATH/.sc/last-scorecard.json`. On Findings, use Up/Down, PageUp/PageDown, and Home/End to browse rows. Existing files inside the project have OSC 8 file-and-line links. `sc tui [PATH] --inline` prints up to eight gates and five findings without entering the alternate screen. Redirected inline output is plain text. Use `sc analyze --format json` for automation.
 
 ### `sc analyze [PATH] [OPTIONS]`
 
@@ -58,6 +58,10 @@ Command flags override matching config settings. Every run writes `.sc/last-scor
 ### `sc doctor`
 
 `sc doctor [PATH] [--pack PACK]` lists the tools the project's language pack needs and the install command for each missing one. It exits 1 when a required tool is missing and 2 when no pack matches or several do. Run it when a finding says a tool is not installed.
+
+### `sc export`
+
+`sc export --waypoint --project SLUG` creates or updates Waypoint task tickets from `.sc/last-scorecard.json`. Use `--dry-run` to preview groups without network access. Set `WAYPOINT_API_URL` and `WAYPOINT_API_TOKEN` for a live export. Tickets group findings by file and symbol; fingerprint markers prevent duplicate comments on retries. Absolute and parent-traversing paths are rejected, and finding evidence is omitted. See [Export findings to Waypoint](../../docs/how-to/waypoint-export.md) for configuration and behavior.
 
 ### `sc setup`
 

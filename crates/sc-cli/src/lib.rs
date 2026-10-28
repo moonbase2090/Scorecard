@@ -14,6 +14,7 @@ mod skills;
 #[cfg(feature = "tui")]
 mod tui;
 mod user_config;
+mod waypoint_export;
 
 use std::fs;
 use std::io::{self, Write};
@@ -106,6 +107,31 @@ struct AnalyzeArgs {
     quiet: bool,
 }
 
+#[derive(Args)]
+struct ExportArgs {
+    /// Export to a Waypoint project.
+    #[arg(long)]
+    waypoint: bool,
+    /// Waypoint project that will receive the findings.
+    #[arg(long)]
+    project: String,
+    /// Scorecard JSON report to export.
+    #[arg(long, default_value = ".sc/last-scorecard.json")]
+    input: PathBuf,
+    /// Waypoint API URL, or WAYPOINT_API_URL.
+    #[arg(long)]
+    api_url: Option<String>,
+    /// Name of the environment variable containing a Waypoint bearer token.
+    #[arg(long, default_value = "WAYPOINT_API_TOKEN")]
+    token_env: String,
+    /// Acting Waypoint agent. Defaults to WAYPOINT_AGENT_ID, then PMUX_AGENT.
+    #[arg(long)]
+    agent_id: Option<String>,
+    /// Show the grouped export plan without contacting Waypoint.
+    #[arg(long)]
+    dry_run: bool,
+}
+
 #[derive(Subcommand)]
 enum ConfigCmd {
     /// Print ~/.config/sc/analyzer.toml.
@@ -121,6 +147,8 @@ enum ConfigCmd {
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum Commands {
+    /// Export findings from a saved report to an external tracker.
+    Export(ExportArgs),
     /// Browse a saved scorecard in an interactive terminal.
     #[cfg(feature = "tui")]
     Tui {
@@ -183,6 +211,7 @@ pub fn run() -> i32 {
     let _vt = console::enable_console_vt();
     let cli = Cli::parse();
     match cli.command {
+        Commands::Export(args) => waypoint_export::run(args),
         Commands::Doctor { path, pack } => doctor::run(path, pack),
         #[cfg(feature = "tui")]
         Commands::Tui { path, inline } => {

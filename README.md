@@ -57,6 +57,8 @@ sc analyze .
 
 While analysis runs, an interactive terminal shows the current step and elapsed time on stderr, including with `NO_COLOR=1`. Use `--quiet` to hide progress.
 
+Export a saved report to Waypoint with `sc export --waypoint --project PROJECT`. The command previews grouped tickets with `--dry-run`; see [Export findings to Waypoint](docs/how-to/waypoint-export.md) for API credentials and retry behavior.
+
 `sc analyze` skips macOS AppleDouble (`._*`) and `.DS_Store` files in every engine's file walk and writes one stderr line with the count, the first file, and the `find` command that deletes them ([troubleshooting](docs/troubleshooting.md#ignoring-n-macos-metadata-files)). Test runners and build tools can still read these files and fail.
 
 In a terminal the report looks like this (from `testdata/good_crate`):
