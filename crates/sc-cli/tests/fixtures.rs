@@ -965,7 +965,14 @@ fn excluded_enforced_failures_warn_in_every_output_format() {
 /// correct result but not what the test checks. Fail loudly instead of passing.
 fn require_on_path(tool: &str) {
     let found = std::env::var_os("PATH")
-        .map(|path| std::env::split_paths(&path).any(|dir| dir.join(tool).is_file()))
+        .map(|path| {
+            std::env::split_paths(&path).any(|dir| {
+                // Windows installs node.exe and npm.cmd, so the bare name never matches there.
+                dir.join(tool).is_file()
+                    || dir.join(format!("{tool}.exe")).is_file()
+                    || dir.join(format!("{tool}.cmd")).is_file()
+            })
+        })
         .unwrap_or(false);
     assert!(
         found,
