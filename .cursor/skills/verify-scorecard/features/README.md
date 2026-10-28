@@ -8,4 +8,6 @@ Start with [Launch and Doctor](../SKILL.md). Commands run in the same Bash shell
 
 Capture every entry in a feature when that feature changes. A passing convenient format is not proof for another format. Keep action/output/exit evidence outside scratch state and confirm it survives Cleanup.
 
+4. [Waypoint export](waypoint-export.md): dry-run planning, local HTTP protocol, and retry idempotency.
+
 This initial map does not cover MCP requests, `sc setup`, user-config creation, agent installation, every language pack, mutation, or external LLM review. When touching those paths, extend the map and use the existing fixtures and protocol tests rather than treating this web smoke pass as complete coverage. User-global setup needs an isolated account/container; these recipes do not redirect the user's home or mutate live agent configuration. Consult [CLI reference](../../../../docs/reference/cli.md), [pack prerequisites](../../../../docs/packs.md), and [MCP documentation](../../../../docs/how-to/agents.md) for those branches.

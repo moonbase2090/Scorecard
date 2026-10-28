@@ -8,6 +8,7 @@ sc config path
 sc config init [--force]
 sc setup
 sc skills install [--agent AGENT] [--check] [--force]
+sc export --waypoint --project SLUG [--input PATH] [--api-url URL] [--token-env NAME] [--agent-id ID] [--dry-run]
 sc help [COMMAND]
 ```
 
@@ -112,6 +113,22 @@ Installs the embedded Scorecard skill. Default `--agent all` targets all support
 | `--force` | off | Replace an existing skill, including a user-edited copy. |
 
 Existing files that differ from the embedded skill are preserved unless `--force` is set. See [Agents and MCP](../how-to/agents.md) for destinations and automatic installation.
+
+## sc export
+
+Exports findings from a saved Scorecard JSON report to Waypoint. Findings are grouped by relative file and symbol. Each group has a stable ticket label; each finding comment includes a fingerprint, report context, and suggested action. Repeating the command updates the matching ticket without duplicating a finding comment. Archived matching tickets are left unchanged. Evidence fields are not sent.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--waypoint` | required | Select Waypoint as the export target. |
+| `--project SLUG` | required | Destination Waypoint project slug. |
+| `--input PATH` | `.sc/last-scorecard.json` | Saved Scorecard JSON report to export. |
+| `--api-url URL` | `WAYPOINT_API_URL` | Waypoint API base URL. Must use HTTPS, except HTTP on loopback for local testing. |
+| `--token-env NAME` | `WAYPOINT_API_TOKEN` | Environment variable containing the bearer token. The token is never accepted on the command line. |
+| `--agent-id ID` | `WAYPOINT_AGENT_ID`, then `PMUX_AGENT` | Optional acting identity sent to Waypoint. |
+| `--dry-run` | off | Print planned groups without network requests or requiring credentials. |
+
+The token variable must be set for a live export. Example: `WAYPOINT_API_TOKEN=... sc export --waypoint --project my-project`. See [Export findings to Waypoint](../how-to/waypoint-export.md) for setup and retry behavior.
 
 ## sc help
 
