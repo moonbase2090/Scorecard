@@ -4,7 +4,10 @@
 //! One marker selects a pack. Several markers stay ambiguous unless only one
 //! of them has source files. An unknown tree does not pretend to pass.
 
-use std::path::Path;
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+
+use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PackId {
@@ -241,6 +244,7 @@ pub fn text_secrets_with_generated(
         return vec![empty_secrets_scope()];
     }
     let mut big_text = Vec::new();
+    let mut clean = CleanCache::load(root);
     for path in files {
         let rel = path
             .strip_prefix(root)
@@ -262,7 +266,7 @@ pub fn text_secrets_with_generated(
                 continue;
             }
         }
-        scan_file(&path, &rel, &mut findings);
+        scan_file_cached(&path, &rel, &mut findings, &mut clean);
     }
     let mut oversized = Vec::new();
     for (path, rel, len) in big_text {
@@ -274,12 +278,90 @@ pub fn text_secrets_with_generated(
             }
             continue;
         }
-        scan_file(&path, &rel, &mut findings);
+        scan_file_cached(&path, &rel, &mut findings, &mut clean);
     }
+    clean.save();
     if !oversized.is_empty() {
         findings.push(partial_scan(&oversized));
     }
     findings
+}
+
+/// Files that scanned clean on an earlier run, keyed by relative path and
+/// content hash. Only clean files are recorded: the cache holds no finding
+/// evidence, so no matched secret text is ever written to disk.
+struct CleanCache {
+    path: PathBuf,
+    known: BTreeSet<String>,
+    seen: BTreeSet<String>,
+}
+
+const CLEAN_CACHE_HEADER: &str = "# scorecard secrets clean-cache v1";
+
+impl CleanCache {
+    fn load(root: &Path) -> Self {
+        let path = root.join(".sc").join("cache").join("secrets-clean.txt");
+        let header = format!("{CLEAN_CACHE_HEADER} {}", sc_core::SCORECARD_VERSION);
+        let known = match std::fs::read_to_string(&path) {
+            Ok(text) => {
+                let mut lines = text.lines();
+                if lines.next() == Some(header.as_str()) {
+                    lines.map(str::to_string).collect()
+                } else {
+                    BTreeSet::new()
+                }
+            }
+            Err(_) => BTreeSet::new(),
+        };
+        Self {
+            path,
+            known,
+            seen: BTreeSet::new(),
+        }
+    }
+
+    fn save(&self) {
+        let header = format!("{CLEAN_CACHE_HEADER} {}", sc_core::SCORECARD_VERSION);
+        let mut text = header;
+        text.push('\n');
+        for key in &self.seen {
+            text.push_str(key);
+            text.push('\n');
+        }
+        if let Some(dir) = self.path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&self.path, text);
+    }
+}
+
+fn clean_key(bytes: &[u8], rel: &str) -> String {
+    let mut hash = Sha256::new();
+    hash.update(bytes);
+    format!("{:x}\t{rel}", hash.finalize())
+}
+
+/// Scan one file, skipping it when the cache says it is unchanged and clean.
+fn scan_file_cached(
+    path: &Path,
+    rel: &str,
+    findings: &mut Vec<sc_core::Finding>,
+    clean: &mut CleanCache,
+) {
+    let Ok(bytes) = std::fs::read(path) else {
+        scan_file(path, rel, findings);
+        return;
+    };
+    let key = clean_key(&bytes, rel);
+    if clean.known.contains(&key) {
+        clean.seen.insert(key);
+        return;
+    }
+    let before = findings.len();
+    scan_bytes(&bytes, rel, findings);
+    if findings.len() == before {
+        clean.seen.insert(key);
+    }
 }
 
 fn empty_secrets_scope() -> sc_core::Finding {
@@ -301,20 +383,20 @@ fn empty_secrets_scope() -> sc_core::Finding {
 }
 
 fn scan_file(path: &Path, rel: &str, findings: &mut Vec<sc_core::Finding>) {
+    match std::fs::read(path) {
+        Ok(bytes) => scan_bytes(&bytes, rel, findings),
+        Err(err) => findings.push(unreadable(rel, &err)),
+    }
+}
+
+fn scan_bytes(bytes: &[u8], rel: &str, findings: &mut Vec<sc_core::Finding>) {
     // `read_to_string` skips the whole file on one non-UTF-8 byte, which
     // hides every secret in it. Scan the bytes we can read.
-    let bytes = match std::fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(err) => {
-            findings.push(unreadable(rel, &err));
-            return;
-        }
-    };
-    if file_has_object_magic(&bytes) {
+    if file_has_object_magic(bytes) {
         findings.push(skipped_object_file(rel));
         return;
     }
-    let text = String::from_utf8_lossy(&bytes);
+    let text = String::from_utf8_lossy(bytes);
     findings.extend(crate::secrets::secrets_in_text(&text, rel));
 }
 
@@ -747,6 +829,57 @@ mod tests {
             .iter()
             .map(|finding| (finding.file.as_str(), finding.rule.as_str()))
             .collect()
+    }
+
+    #[test]
+    fn clean_files_are_cached_until_their_content_changes() {
+        let root = std::env::temp_dir().join(format!("sc-clean-cache-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), "pub fn value() -> i32 { 1 }\n").unwrap();
+        assert!(text_secrets(&root, &[]).is_empty());
+        let cache = std::fs::read_to_string(root.join(".sc/cache/secrets-clean.txt")).unwrap();
+        let hash = format!("{:x}", Sha256::digest(b"pub fn value() -> i32 { 1 }\n"));
+        assert!(cache.contains(&format!("{hash}\tsrc/lib.rs")), "{cache}");
+        // Same content, same path: the cached verdict stands and still reports nothing.
+        assert!(text_secrets(&root, &[]).is_empty());
+        // Changed content: the hash no longer matches, so the file is scanned again.
+        let key = format!("{}{}", "AKIA", "QWERTYUIOPASDFGH");
+        std::fs::write(
+            root.join("src/lib.rs"),
+            format!("const K: &str = \"{key}\";\n"),
+        )
+        .unwrap();
+        let findings = text_secrets(&root, &[]);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.file == "src/lib.rs" && f.rule == "secrets.aws_access_key"),
+            "{:?}",
+            findings
+                .iter()
+                .map(|f| (&f.file, &f.rule))
+                .collect::<Vec<_>>()
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn files_with_findings_never_reach_the_cache() {
+        let root = std::env::temp_dir().join(format!("sc-no-leak-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let key = format!("{}{}", "AKIA", "QWERTYUIOPASDFGH");
+        std::fs::write(root.join("config.py"), format!("KEY = \"{key}\"\n")).unwrap();
+        assert!(!text_secrets(&root, &[]).is_empty());
+        let cache =
+            std::fs::read_to_string(root.join(".sc/cache/secrets-clean.txt")).unwrap_or_default();
+        assert!(!cache.contains("config.py"), "{cache}");
+        assert!(
+            !cache.contains(&key),
+            "matched text must never be written to the cache"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
