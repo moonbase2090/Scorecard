@@ -244,6 +244,12 @@ pub fn run(path: Option<PathBuf>, pack: Option<String>) -> i32 {
             }
         };
     let chosen = pack.unwrap_or(config.pack.clone());
+    if chosen.trim() == "multi" {
+        eprintln!(
+            "sc: `multi` is an analyze mode; run `sc doctor` in each pack root to check its tools"
+        );
+        return 2;
+    }
     let packs = match sc_engines::detected_pack_names(&root, &chosen) {
         Ok(packs) => packs,
         Err(err) => {

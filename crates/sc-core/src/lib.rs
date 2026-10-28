@@ -5,6 +5,7 @@ mod baseline;
 mod config;
 mod model;
 mod score;
+mod trend;
 
 pub use baseline::{gates_failing_on_new_findings, Baseline, BASELINE_VERSION};
 pub use config::{
@@ -15,6 +16,7 @@ pub use model::*;
 pub use score::{
     compute_scores, crap_score, exceeds_threshold, exit_code_fails, report_verdict, verdict_fails,
 };
+pub use trend::{trend, Trend};
 
 pub const SCORECARD_VERSION: &str = "0.1";
 

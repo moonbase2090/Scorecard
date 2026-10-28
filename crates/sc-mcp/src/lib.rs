@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
-//! MCP server for four scorecard tools.
-//!
-//! `analyze_paths`, `analyze_diff`, `explain`, and `list_findings`.
+//! MCP server for scorecard tools: `analyze_paths`, `analyze_diff`, `explain`,
+//! `list_findings`, `rerun_gate`, `doctor`, and `compare_to_baseline`.
 //! There is no chat tool.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use sc_core::{gates_failing_on_new_findings, Baseline, Finding, Scorecard};
 use sc_engines::{analyze, AnalyzeRequest};
 use serde_json::{json, Value};
 
@@ -57,6 +57,21 @@ fn tools() -> Vec<Value> {
             "List findings from the last scorecard",
             json!({"type":"object","properties":{"scorecard_id":{"type":"string"},"severity":{"type":"string"}}}),
         ),
+        tool(
+            "rerun_gate",
+            "Re-run the analysis and return one gate's result with its findings",
+            json!({"type":"object","properties":{"gate":{"type":"string"}},"required":["gate"]}),
+        ),
+        tool(
+            "doctor",
+            "List the tools the last analysis could not run, with the fix for each",
+            json!({"type":"object","properties":{}}),
+        ),
+        tool(
+            "compare_to_baseline",
+            "Compare the last scorecard with .sc/baseline.json: new and resolved findings, and gates that fail on new findings",
+            json!({"type":"object","properties":{}}),
+        ),
     ]
 }
 
@@ -77,6 +92,9 @@ fn call_tool(cwd: &Path, params: &Value) -> Value {
         "analyze_diff" => analyze_diff(cwd, &args),
         "explain" => explain(cwd, &args),
         "list_findings" => list_findings(cwd, &args),
+        "rerun_gate" => rerun_gate(cwd, &args),
+        "doctor" => doctor(cwd),
+        "compare_to_baseline" => compare_to_baseline(cwd),
         _ => Err(format!("unknown tool {name}")),
     };
     match body {
@@ -132,6 +150,18 @@ fn run_analyze(
     spec_path: Option<PathBuf>,
     intent: Option<String>,
 ) -> Result<String, String> {
+    let card = analyze_crate(cwd, diff_base, diff_head, path_list, spec_path, intent)?;
+    serde_json::to_string(&card).map_err(|err| err.to_string())
+}
+
+fn analyze_crate(
+    cwd: &Path,
+    diff_base: Option<String>,
+    diff_head: Option<String>,
+    path_list: Vec<String>,
+    spec_path: Option<PathBuf>,
+    intent: Option<String>,
+) -> Result<Scorecard, String> {
     let root = find_crate(cwd)?;
     let config = sc_core::load_config_file(sc_core::resolve_config_path(None, &root).as_deref())?;
     let output = analyze(AnalyzeRequest {
@@ -149,7 +179,115 @@ fn run_analyze(
         progress: None,
         config,
     });
-    serde_json::to_string(&output.scorecard).map_err(|err| err.to_string())
+    Ok(output.scorecard)
+}
+
+fn rerun_gate(cwd: &Path, args: &Value) -> Result<String, String> {
+    let gate = args
+        .get("gate")
+        .and_then(Value::as_str)
+        .ok_or("gate is required")?;
+    let card = analyze_crate(cwd, None, None, Vec::new(), None, None)?;
+    let result = card
+        .measures
+        .gates
+        .iter()
+        .find(|result| result.id == gate)
+        .ok_or_else(|| {
+            let ids: Vec<&str> = card.measures.gates.iter().map(|g| g.id.as_str()).collect();
+            format!("no gate {gate}; this run has: {}", ids.join(", "))
+        })?;
+    let findings: Vec<&Finding> = card
+        .sections
+        .findings
+        .iter()
+        .filter(|finding| finding.engine == engine_for_gate(gate))
+        .collect();
+    serde_json::to_string(&json!({
+        "gate": result.id,
+        "pass": result.pass,
+        "enforced": result.enforced,
+        "reason": result.reason,
+        "findings": findings,
+    }))
+    .map_err(|err| err.to_string())
+}
+
+/// The engine whose findings explain a gate. `types` is reported by `compile`.
+fn engine_for_gate(gate: &str) -> &str {
+    if gate == "types" {
+        "compile"
+    } else {
+        gate
+    }
+}
+
+fn doctor(cwd: &Path) -> Result<String, String> {
+    let card = last_card(cwd)?;
+    let missing: Vec<Value> = card
+        .sections
+        .findings
+        .iter()
+        .filter(|finding| finding.rule == "engine.unavailable")
+        .map(|finding| {
+            json!({
+                "engine": finding.engine,
+                "message": finding.message,
+                "fix": finding.suggested_action,
+            })
+        })
+        .collect();
+    serde_json::to_string(&missing).map_err(|err| err.to_string())
+}
+
+fn compare_to_baseline(cwd: &Path) -> Result<String, String> {
+    let card = last_card(cwd)?;
+    let text = find_file(cwd, ".sc/baseline.json")
+        .ok_or("no baseline; run analyze --write-baseline first")?;
+    let baseline: Baseline =
+        serde_json::from_str(&std::fs::read_to_string(text).map_err(|err| err.to_string())?)
+            .map_err(|err| err.to_string())?;
+    let new: Vec<&Finding> = card
+        .sections
+        .findings
+        .iter()
+        .filter(|finding| !baseline.contains(finding))
+        .collect();
+    let current: std::collections::BTreeSet<String> = card
+        .sections
+        .findings
+        .iter()
+        .map(Finding::fingerprint)
+        .collect();
+    let resolved = baseline
+        .fingerprints
+        .iter()
+        .filter(|fingerprint| !current.contains(*fingerprint))
+        .count();
+    serde_json::to_string(&json!({
+        "new_findings": new,
+        "resolved_findings": resolved,
+        "gates_failing_on_new_findings": gates_failing_on_new_findings(&card, &baseline),
+    }))
+    .map_err(|err| err.to_string())
+}
+
+fn last_card(cwd: &Path) -> Result<Scorecard, String> {
+    serde_json::from_value(last_scorecard(cwd)?).map_err(|err| err.to_string())
+}
+
+/// The nearest `relative` file at or above `cwd`, like `last-scorecard.json`.
+fn find_file(cwd: &Path, relative: &str) -> Option<PathBuf> {
+    let mut dir = cwd.to_path_buf();
+    loop {
+        let path = dir.join(relative);
+        if path.is_file() {
+            return Some(path);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
 }
 
 fn explain(cwd: &Path, args: &Value) -> Result<String, String> {
@@ -230,8 +368,107 @@ fn find_crate(cwd: &Path) -> Result<PathBuf, String> {
 mod tests {
     use super::*;
 
+    fn finding(engine: &str, rule: &str, message: &str) -> Finding {
+        Finding {
+            id: message.into(),
+            rule: rule.into(),
+            engine: engine.into(),
+            severity: "error".into(),
+            file: "src/lib.rs".into(),
+            span: None,
+            symbol: None,
+            message: message.into(),
+            evidence: json!({}),
+            suggested_action: Some(format!("fix {message}")),
+            disposition: String::new(),
+        }
+    }
+
+    fn write_report(dir: &Path, card: &Scorecard, baseline: Option<&Baseline>) {
+        std::fs::create_dir_all(dir.join(".sc")).unwrap();
+        std::fs::write(
+            dir.join(".sc/last-scorecard.json"),
+            serde_json::to_string(card).unwrap(),
+        )
+        .unwrap();
+        if let Some(baseline) = baseline {
+            std::fs::write(
+                dir.join(".sc/baseline.json"),
+                serde_json::to_string(baseline).unwrap(),
+            )
+            .unwrap();
+        }
+    }
+
     #[test]
-    fn lists_four_tools_and_no_chat() {
+    fn compare_to_baseline_reports_new_findings_and_the_gate_they_fail() {
+        let dir = std::env::temp_dir().join(format!("sc-mcp-compare-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let known = finding("tests", "test.failed", "known failure");
+        let fresh = finding("tests", "test.failed", "new failure");
+        let mut card = Scorecard::skeleton("repo", 30);
+        card.measures.gates = vec![sc_core::Gate {
+            id: "tests".into(),
+            pass: false,
+            enforced: true,
+            reason: None,
+        }];
+        card.sections.findings = vec![known.clone(), fresh];
+        write_report(&dir, &card, Some(&Baseline::from_findings(&[known])));
+        let out: Value = serde_json::from_str(&compare_to_baseline(&dir).unwrap()).unwrap();
+        assert_eq!(out["new_findings"].as_array().unwrap().len(), 1);
+        assert_eq!(out["new_findings"][0]["message"], "new failure");
+        assert_eq!(out["resolved_findings"], 0);
+        assert_eq!(out["gates_failing_on_new_findings"], json!(["tests"]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn doctor_lists_each_engine_that_could_not_run_with_its_fix() {
+        let dir = std::env::temp_dir().join(format!("sc-mcp-doctor-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut card = Scorecard::skeleton("repo", 30);
+        card.sections.findings = vec![
+            finding("lint", "engine.unavailable", "shellcheck is not installed"),
+            finding("tests", "test.failed", "a real failure"),
+        ];
+        write_report(&dir, &card, None);
+        let out: Value = serde_json::from_str(&doctor(&dir).unwrap()).unwrap();
+        assert_eq!(out.as_array().unwrap().len(), 1);
+        assert_eq!(out[0]["engine"], "lint");
+        assert_eq!(out[0]["fix"], "fix shellcheck is not installed");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rerun_gate_returns_one_gate_or_names_the_gates_that_exist() {
+        let dir = std::env::temp_dir().join(format!("sc-mcp-rerun-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"rerun_fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("src/lib.rs"),
+            "pub fn value() -> i32 { 1 }\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn value_is_one() { assert_eq!(super::value(), 1); }\n}\n",
+        )
+        .unwrap();
+        let out: Value =
+            serde_json::from_str(&rerun_gate(&dir, &json!({"gate": "tests"})).unwrap()).unwrap();
+        assert_eq!(out["gate"], "tests");
+        assert_eq!(out["pass"], true, "{out}");
+        let err = rerun_gate(&dir, &json!({"gate": "nope"})).unwrap_err();
+        assert!(
+            err.contains("no gate nope") && err.contains("tests"),
+            "{err}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn lists_the_scorecard_tools_and_no_chat() {
         let response = handle(
             &json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}),
             Path::new("."),
@@ -245,7 +482,15 @@ mod tests {
             .collect();
         assert_eq!(
             names,
-            vec!["analyze_paths", "analyze_diff", "explain", "list_findings"]
+            vec![
+                "analyze_paths",
+                "analyze_diff",
+                "explain",
+                "list_findings",
+                "rerun_gate",
+                "doctor",
+                "compare_to_baseline"
+            ]
         );
     }
 

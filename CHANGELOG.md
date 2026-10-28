@@ -4,12 +4,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.14] - 2026-10-28
+
+### Added
+
+- `sc-mcp` adds `rerun_gate` (one gate re-run with its findings), `doctor` (tools that could not run, with the fix), and `compare_to_baseline` (new and resolved findings against `.sc/baseline.json`) for agents (SC-39).
+- `sc export --waypoint` exports saved findings to Waypoint, grouped by file and symbol, with fingerprint-based retry deduplication.
+- On a terminal, `sc analyze` prints one line against the previous run: changed scores and new or resolved findings (SC-49).
+
+### Fixed
+
+- On Windows, `APPDATA` applies only to the native `USERPROFILE`; a `HOME` override resolves config under that profile's roaming directory instead of the signed-in account's AppData folder.
+
 ## [0.1.13] - 2026-10-28
 
 ### Added
 
 - The Markdown report has an Engine timing table: time per engine, summed over its runs, with a total (SC-41, part a).
 - `sc analyze --write-baseline` stores each finding's fingerprint in `.sc/baseline.json`, and `sc analyze --baseline` exits 1 only when a failing gate fails on a finding not in that file. Known findings stay in the report. Off by default. Metric regressions are not gated yet.
+- Rust analysis can run dependency and secrets scans alongside Cargo check, test, and coverage phases with `[engines] parallel = true`. Cargo commands remain sequential; the setting is off by default.
 
 ## [0.1.12] - 2026-10-27
 

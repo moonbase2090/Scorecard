@@ -37,6 +37,9 @@ The macOS package runs `sc skills install --agent detected` after creating the u
 | `analyze_diff` | Runs `sc analyze --diff` |
 | `list_findings` | Lists findings from `.sc/last-scorecard.json` |
 | `explain` | Explains one finding from that report |
+| `rerun_gate` | Re-runs the analysis and returns one gate's result with its findings |
+| `doctor` | Lists the tools the last analysis could not run, with the fix for each |
+| `compare_to_baseline` | Compares the last report with `.sc/baseline.json`: new and resolved findings, and the gates that fail on new findings |
 
 ## Register by hand
 

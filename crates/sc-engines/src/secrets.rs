@@ -829,7 +829,7 @@ mod tests {
         assert!(
             secrets_in_text(own, "crates/sc-engines/src/secrets.rs").is_empty(),
             "{:?}",
-            secrets_in_text(own, "crates/sc-engines/src/secrets.rs")
+            rule_names(&secrets_in_text(own, "crates/sc-engines/src/secrets.rs"))
         );
     }
 

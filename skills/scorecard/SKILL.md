@@ -25,7 +25,7 @@ Install the skill for an agent with `sc skills install --agent codex`; see [Skil
 
 ## Commands
 
-The top-level commands are `sc analyze`, `sc config`, `sc doctor`, `sc setup`, `sc skills`, and `sc help [COMMAND]`. Builds with the optional `tui` Cargo feature also provide `sc tui [PATH]` for interactive browsing of `PATH/.sc/last-scorecard.json`. On Findings, use Up/Down, PageUp/PageDown, and Home/End to browse rows. Existing files inside the project have OSC 8 file-and-line links. `sc tui [PATH] --inline` prints up to eight gates and five findings without entering the alternate screen. Redirected inline output is plain text. Use `sc analyze --format json` for automation.
+The top-level commands are `sc analyze`, `sc config`, `sc doctor`, `sc export`, `sc setup`, `sc skills`, and `sc help [COMMAND]`. Builds with the optional `tui` Cargo feature also provide `sc tui [PATH]` for interactive browsing of `PATH/.sc/last-scorecard.json`. On Findings, use Up/Down, PageUp/PageDown, and Home/End to browse rows. Existing files inside the project have OSC 8 file-and-line links. `sc tui [PATH] --inline` prints up to eight gates and five findings without entering the alternate screen. Redirected inline output is plain text. Use `sc analyze --format json` for automation.
 
 ### `sc analyze [PATH] [OPTIONS]`
 
@@ -58,6 +58,10 @@ Command flags override matching config settings. Every run writes `.sc/last-scor
 ### `sc doctor`
 
 `sc doctor [PATH] [--pack PACK]` lists the tools the project's language pack needs and the install command for each missing one. It exits 1 when a required tool is missing and 2 when no pack matches or several do. Run it when a finding says a tool is not installed.
+
+### `sc export`
+
+`sc export --waypoint --project SLUG` creates or updates Waypoint task tickets from `.sc/last-scorecard.json`. Use `--dry-run` to preview groups without network access. Set `WAYPOINT_API_URL` and `WAYPOINT_API_TOKEN` for a live export. Tickets group findings by file and symbol; fingerprint markers prevent duplicate comments on retries. Absolute and parent-traversing paths are rejected, and finding evidence is omitted. See [Export findings to Waypoint](../../docs/how-to/waypoint-export.md) for configuration and behavior.
 
 ### `sc setup`
 
@@ -105,7 +109,7 @@ Config resolution is `--config PATH`, then `analyzer.toml` in the analyzed direc
 | `[scope] exclude`, `include_generated` | Exclude paths (default empty) or opt selected generated/vendor paths back into scanning (default empty). |
 | `[mutation] mode`, `max_mutants`, `budget_seconds` | Configure mutation checks (`off`, `50`, and `180` by default). |
 | `[llm] enabled`, `backend`, `endpoint`, `model`, `base_url`, `api_key_env`, `max_tool_rounds` | Configure optional spec/intent review. `backend` is `ollama`, `openai-compatible`, or `cursor`; review is disabled by default. Keep API keys in their named environment variable, not in the config file. |
-| `[engines] coverage`, `sca`, `perf` | Enable coverage (`true`), dependency analysis (`true`), and Rust performance checks (`false`). |
+| `[engines] coverage`, `sca`, `parallel`, `perf` | Enable coverage (`true`), dependency analysis (`true`), parallel Rust dependency/secrets scans during Cargo phases (`false`), and Rust performance checks (`false`). |
 | `[commands] lint` | Set the lint command (default `cargo clippy --workspace`); an empty value skips the command lint engine. |
 | `[html] enforce`, `[links] enforce`, `[a11y] enforce`, `[a11y] disable` | Configure web and accessibility enforcement (`auto`, `false`, `false`, and no disabled rules by default). |
 
@@ -129,7 +133,7 @@ Exit `0` means no selected gate failed. `--fail-on none` deliberately selects no
 
 Use `--format json` for automation, `--format pretty` for a terminal, `--format md` for a concise shareable report, `--format sarif` for GitHub code scanning, and `--format html --out report.html` for a self-contained browser report. Findings marked with disposition `fix` need attention; advisory findings may not affect the process exit.
 
-For MCP, `sc-mcp` exposes `analyze_paths`, `analyze_diff`, `list_findings`, and `explain`. After analysis, read `.sc/last-scorecard.json` or use the MCP report tools to inspect findings.
+For MCP, `sc-mcp` exposes `analyze_paths`, `analyze_diff`, `list_findings`, `explain`, `rerun_gate`, `doctor`, and `compare_to_baseline`. After analysis, read `.sc/last-scorecard.json` or use the MCP report tools to inspect findings.
 
 ## Workflows
 

@@ -5,8 +5,10 @@
 ## Common changes
 
 ```toml
-# Two language markers in one tree (for example Cargo.toml and package.json): pick one.
+# Two language markers in one root: pick one; automatic detection remains unchanged.
 pack = "rust"
+
+# For separate language-pack roots in a monorepo, use pack = "multi" instead.
 
 [gates]
 # Also fail on undeclared dependencies.
@@ -20,6 +22,11 @@ exclude = ["src/generated/**"]
 # Reopen one built-in generated directory when you need to inspect it.
 # Remove or negate a matching .gitignore rule too.
 # include_generated = ["build/**"]
+
+[engines]
+# Run read-only Rust dependency and secrets scans alongside Cargo phases.
+# Cargo commands remain sequential; this is off by default.
+parallel = false
 
 [commands]
 # Lint command for the Rust and command packs. Empty skips lint.

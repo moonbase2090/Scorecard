@@ -107,6 +107,9 @@ pub fn analyze_with_generated_paths(
     request: AnalyzeRequest,
     generated_paths: &[PathBuf],
 ) -> AnalyzeOutput {
+    if request.config.pack.trim() == "multi" {
+        return analyze_multi(request, generated_paths);
+    }
     // Snapshot Git state before any engine runs and exclude Scorecard's saved
     // report and requested output files from earlier runs.
     crate::command::set_run_budget(request.budget);
@@ -143,6 +146,522 @@ pub fn analyze_with_generated_paths(
         }
         Err(err) => analyze_blocked(request, "unknown", &err, git),
     }
+}
+
+thread_local! {
+    static SUPPRESS_LAST_SCORECARD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+struct LastScorecardSuppression(bool);
+
+impl LastScorecardSuppression {
+    fn enter() -> Self {
+        Self(SUPPRESS_LAST_SCORECARD.with(|flag| flag.replace(true)))
+    }
+}
+
+impl Drop for LastScorecardSuppression {
+    fn drop(&mut self) {
+        SUPPRESS_LAST_SCORECARD.with(|flag| flag.set(self.0));
+    }
+}
+
+fn analyze_multi(request: AnalyzeRequest, generated_paths: &[PathBuf]) -> AnalyzeOutput {
+    let started = Instant::now();
+    let root = request.root.clone();
+    let git = git_info(&root, generated_paths);
+    let roots = discover_multi_roots(
+        &root,
+        &request.config.scope.exclude,
+        &request.config.scope.include_generated,
+    );
+    if roots.is_empty() {
+        let output = analyze_blocked(
+            request,
+            "multi",
+            "no unambiguous pack roots found; place each language pack in its own directory or remove pack = \"multi\"",
+            git,
+        );
+        write_last_scorecard(&root, &output.scorecard);
+        return output;
+    }
+    let outputs = run_multi_roots(&request, &root, roots, started);
+    combine_multi_outputs(root, git, outputs, &request.fail_on)
+}
+
+type MultiOutput = (String, AnalyzeOutput);
+
+fn discover_multi_roots(
+    root: &Path,
+    exclude: &[String],
+    include_generated: &[String],
+) -> Vec<(String, crate::pack::PackId)> {
+    use crate::pack::Detected;
+    let mut roots = Vec::new();
+    for item in sc_graph::walk(root, root, exclude, include_generated, None) {
+        let sc_graph::WalkItem::Entry(entry) = item else {
+            continue;
+        };
+        if entry.kind != sc_graph::WalkKind::Directory || !has_direct_pack_marker(&entry.path) {
+            continue;
+        }
+        if let Ok(Detected::Pack(pack)) =
+            crate::pack::detect_with_generated(&entry.path, "", include_generated)
+        {
+            let rel = entry
+                .path
+                .strip_prefix(root)
+                .unwrap_or(&entry.path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            roots.push((if rel.is_empty() { ".".into() } else { rel }, pack));
+        }
+    }
+    let candidates = roots.clone();
+    roots.retain(|(path, pack)| !has_same_pack_parent(path, *pack, &candidates));
+    roots.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.as_str().cmp(b.1.as_str())));
+    roots.dedup();
+    roots
+}
+
+fn has_same_pack_parent(
+    path: &str,
+    pack: crate::pack::PackId,
+    candidates: &[(String, crate::pack::PackId)],
+) -> bool {
+    let mut parent = Path::new(path).parent();
+    while let Some(candidate) = parent {
+        let key = if candidate.as_os_str().is_empty() {
+            ".".into()
+        } else {
+            candidate.to_string_lossy().replace('\\', "/")
+        };
+        if candidates
+            .iter()
+            .any(|(other, other_pack)| other == &key && *other_pack == pack)
+        {
+            return true;
+        }
+        if candidate.as_os_str().is_empty() {
+            break;
+        }
+        parent = candidate.parent();
+    }
+    false
+}
+
+fn run_multi_roots(
+    request: &AnalyzeRequest,
+    root: &Path,
+    roots: Vec<(String, crate::pack::PackId)>,
+    started: Instant,
+) -> Vec<MultiOutput> {
+    roots
+        .into_iter()
+        .map(|(prefix, pack)| {
+            let mut unit = request.clone();
+            unit.root = if prefix == "." {
+                root.to_path_buf()
+            } else {
+                root.join(&prefix)
+            };
+            unit.config.pack = pack.as_str().to_string();
+            unit.budget = request.budget.saturating_sub(started.elapsed());
+            unit.path_list = paths_for_multi_root(&request.path_list, &prefix);
+            let suppression = LastScorecardSuppression::enter();
+            let output = analyze_with_generated_paths(unit, &[]);
+            drop(suppression);
+            (prefix, output)
+        })
+        .collect()
+}
+
+fn paths_for_multi_root(paths: &[String], prefix: &str) -> Vec<String> {
+    if prefix == "." {
+        return paths.to_vec();
+    }
+    paths
+        .iter()
+        .filter_map(|path| path.strip_prefix(&format!("{prefix}/")).map(str::to_string))
+        .collect()
+}
+
+fn combine_multi_outputs(
+    root: PathBuf,
+    git: GitInfo,
+    outputs: Vec<MultiOutput>,
+    fail_on: &[String],
+) -> AnalyzeOutput {
+    let mut card = outputs[0].1.scorecard.clone();
+    card.identity.pack = "multi".into();
+    card.identity.id = sc_core::new_scorecard_id();
+    card.context.git = git;
+    card.context.scope.mode = outputs[0].1.scorecard.context.scope.mode.clone();
+    card.context.scope.paths.clear();
+    card.context.scope.base = outputs[0].1.scorecard.context.scope.base.clone();
+    card.context.scope.other_paths = None;
+    card.measures.gates.clear();
+    card.sections.findings.clear();
+    card.sections.crap.worst.clear();
+    card.sections.spec = sc_core::SpecSection::empty();
+    card.sections.mutation = MutationSection::skipped();
+    card.sections.test_value = None;
+    card.sections.llm = None;
+    card.engines.engines_run.clear();
+    card.engines.engines_skipped.clear();
+    card.runs.clear();
+    card.measures.metrics = Metrics::zeros();
+    let mut analyzer_error = false;
+    let mut gate_reasons = std::collections::BTreeMap::new();
+    for (prefix, output) in outputs {
+        analyzer_error |= output.status == RunStatus::AnalyzerError;
+        merge_multi_part(&mut card, &prefix, output.scorecard, &mut gate_reasons);
+    }
+    finalize_multi_card(&root, &mut card, fail_on, analyzer_error, gate_reasons)
+}
+
+fn merge_multi_part(
+    card: &mut Scorecard,
+    prefix: &str,
+    part: Scorecard,
+    reasons: &mut std::collections::BTreeMap<String, Vec<String>>,
+) {
+    merge_multi_scope(card, prefix, &part.context.scope);
+    merge_multi_sections(card, prefix, part.sections);
+    merge_multi_gates(card, prefix, part.measures.gates, reasons);
+    merge_multi_metrics(&mut card.measures.metrics, part.measures.metrics);
+    card.engines.engines_run.extend(part.engines.engines_run);
+    card.engines
+        .engines_skipped
+        .extend(part.engines.engines_skipped);
+    card.runs.extend(part.runs);
+}
+
+fn merge_multi_scope(card: &mut Scorecard, prefix: &str, scope: &Scope) {
+    card.context
+        .scope
+        .paths
+        .extend(scope.paths.iter().map(|path| {
+            if prefix == "." {
+                path.clone()
+            } else {
+                format!("{prefix}/{path}")
+            }
+        }));
+    if let Some(count) = scope.other_paths {
+        *card.context.scope.other_paths.get_or_insert(0) += count;
+    }
+}
+
+fn merge_multi_sections(card: &mut Scorecard, prefix: &str, sections: sc_core::ScorecardSections) {
+    merge_multi_spec(&mut card.sections.spec, prefix, sections.spec);
+    merge_multi_mutation(&mut card.sections.mutation, sections.mutation);
+    merge_multi_test_value(&mut card.sections.test_value, sections.test_value);
+    merge_multi_llm(&mut card.sections.llm, sections.llm);
+    append_unique_findings(
+        &mut card.sections.findings,
+        prefix_findings(prefix, sections.findings),
+    );
+    card.sections
+        .crap
+        .worst
+        .extend(prefix_crap(prefix, sections.crap.worst));
+    merge_generated_warning(
+        &mut card.sections.generated_files_warning,
+        prefix,
+        sections.generated_files_warning,
+    );
+}
+
+fn merge_multi_spec(current: &mut sc_core::SpecSection, prefix: &str, next: sc_core::SpecSection) {
+    if let Some(path) = next.path {
+        let path = if prefix == "." || Path::new(&path).is_absolute() {
+            path
+        } else {
+            format!("{prefix}/{path}")
+        };
+        current.path.get_or_insert(path);
+    }
+    current.gaps.extend(next.gaps);
+    current.llm_rounds = match (current.llm_rounds, next.llm_rounds) {
+        (Some(total), Some(rounds)) => Some(total + rounds),
+        (None, Some(rounds)) => Some(rounds),
+        (value, None) => value,
+    };
+}
+
+fn merge_multi_mutation(current: &mut MutationSection, next: MutationSection) {
+    if next.status != "skipped" {
+        current.status = if current.status == "skipped" || current.status == next.status {
+            next.status
+        } else {
+            "partial".into()
+        };
+    }
+    current.killed += next.killed;
+    current.survived += next.survived;
+    current.timeout += next.timeout;
+    current.unviable += next.unviable;
+    let total = current.killed + current.survived;
+    current.score = (total > 0).then(|| current.killed as f64 / total as f64);
+}
+
+fn merge_multi_test_value(current: &mut Option<TestValueSection>, next: Option<TestValueSection>) {
+    let Some(next) = next else { return };
+    let Some(current) = current.as_mut() else {
+        *current = Some(next);
+        return;
+    };
+    if current.weakening.status == "skipped" {
+        current.weakening.status = next.weakening.status.clone();
+    } else if next.weakening.status != "skipped"
+        && current.weakening.status != next.weakening.status
+    {
+        current.weakening.status = "partial".into();
+    }
+    current.weakening.findings += next.weakening.findings;
+    if current.weakening.reason.is_none() {
+        current.weakening.reason = next.weakening.reason;
+    }
+}
+
+fn merge_multi_llm(current: &mut Option<LlmSection>, next: Option<LlmSection>) {
+    let Some(next) = next else { return };
+    let Some(current) = current.as_mut() else {
+        *current = Some(next);
+        return;
+    };
+    let found_gaps = current.verdict.as_deref() == Some("gaps found")
+        || next.verdict.as_deref() == Some("gaps found");
+    current.notes.extend(next.notes);
+    current.rounds = Some(current.rounds.unwrap_or_default() + next.rounds.unwrap_or_default());
+    if current.status != next.status {
+        current.status = "partial".into();
+    }
+    current.verdict = if current.status == "ran" {
+        Some(if found_gaps { "gaps found" } else { "no gaps" }.into())
+    } else {
+        None
+    };
+}
+
+fn prefix_findings(prefix: &str, mut findings: Vec<Finding>) -> Vec<Finding> {
+    if prefix != "." {
+        for finding in &mut findings {
+            finding.file = format!("{prefix}/{}", finding.file);
+        }
+    }
+    findings
+}
+
+fn append_unique_findings(current: &mut Vec<Finding>, next: Vec<Finding>) {
+    for finding in next {
+        if !current.contains(&finding) {
+            current.push(finding);
+        }
+    }
+}
+
+fn prefix_crap(prefix: &str, mut worst: Vec<sc_core::CrapFunction>) -> Vec<sc_core::CrapFunction> {
+    if prefix != "." {
+        for function in &mut worst {
+            function.file = format!("{prefix}/{}", function.file);
+        }
+    }
+    worst
+}
+
+fn merge_generated_warning(
+    current: &mut Option<sc_core::GeneratedFilesWarning>,
+    prefix: &str,
+    next: Option<sc_core::GeneratedFilesWarning>,
+) {
+    let Some(mut next) = next else { return };
+    if prefix != "." {
+        for path in &mut next.files {
+            *path = format!("{prefix}/{path}");
+        }
+        for path in &mut next.skipped_files {
+            *path = format!("{prefix}/{path}");
+        }
+    }
+    if let Some(current) = current {
+        current.files.extend(next.files);
+        current.skipped_files.extend(next.skipped_files);
+    } else {
+        *current = Some(next);
+    }
+}
+
+fn merge_multi_gates(
+    card: &mut Scorecard,
+    prefix: &str,
+    gates: Vec<Gate>,
+    reasons: &mut std::collections::BTreeMap<String, Vec<String>>,
+) {
+    for gate in gates {
+        if let Some(existing) = card
+            .measures
+            .gates
+            .iter_mut()
+            .find(|existing| existing.id == gate.id)
+        {
+            existing.pass &= gate.pass;
+            existing.enforced |= gate.enforced;
+        } else {
+            card.measures.gates.push(gate.clone());
+        }
+        if let Some(reason) = gate.reason {
+            reasons
+                .entry(gate.id)
+                .or_default()
+                .push(format!("{prefix}: {reason}"));
+        }
+    }
+}
+
+fn merge_multi_metrics(current: &mut Metrics, next: Metrics) {
+    current.loc_changed += next.loc_changed;
+    current.files_changed += next.files_changed;
+    current.coverage_changed += next.coverage_changed;
+    current.crap_max = current.crap_max.max(next.crap_max);
+    current.crap_over_threshold += next.crap_over_threshold;
+    current.hallucinated_imports += next.hallucinated_imports;
+    current.undeclared_dependencies += next.undeclared_dependencies;
+}
+
+fn finalize_multi_card(
+    root: &Path,
+    card: &mut Scorecard,
+    fail_on: &[String],
+    analyzer_error: bool,
+    mut gate_reasons: std::collections::BTreeMap<String, Vec<String>>,
+) -> AnalyzeOutput {
+    for gate in &mut card.measures.gates {
+        if !gate.pass {
+            if let Some(reasons) = gate_reasons.remove(&gate.id) {
+                gate.reason = Some(reasons.join("; "));
+            }
+        }
+    }
+    card.sections.findings.sort_by(|a, b| {
+        a.file
+            .cmp(&b.file)
+            .then(a.rule.cmp(&b.rule))
+            .then(a.id.cmp(&b.id))
+    });
+    unique_ids(&mut card.sections.findings);
+    apply_disposition(&mut card.sections.findings);
+    if let Some(value) = &mut card.sections.test_value {
+        value.mutation = sc_core::TestValueMutation {
+            status: card.sections.mutation.status.clone(),
+            score: card.sections.mutation.score,
+            killed: card.sections.mutation.killed,
+            survived: card.sections.mutation.survived,
+            timeout: card.sections.mutation.timeout,
+            unviable: card.sections.mutation.unviable,
+        };
+        value.status = match (
+            card.sections.mutation.status.as_str(),
+            value.weakening.status.as_str(),
+        ) {
+            ("skipped", "skipped") => "skipped",
+            ("ran", "ran") => "ran",
+            _ => "partial",
+        }
+        .into();
+    }
+    card.context.scope.paths.sort();
+    card.context.scope.paths.dedup();
+    order_engines(
+        &mut card.engines.engines_run,
+        &mut card.engines.engines_skipped,
+    );
+    card.sections
+        .crap
+        .worst
+        .sort_by(|a, b| b.crap.total_cmp(&a.crap));
+    card.measures.scores = compute_scores(&card.sections.findings);
+    card.verdict = if card
+        .measures
+        .gates
+        .iter()
+        .any(|gate| gate.enforced && !gate.pass)
+    {
+        "fail"
+    } else {
+        "pass"
+    }
+    .into();
+    card.identity.test_selection = "multi-pack".into();
+    card.sections.crap.worst.truncate(10);
+    let status = if analyzer_error {
+        RunStatus::AnalyzerError
+    } else if sc_core::exit_code_fails(&card.measures.gates, fail_on) {
+        RunStatus::GateFailed
+    } else {
+        RunStatus::Passed
+    };
+    write_last_scorecard(root, card);
+    AnalyzeOutput {
+        scorecard: card.clone(),
+        status,
+    }
+}
+
+fn has_direct_pack_marker(root: &Path) -> bool {
+    let entries: Vec<_> = std::fs::read_dir(root)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .collect();
+    [
+        "Cargo.toml",
+        "package.json",
+        "pyproject.toml",
+        "requirements.txt",
+        "setup.py",
+        "Pipfile",
+        "go.mod",
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts",
+        "composer.json",
+        "CMakeLists.txt",
+    ]
+    .iter()
+    .any(|name| root.join(name).is_file())
+        || entries.iter().any(|path| {
+            path.extension().is_some_and(|ext| {
+                matches!(
+                    ext.to_str(),
+                    Some("html" | "csproj" | "sln" | "sh" | "bash" | "c" | "cc" | "cpp" | "cxx")
+                )
+            })
+        })
+        || ((root.join("Makefile").is_file()
+            || root.join("configure").is_file()
+            || root.join("configure.ac").is_file())
+            && entries.iter().any(|path| {
+                path.extension()
+                    .is_some_and(|ext| matches!(ext.to_str(), Some("c" | "cc" | "cpp" | "cxx")))
+            }))
+        || ["scripts", "bin"].iter().any(|subdir| {
+            root.join(subdir).is_dir()
+                && std::fs::read_dir(root.join(subdir))
+                    .ok()
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .any(|entry| {
+                        entry
+                            .path()
+                            .extension()
+                            .is_some_and(|ext| matches!(ext.to_str(), Some("sh" | "bash")))
+                    })
+        })
 }
 
 fn analyze_blocked(
@@ -1013,33 +1532,59 @@ fn analyze_rust(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
     } else {
         selection.workspace_root
     };
-    let mut state = RustState::new(workspace_root, request.config.toolchain.clone());
-    if let Some(err) = &select_error {
-        state.findings.push(unavailable("scope", err));
-    }
-    state.analyzer_error = select_error.is_some();
+    let build = || {
+        let mut state = RustState::new(workspace_root, request.config.toolchain.clone());
+        if let Some(err) = &select_error {
+            state.findings.push(unavailable("scope", err));
+        }
+        state.analyzer_error = select_error.is_some();
 
-    let manifest = root.join("Cargo.toml");
-    if !manifest.is_file() {
-        missing_manifest(&mut state);
-    } else {
-        report(&request, "Checking types (cargo check)");
-        compile_phase(root, &manifest, deadline, &mut state);
+        let manifest = root.join("Cargo.toml");
+        if !manifest.is_file() {
+            missing_manifest(&mut state);
+        } else {
+            report(&request, "Checking types (cargo check)");
+            compile_phase(root, &manifest, deadline, &mut state);
 
-        report(&request, "Running tests (cargo test)");
-        test_phase(root, &selection, &manifest, deadline, &mut state);
-        report(&request, "Measuring coverage");
-        coverage_phase(
-            root,
+            report(&request, "Running tests (cargo test)");
+            test_phase(root, &selection, &manifest, deadline, &mut state);
+            report(&request, "Measuring coverage");
+            coverage_phase(
+                root,
+                &selection,
+                &manifest,
+                deadline,
+                request.config.engines.coverage,
+                &mut state,
+            );
+        }
+        state
+    };
+    let sca = || scan_rust_dependencies(root, &selection, request.config.engines.sca);
+    let secrets = || {
+        scan_rust_secrets(
             &selection,
-            &manifest,
-            deadline,
-            request.config.engines.coverage,
-            &mut state,
-        );
-    }
+            root,
+            &request.config.scope.exclude,
+            &request.config.scope.include_generated,
+        )
+    };
+    let (state, independent) = if request.config.engines.parallel {
+        with_independent_scans(build, sca, secrets)
+    } else {
+        let state = build();
+        (state, (sca(), secrets()))
+    };
 
-    assemble_rust_report(&request, &selection, threshold, deadline, state, git)
+    assemble_rust_report(
+        &request,
+        &selection,
+        threshold,
+        deadline,
+        state,
+        independent,
+        git,
+    )
 }
 
 struct RustState {
@@ -1424,6 +1969,7 @@ fn assemble_rust_report(
     threshold: u32,
     deadline: Instant,
     mut state: RustState,
+    independent: (DependencyScan, Vec<Finding>),
     git: GitInfo,
 ) -> AnalyzeOutput {
     let root = &request.root;
@@ -1478,23 +2024,16 @@ fn assemble_rust_report(
     state.findings.extend(crap.findings);
 
     report(request, "Checking dependencies");
-    let undeclared = import_findings(
-        root,
-        selection,
-        request.config.engines.sca,
-        &mut state.ran,
-        &mut state.skipped,
-        &mut state.findings,
-    );
+    let undeclared = independent.0.count;
+    if independent.0.enabled {
+        state.ran.push("sca".into());
+    } else {
+        state.skipped.push("sca".into());
+    }
+    state.findings.extend(independent.0.findings);
     report(request, "Checking secrets");
-    secret_and_perf(
-        selection,
-        root,
-        &request.config.scope.exclude,
-        &request.config.scope.include_generated,
-        &mut state.ran,
-        &mut state.findings,
-    );
+    state.ran.extend(["secrets".into(), "perf".into()]);
+    state.findings.extend(independent.1);
     report(request, "Checking spec");
     let mut spec = spec_engine(
         request,
@@ -2319,35 +2858,83 @@ fn crap_gate(coverage_complete: bool, over: u64, untested: u64, untested_cc: u32
     gate("crap", over == 0 && untested == 0, &reason)
 }
 
-fn import_findings(
-    root: &Path,
-    selection: &Selection,
-    sca_enabled: bool,
-    ran: &mut Vec<String>,
-    skipped: &mut Vec<String>,
-    findings: &mut Vec<Finding>,
-) -> u64 {
-    if !sca_enabled {
-        skipped.push("sca".into());
-        return 0;
+struct DependencyScan {
+    enabled: bool,
+    count: u64,
+    findings: Vec<Finding>,
+}
+
+/// Run independent read-only scans while a build closure performs the serial
+/// Cargo phases. Scoped workers can borrow the selected source tree safely.
+fn with_independent_scans<B, S, P, BR, SR, PR>(build: B, sca: S, secrets: P) -> (BR, (SR, PR))
+where
+    B: FnOnce() -> BR + Send,
+    S: FnOnce() -> SR + Send,
+    P: FnOnce() -> PR + Send,
+    BR: Send,
+    SR: Send,
+    PR: Send,
+{
+    std::thread::scope(|scope| {
+        let sca = scope.spawn(sca);
+        let secrets = scope.spawn(secrets);
+        let built = build();
+        (
+            built,
+            (
+                sca.join().expect("SCA scan worker panicked"),
+                secrets.join().expect("secrets scan worker panicked"),
+            ),
+        )
+    })
+}
+
+fn scan_rust_dependencies(root: &Path, selection: &Selection, enabled: bool) -> DependencyScan {
+    if !enabled {
+        return DependencyScan {
+            enabled,
+            count: 0,
+            findings: Vec::new(),
+        };
     }
-    // First segments that resolve inside the crate are never external:
-    // declared `mod` names, `extern crate` aliases, and file modules
-    // (`src/score.rs`, `src/foo/mod.rs`) across the analyzed sources.
-    let mut local: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    // First segments resolving inside the crate are never external.
+    let mut local = BTreeSet::new();
     for file in &selection.files {
         local.extend(file.local_names.iter().cloned());
         if let Some(module) = file_module(&file.rel) {
             local.insert(module);
         }
     }
-    ran.push("sca".into());
-    let mut count = 0u64;
+    let mut findings = Vec::new();
+    let mut count = 0;
     for file in &selection.files {
         let allowed = crate::manifest::declared_for_file(root, &file.rel);
-        count += undeclared_imports(file, &allowed, &local, findings);
+        count += undeclared_imports(file, &allowed, &local, &mut findings);
     }
-    count
+    DependencyScan {
+        enabled,
+        count,
+        findings,
+    }
+}
+
+#[cfg(test)]
+fn import_findings(
+    root: &Path,
+    selection: &Selection,
+    enabled: bool,
+    ran: &mut Vec<String>,
+    skipped: &mut Vec<String>,
+    findings: &mut Vec<Finding>,
+) -> u64 {
+    let scan = scan_rust_dependencies(root, selection, enabled);
+    if scan.enabled {
+        ran.push("sca".into());
+    } else {
+        skipped.push("sca".into());
+    }
+    findings.extend(scan.findings);
+    scan.count
 }
 
 fn undeclared_imports(
@@ -2413,21 +3000,13 @@ fn file_module(rel: &str) -> Option<String> {
     Some(stem.to_string())
 }
 
-fn secret_and_perf(
+fn scan_rust_secrets(
     selection: &Selection,
     root: &Path,
     exclude: &[String],
     include_generated: &[String],
-    ran: &mut Vec<String>,
-    findings: &mut Vec<Finding>,
-) {
-    ran.push("secrets".into());
-    ran.push("perf".into());
-    findings.extend(crate::pack::text_secrets_with_generated(
-        root,
-        exclude,
-        include_generated,
-    ));
+) -> Vec<Finding> {
+    let mut findings = crate::pack::text_secrets_with_generated(root, exclude, include_generated);
     for file in &selection.files {
         for hit in &file.perf {
             findings.push(Finding {
@@ -2445,6 +3024,7 @@ fn secret_and_perf(
             });
         }
     }
+    findings
 }
 
 struct SpecRun {
@@ -2870,6 +3450,9 @@ fn mean_coverage(
 }
 
 fn write_last_scorecard(root: &Path, card: &Scorecard) {
+    if SUPPRESS_LAST_SCORECARD.with(std::cell::Cell::get) {
+        return;
+    }
     let path = root.join(".sc").join("last-scorecard.json");
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -3019,6 +3602,136 @@ fn unique_ids(findings: &mut [Finding]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn multi_pack_analysis_aggregates_root_relative_findings() {
+        let root = std::env::temp_dir().join(format!("sc-multi-pack-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let site = root.join("web-app");
+        std::fs::create_dir_all(&site).unwrap();
+        std::fs::write(
+            site.join("index.html"),
+            "<html><body><p>Broken</p></body></html>",
+        )
+        .unwrap();
+        let go = root.join("go-app");
+        std::fs::create_dir_all(&go).unwrap();
+        std::fs::write(go.join("go.mod"), "module example.com/go-app\n\ngo 1.23\n").unwrap();
+        std::fs::write(go.join("main.go"), "package main\nfunc main() {}\n").unwrap();
+        let config = Config {
+            pack: "multi".into(),
+            ..Config::default()
+        };
+        let output = analyze(AnalyzeRequest {
+            root: root.clone(),
+            repo: "multi-fixture".into(),
+            fail_on: vec!["none".into()],
+            budget: Duration::from_secs(20),
+            config,
+            diff_base: None,
+            diff_head: None,
+            path_list: Vec::new(),
+            spec_path: None,
+            mutation_override: Some("off".into()),
+            llm_override: Some(false),
+            intent: None,
+            progress: None,
+        });
+        assert_eq!(output.scorecard.identity.pack, "multi");
+        assert!(output
+            .scorecard
+            .sections
+            .findings
+            .iter()
+            .any(|finding| finding.file == "web-app/index.html"));
+        assert!(output.scorecard.measures.gates.iter().any(|gate| gate
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("go-app:"))));
+        assert!(root.join(".sc/last-scorecard.json").is_file());
+        assert!(!root.join("web-app/.sc/last-scorecard.json").exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn independent_scans_overlap_the_build_work() {
+        let rendezvous = std::sync::Arc::new(std::sync::Barrier::new(3));
+        let build_barrier = rendezvous.clone();
+        let sca_barrier = rendezvous.clone();
+        let secrets_barrier = rendezvous.clone();
+        let (built, (sca, secrets)) = with_independent_scans(
+            move || {
+                build_barrier.wait();
+                "build"
+            },
+            move || {
+                sca_barrier.wait();
+                "sca"
+            },
+            move || {
+                secrets_barrier.wait();
+                "secrets"
+            },
+        );
+        assert_eq!((built, sca, secrets), ("build", "sca", "secrets"));
+    }
+
+    #[test]
+    fn parallel_rust_analysis_keeps_dependency_and_secret_findings() {
+        let dir = git_repo("sc-parallel-rust");
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"parallel_fixture\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let key = format!("AKIA{}{}", "0Z3VS5J4", "AB3KQM9Z");
+        std::fs::write(
+            dir.join("src/main.rs"),
+            format!("use undeclared_crate::Thing;\nconst KEY: &str = \"{key}\";\nfn main() {{}}\n"),
+        )
+        .unwrap();
+        let config: Config = toml::from_str(
+            "pack = \"rust\"\n[engines]\nparallel = true\ncoverage = false\n[commands]\nlint = \"\"\n",
+        )
+        .unwrap();
+        let output = analyze(AnalyzeRequest {
+            root: dir.clone(),
+            repo: "parallel_fixture".into(),
+            fail_on: Vec::new(),
+            budget: Duration::from_secs(60),
+            config,
+            diff_base: None,
+            diff_head: None,
+            path_list: Vec::new(),
+            spec_path: None,
+            mutation_override: None,
+            llm_override: Some(false),
+            intent: None,
+            progress: None,
+        });
+        let findings = &output.scorecard.sections.findings;
+        assert!(findings.iter().any(|finding| {
+            finding.rule == "sca.undeclared_dependency"
+                && finding.symbol.as_deref() == Some("undeclared_crate")
+        }));
+        assert!(findings
+            .iter()
+            .any(|finding| finding.rule == "secrets.aws_access_key"));
+        assert!(output
+            .scorecard
+            .engines
+            .engines_run
+            .iter()
+            .any(|engine| engine == "sca"));
+        assert!(output
+            .scorecard
+            .engines
+            .engines_run
+            .iter()
+            .any(|engine| engine == "secrets"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     use sc_core::{Config, Span};
 
     fn sample_fn(file: &str, symbol: &str, line: u32) -> FunctionInfo {
