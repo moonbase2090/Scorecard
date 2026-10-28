@@ -4,6 +4,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-10-28
+
 ### Added
 
 - The Markdown report has an Engine timing table: time per engine, summed over its runs, with a total (SC-41, part a).
