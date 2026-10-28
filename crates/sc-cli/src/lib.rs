@@ -368,6 +368,7 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
     ) {
         let _ = writeln!(io::stderr(), "{warning}");
     }
+    let previous = previous_run(&root);
     let generated_paths = generated_output_paths(&root, out.as_deref(), &file_format);
     // The spinner animates on stderr only; stdout stays byte-identical.
     // It starts just before the long analysis run and is cleared before
@@ -400,6 +401,7 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
         spinner.finish();
     }
     finish_baseline(&mut output, write_baseline, known.as_ref(), &baseline_file);
+    print_trend(previous.as_ref(), &output.scorecard, view.tty && !quiet);
     emit(
         &mut stdout,
         &view,
@@ -521,6 +523,45 @@ fn finish_baseline(output: &mut AnalyzeOutput, write: bool, known: Option<&Basel
             );
         }
     }
+}
+
+/// The report the last run left behind. It is read before analysis, because
+/// analysis overwrites it.
+fn previous_run(root: &Path) -> Option<sc_core::Scorecard> {
+    let text = fs::read_to_string(root.join(".sc/last-scorecard.json")).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// One stderr line against the previous run, shown only on a terminal so
+/// captured output and CI logs stay as they were.
+fn print_trend(previous: Option<&sc_core::Scorecard>, card: &sc_core::Scorecard, show: bool) {
+    if !show {
+        return;
+    }
+    let Some(previous) = previous else {
+        return;
+    };
+    let Some(trend) = sc_core::trend(previous, card) else {
+        return;
+    };
+    let _ = writeln!(io::stderr(), "{}", trend_line(&trend));
+}
+
+fn trend_line(trend: &sc_core::Trend) -> String {
+    let scores = if trend.scores.is_empty() {
+        "no score change".to_string()
+    } else {
+        trend
+            .scores
+            .iter()
+            .map(|(name, before, after)| format!("{name} {before:.2} -> {after:.2}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    format!(
+        "sc: vs previous run: {scores}; {} new findings, {} resolved",
+        trend.new_findings, trend.resolved_findings
+    )
 }
 
 fn read_baseline(path: &Path) -> Result<Baseline, String> {
@@ -855,5 +896,53 @@ mod baseline_gate_tests {
             matches!(out.status, RunStatus::GateFailed),
             "tests must block"
         );
+    }
+}
+
+#[cfg(test)]
+mod trend_line_tests {
+    use super::*;
+
+    #[test]
+    fn names_each_changed_score_and_the_finding_movement() {
+        let trend = sc_core::Trend {
+            scores: vec![("maintainability", 1.0, 0.75)],
+            new_findings: 1,
+            resolved_findings: 0,
+        };
+        assert_eq!(
+            trend_line(&trend),
+            "sc: vs previous run: maintainability 1.00 -> 0.75; 1 new findings, 0 resolved"
+        );
+    }
+
+    #[test]
+    fn says_so_when_no_score_moved() {
+        let trend = sc_core::Trend {
+            scores: Vec::new(),
+            new_findings: 0,
+            resolved_findings: 2,
+        };
+        assert_eq!(
+            trend_line(&trend),
+            "sc: vs previous run: no score change; 0 new findings, 2 resolved"
+        );
+    }
+
+    #[test]
+    fn previous_run_reads_a_saved_report_and_none_when_absent() {
+        let root = std::env::temp_dir().join(format!("sc-prev-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(previous_run(&root).is_none());
+        let card = sc_core::Scorecard::skeleton("repo", 30);
+        std::fs::create_dir_all(root.join(".sc")).unwrap();
+        std::fs::write(
+            root.join(".sc/last-scorecard.json"),
+            serde_json::to_string(&card).unwrap(),
+        )
+        .unwrap();
+        let read = previous_run(&root).unwrap();
+        assert_eq!(read.identity.repo, "repo");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
