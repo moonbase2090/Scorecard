@@ -31,6 +31,26 @@ A gate with `enforced: false` is reported and does not fail the process. Rust en
 | C++ | `.sc/coverage/cpp.info` from lcov after CTest |
 | Go | `go test -coverprofile` |
 
+### Gate matrix
+
+Each row lists the gates a pack runs. **Enforced** gates set exit 1 when they fail (the default `fail_on` list is `types,tests,crap,secrets,lint`). **Advisory** gates are reported and do not change the exit code. A gate marked *when the tool is present* is advisory on a machine without that tool, with the reason the report gives. Coverage source is the report the `crap` gate reads.
+
+| Pack | Enforced | Advisory | Coverage source |
+|---|---|---|---|
+| Rust | types, tests, crap, lint, secrets | sca | `cargo llvm-cov` |
+| Node | types (`node --check`), crap, secrets | tests (until a `test` script exists), lint (until eslint is configured), sca | c8 or nyc, `coverage-final.json` |
+| Python | types (`compileall`), crap, lint (ruff), secrets | tests (until a pytest suite exists), sca | pytest-cov, falls back to coverage.py |
+| Bash | types (`bash -n`), crap, secrets | tests (bats), lint (shellcheck), sca | kcov, Cobertura |
+| Go | secrets; types, tests, lint when Go is installed | sca; crap until a coverage record exists | `go test -coverprofile` |
+| Java | types, tests, crap, secrets | lint, sca | JaCoCo, `jacoco.xml` |
+| C# | types, tests, secrets | lint (analyzers run in `dotnet build`), sca, crap until a coverage record exists | Cobertura, `csharp.cobertura.xml` |
+| PHP | types, crap, secrets; tests when PHPUnit is installed | lint (phpstan), sca | PHPUnit with pcov, `clover.xml` |
+| C++ | types, secrets | tests (CTest), lint (clang-tidy), sca, crap until a coverage record exists | lcov after CTest, `cpp.info` |
+| Web | html, secrets | a11y, links, crap until a coverage record exists | none |
+| Command | secrets, plus the lint command you set | sca | none |
+
+Measured on the repository's test packs with the tools that were not installed on that machine, so the advisory reasons above are the ones the report gives. The Go row is not measured: Go was not installed there.
+
 Node runs c8 or nyc with `--all`. For a Python `src/` layout, `sc` puts each source root first on `PYTHONPATH` while pytest or the `coverage.py` fallback runs. Tests import the checkout that coverage measures, even when another package copy is installed. Python passes each directory that holds a scored function to pytest-cov as a `--cov` source, and the fallback uses the same directories as `--source`. A file the tests never load is scored at 0% coverage instead of being left out.
 
 The command pack has no coverage runner. When a pack writes no coverage report, no function is scored: the CRAP table is empty, and the `crap` gate is advisory with the reason that some functions have no coverage record and were not scored. The run reports `coverage.missing`.
