@@ -23,7 +23,7 @@ summary to scrollback or a pipe with `sc tui --inline`. See [Browse a saved anal
 Download `sc` for your platform and run it on a project:
 
 ```bash doctest network
-VERSION=v0.1.10
+VERSION=v0.1.12
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64) TARGET=aarch64-apple-darwin ;;
   Darwin-x86_64) TARGET=x86_64-apple-darwin ;;
@@ -64,7 +64,7 @@ Export a saved report to Waypoint with `sc export --waypoint --project PROJECT`.
 In a terminal the report looks like this (from `testdata/good_crate`):
 
 ```text
-sc 0.1.12  testdata/good_crate  rust  5ac851c clean  scope tree
+sc 0.1.13  testdata/good_crate  rust  5ac851c clean  scope tree
 
 PASS
 
@@ -131,6 +131,7 @@ Next:
 - Run `sc setup` so coding agents on this machine can use `sc` ([agents](docs/how-to/agents.md)).
 - Install just the agent instructions with `sc skills install --agent detected`; see [skill installation](docs/how-to/agents.md#install-the-skill).
 - Write a user config with `sc config init`, or put `analyzer.toml` at the project root ([configure](docs/how-to/config.md)).
+- Rust projects can opt into overlapping dependency and secrets scans with `[engines] parallel = true`; Cargo commands remain sequential and the setting is off by default.
 
 The secrets scan also finds PEM private keys split across source string literals, including Go or Java concatenations and YAML lists. See [PEM examples](examples/README.md#pem-keys-in-source-files).
 
@@ -151,20 +152,20 @@ The secrets scan also finds PEM private keys split across source string literals
 
 ## Install
 
-Published release [v0.1.10](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.10). Each `.tar.gz` holds a top-level directory `sc-v<version>-<target>/` with `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md`.
+Published release [v0.1.12](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.12). Each `.tar.gz` holds a top-level directory `sc-v<version>-<target>/` with `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md`.
 
 | Platform | Asset |
 |---|---|
-| macOS, Apple silicon | `sc-v0.1.10-aarch64-apple-darwin.tar.gz` |
-| macOS, Intel | `sc-v0.1.10-x86_64-apple-darwin.tar.gz` |
-| macOS installer | `sc-v0.1.10-macos.pkg`, or `sc-v0.1.10-universal-apple-darwin.dmg`. Installs `sc` and `sc-mcp` to `/usr/local/bin` |
-| Linux, arm64 | `sc-v0.1.10-aarch64-unknown-linux-gnu.tar.gz` |
-| Linux, x86_64 | `sc-v0.1.10-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS, Apple silicon | `sc-v0.1.12-aarch64-apple-darwin.tar.gz` |
+| macOS, Intel | `sc-v0.1.12-x86_64-apple-darwin.tar.gz` |
+| macOS installer | `sc-v0.1.12-macos.pkg`, or `sc-v0.1.12-universal-apple-darwin.dmg`. Installs `sc` and `sc-mcp` to `/usr/local/bin` |
+| Linux, arm64 | `sc-v0.1.12-aarch64-unknown-linux-gnu.tar.gz` |
+| Linux, x86_64 | `sc-v0.1.12-x86_64-unknown-linux-gnu.tar.gz` |
 
 To check a download, fetch `SHA256SUMS` into the same directory and verify only the files you have:
 
 ```bash
-curl -fsSLO https://github.com/moonbase2090/Scorecard/releases/download/v0.1.10/SHA256SUMS
+curl -fsSLO https://github.com/moonbase2090/Scorecard/releases/download/v0.1.12/SHA256SUMS
 shasum -a 256 -c --ignore-missing SHA256SUMS   # Linux: sha256sum -c --ignore-missing SHA256SUMS
 ```
 
@@ -180,6 +181,11 @@ Rust coverage needs `rustup component add llvm-tools` and `cargo install cargo-l
 For Python projects with a `src/` layout, `sc` prepends each source root to `PYTHONPATH` while tests and coverage run. Pytest then imports the checkout files that Scorecard measures, even when another package copy is installed.
 
 For a Cargo workspace, analyze the root to check every member. Analyze a member directory to check only that package and avoid sibling crates.
+
+For a monorepo with separate language pack roots, set `pack = "multi"` in
+`analyzer.toml` or run `sc analyze --pack multi`. Scorecard analyzes discovered
+roots in sequence and writes one combined report. Use `sc doctor` in each pack
+root to check its required tools.
 
 ## License
 

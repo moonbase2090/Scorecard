@@ -109,7 +109,7 @@ Config resolution is `--config PATH`, then `analyzer.toml` in the analyzed direc
 | `[scope] exclude`, `include_generated` | Exclude paths (default empty) or opt selected generated/vendor paths back into scanning (default empty). |
 | `[mutation] mode`, `max_mutants`, `budget_seconds` | Configure mutation checks (`off`, `50`, and `180` by default). |
 | `[llm] enabled`, `backend`, `endpoint`, `model`, `base_url`, `api_key_env`, `max_tool_rounds` | Configure optional spec/intent review. `backend` is `ollama`, `openai-compatible`, or `cursor`; review is disabled by default. Keep API keys in their named environment variable, not in the config file. |
-| `[engines] coverage`, `sca`, `perf` | Enable coverage (`true`), dependency analysis (`true`), and Rust performance checks (`false`). |
+| `[engines] coverage`, `sca`, `parallel`, `perf` | Enable coverage (`true`), dependency analysis (`true`), parallel Rust dependency/secrets scans during Cargo phases (`false`), and Rust performance checks (`false`). |
 | `[commands] lint` | Set the lint command (default `cargo clippy --workspace`); an empty value skips the command lint engine. |
 | `[html] enforce`, `[links] enforce`, `[a11y] enforce`, `[a11y] disable` | Configure web and accessibility enforcement (`auto`, `false`, `false`, and no disabled rules by default). |
 

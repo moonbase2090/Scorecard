@@ -21,7 +21,9 @@ sc help [COMMAND]
 | `--format FORMAT` | `pretty` on a terminal, `json` otherwise | `json`, `pretty`, `md`, `sarif`, `html`, or `all`. See [Output](#output). |
 | `--out PATH` | none | Also write the report to `PATH`. Stdout prints the short summary, including when it is not a terminal. Without this flag, stdout is the chosen `--format`. |
 | `--fail-on LIST` | `types,tests,crap,secrets,lint` | Comma-separated [gates](gates.md) whose failures set exit 1. Use `none` by itself to suppress gate failures from the exit code. Empty or blank lists are invalid. Overrides `gates.fail_on`; already enforced failures remain in the report verdict. |
-| `--pack PACK` | detected | `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, `web`, or `command`. Needed when the tree has two markers. See [packs](../packs.md). |
+| `--write-baseline` | off | Write each finding's fingerprint to `.sc/baseline.json` under the project. Run it once on the state you accept, then gate with `--baseline`. Cannot be combined with `--baseline`. |
+| `--baseline` | off | Exit 1 only when a failing gate fails on a finding not in `.sc/baseline.json`. Known findings stay in the report. Exits 2 with a fix hint when there is no baseline file. Does not gate on metric regressions yet. |
+| `--pack PACK` | detected | `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, `web`, `command`, or `multi`. Use `multi` to opt into sequential analysis of monorepo pack roots. See [packs](../packs.md). |
 | `--diff [BASE]` | off | Score only what changed against git `BASE`. Paths are relative to the project directory, including when that directory sits inside a larger git repository. Python compiles, lints, and checks imports only in changed `.py` files, runs pytest only on changed `test_*.py` and `*_test.py` files, and drops secret findings on unchanged paths. Without `BASE` (AUTO): `HEAD~1`, else `main`, else `master`, skipping a candidate that is the same commit as `HEAD`. When none remain — a shallow clone, a single commit, or a depth-1 clone of `main` or `master` — the run exits 2 with verdict `fail` and one stderr line; fetch full history (`fetch-depth: 0`) or pass `--diff BASE`. A missing explicit base exits 2 the same way and names the ref. An explicit `--diff HEAD` still works. Uncommitted changes count. |
 | `--diff-head REV` | worktree | With `--diff`, compare `BASE` to commit `REV` instead of the worktree. |
 | `--paths FILE` | off | Score only the source files listed in `FILE`, one per line. Cannot be combined with `--diff`. |
@@ -81,6 +83,8 @@ Print or create `~/.config/sc/analyzer.toml`. See [Configure](../how-to/config.m
 | `sc config init --force` | Replace an existing file. |
 
 ## sc doctor
+
+With `pack = "multi"`, run `sc doctor` in each pack root; doctor exits 2 at the monorepo root because each pack can require different tools.
 
 Lists the tools the project's language pack needs, marks each `ok` or missing, and prints the install command for every missing one. A missing required tool is one an enforced gate cannot run without; a missing optional tool only disables an extra check. Requirements follow the tree: `cc` is required only with `.c` files and `g++` only with C++ files, `pytest` only with a pytest suite, and `uv` is required to run a pytest suite in a project with `uv.lock` or `.venv`, even when system pytest is installed. With a suite and coverage enabled, doctor also checks for `pytest-cov` or `coverage.py`; uv supplies these automatically for uv projects. Elsewhere, either installed coverage tool is enough. `uv` can also supply `ruff`. The pack comes from the same detection as `sc analyze`, including `pack` in `analyzer.toml`. When several manifests match, `sc doctor` stops like `sc analyze` does; pass `--pack`. Install commands use `brew` on macOS and `apt-get` where it exists; otherwise they give the Debian package name.
 
@@ -159,7 +163,7 @@ Scorecard excludes its saved report, cache and coverage files under `.sc/`, and 
 
 | Status | Meaning |
 |---|---|
-| 0 | No selected gate failed. `--fail-on none` deliberately selects no gates. If an enforced gate failed, `sc` names it in one stderr warning and the report verdict remains `fail`. |
+| 0 | No selected gate failed. `--fail-on none` deliberately selects no gates. If an enforced gate failed, `sc` names it in one stderr warning and the report verdict remains `fail`. With `--baseline`, a failing gate that fails only on known findings exits 0 and the report verdict remains `fail`. |
 | 1 | A selected gate failed |
 | 2 | `sc` could not run: missing path, invalid config (including an empty `--fail-on` or `gates.fail_on`), a required toolchain missing, or compile or tests timed out |
 

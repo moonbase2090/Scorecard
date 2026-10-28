@@ -27,7 +27,7 @@ pub struct Config {
     pub html: HtmlConfig,
     pub links: LinksConfig,
     pub a11y: A11yConfig,
-    /// Empty detects a pack from the tree: `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, `web`, or `command`.
+    /// Empty detects a pack from the tree; `multi` opts into sequential monorepo analysis.
     pub pack: String,
     /// Rustup channel for check, test, coverage, and lint. Empty uses
     /// `rust-toolchain.toml` / `rust-toolchain` in the project root.
@@ -102,6 +102,9 @@ pub struct LlmConfig {
 pub struct EnginesConfig {
     pub coverage: bool,
     pub sca: bool,
+    /// Run the read-only Rust SCA and secrets scans alongside Cargo phases.
+    /// Off by default so analysis scheduling remains opt-in.
+    pub parallel: bool,
     /// When true, emit `perf.nested_loop` / `perf.clone_in_loop` on product
     /// Rust (test modules stay skipped). Off by default.
     pub perf: bool,
@@ -201,6 +204,7 @@ impl Default for EnginesConfig {
         Self {
             coverage: true,
             sca: true,
+            parallel: false,
             perf: false,
         }
     }
@@ -415,6 +419,7 @@ mod tests {
         assert_eq!(config.gates.crap_threshold, 30);
         assert!(config.engines.coverage);
         assert!(config.engines.sca);
+        assert!(!config.engines.parallel);
         assert!(!config.engines.perf);
         assert!(config.pack.is_empty());
         assert_eq!(config.gates.new_fn_untested_cc, 15);

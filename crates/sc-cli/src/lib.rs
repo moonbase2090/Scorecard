@@ -26,7 +26,10 @@ use sc_core::{
     apply_disposition, compute_scores, load_config_file, normalize_gates, resolve_config_path,
     Finding, Gate, Scorecard, SCORECARD_VERSION,
 };
-use sc_engines::{analyze_with_generated_paths, os_metadata_warning, AnalyzeRequest, RunStatus};
+use sc_core::{gates_failing_on_new_findings, Baseline, BASELINE_VERSION};
+use sc_engines::{
+    analyze_with_generated_paths, os_metadata_warning, AnalyzeOutput, AnalyzeRequest, RunStatus,
+};
 
 pub use format::{to_json, to_markdown};
 use report::to_html;
@@ -59,7 +62,15 @@ struct AnalyzeArgs {
     /// Default: types,tests,crap,secrets,lint.
     #[arg(long, value_name = "LIST")]
     fail_on: Option<String>,
-    /// Pack override when several manifests match: rust, node, python, bash, go, java, csharp, php, cpp, web, or command.
+    /// Write every finding's fingerprint to `.sc/baseline.json` in the project.
+    /// Run once on a clean or accepted state, then gate with `--baseline`.
+    #[arg(long, conflicts_with = "baseline")]
+    write_baseline: bool,
+    /// Exit 1 only when a failing gate fails on a finding not in `.sc/baseline.json`.
+    /// Known findings still appear in the report. Exits 2 when there is no baseline.
+    #[arg(long)]
+    baseline: bool,
+    /// Pack override when several manifests match, or `multi` to analyze pack roots in a monorepo.
     #[arg(long, value_name = "PACK")]
     pack: Option<String>,
     /// Score only the git diff against BASE. Omit BASE for AUTO (HEAD~1, else
@@ -177,6 +188,9 @@ struct View<'a> {
     color: bool,
     width: usize,
     tty: bool,
+    /// True when `--baseline` decides the exit code, so enforced failures
+    /// that the baseline covers are not reported as unexpected.
+    baseline: bool,
 }
 
 /// Pick what lands on stdout. With `--out`, print the short summary in
@@ -230,6 +244,8 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
         budget_seconds,
         config,
         quiet,
+        write_baseline,
+        baseline,
     } = args;
     let tty = io::IsTerminal::is_terminal(&io::stdout());
     let stdout_format = pretty::stdout_format(format.as_deref(), tty);
@@ -248,6 +264,7 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
         ),
         width: pretty::term_width(),
         tty,
+        baseline,
     };
     let path = path.unwrap_or_else(|| PathBuf::from("."));
     let repo = display_repo(&path);
@@ -288,6 +305,26 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
                 RunStatus::AnalyzerError,
             );
         }
+    };
+
+    let baseline_file = root.join(".sc").join("baseline.json");
+    let known = if baseline {
+        match read_baseline(&baseline_file) {
+            Ok(known) => Some(known),
+            Err(err) => {
+                let _ = writeln!(io::stderr(), "sc: {err}");
+                let card = early_card(&repo, "baseline.invalid", "baseline", &err);
+                return emit(
+                    &mut stdout,
+                    &view,
+                    out.as_deref(),
+                    &card,
+                    RunStatus::AnalyzerError,
+                );
+            }
+        }
+    } else {
+        None
     };
 
     let config_path = resolve_config_path(config.as_deref(), &root);
@@ -360,6 +397,7 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
     ) {
         let _ = writeln!(io::stderr(), "{warning}");
     }
+    let previous = previous_run(&root);
     let generated_paths = generated_output_paths(&root, out.as_deref(), &file_format);
     // The spinner animates on stderr only; stdout stays byte-identical.
     // It starts just before the long analysis run and is cleared before
@@ -370,7 +408,7 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
     } else {
         None
     };
-    let output = analyze_with_generated_paths(
+    let mut output = analyze_with_generated_paths(
         AnalyzeRequest {
             root,
             repo,
@@ -391,6 +429,8 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
     if let Some(spinner) = spinner {
         spinner.finish();
     }
+    finish_baseline(&mut output, write_baseline, known.as_ref(), &baseline_file);
+    print_trend(previous.as_ref(), &output.scorecard, view.tty && !quiet);
     emit(
         &mut stdout,
         &view,
@@ -441,7 +481,7 @@ fn emit(
             .filter(|gate| gate.enforced && !gate.pass)
             .map(|gate| gate.id.as_str())
             .collect();
-        if !failed_enforced.is_empty() {
+        if !failed_enforced.is_empty() && !view.baseline {
             let _ = writeln!(
                 io::stderr(),
                 "sc: exit 0 although enforced gates failed: {} (not in --fail-on)",
@@ -477,6 +517,109 @@ fn note_unresolved_diff_base(card: &Scorecard, status: RunStatus) {
     };
     let line = finding.message.replace(['\n', '\r'], " ");
     let _ = writeln!(io::stderr(), "{line}");
+}
+
+/// Write or apply the baseline once the analysis has run. Writing never changes
+/// the outcome beyond an error; `known` can turn a gate failure into exit 0.
+fn finish_baseline(output: &mut AnalyzeOutput, write: bool, known: Option<&Baseline>, file: &Path) {
+    if write {
+        match write_baseline_file(file, &output.scorecard.sections.findings) {
+            Ok(count) => {
+                let _ = writeln!(
+                    io::stderr(),
+                    "sc: wrote {count} finding fingerprints to {}",
+                    file.display()
+                );
+            }
+            Err(err) => {
+                let _ = writeln!(io::stderr(), "sc: {err}");
+                output.status = RunStatus::AnalyzerError;
+            }
+        }
+    }
+    if let Some(known) = known {
+        // Only gates that --fail-on selects can block; a new finding in an
+        // unselected gate is reported but does not change the exit code.
+        let blocking = gates_failing_on_new_findings(&output.scorecard, known)
+            .iter()
+            .any(|id| output.scorecard.fail_on.contains(id));
+        if output.status == RunStatus::GateFailed && !blocking {
+            output.status = RunStatus::Passed;
+            let _ = writeln!(
+                io::stderr(),
+                "sc: exit 0: every failing --fail-on gate fails only on findings in {}",
+                file.display()
+            );
+        }
+    }
+}
+
+/// The report the last run left behind. It is read before analysis, because
+/// analysis overwrites it.
+fn previous_run(root: &Path) -> Option<sc_core::Scorecard> {
+    let text = fs::read_to_string(root.join(".sc/last-scorecard.json")).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// One stderr line against the previous run, shown only on a terminal so
+/// captured output and CI logs stay as they were.
+fn print_trend(previous: Option<&sc_core::Scorecard>, card: &sc_core::Scorecard, show: bool) {
+    if !show {
+        return;
+    }
+    let Some(previous) = previous else {
+        return;
+    };
+    let Some(trend) = sc_core::trend(previous, card) else {
+        return;
+    };
+    let _ = writeln!(io::stderr(), "{}", trend_line(&trend));
+}
+
+fn trend_line(trend: &sc_core::Trend) -> String {
+    let scores = if trend.scores.is_empty() {
+        "no score change".to_string()
+    } else {
+        trend
+            .scores
+            .iter()
+            .map(|(name, before, after)| format!("{name} {before:.2} -> {after:.2}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    format!(
+        "sc: vs previous run: {scores}; {} new findings, {} resolved",
+        trend.new_findings, trend.resolved_findings
+    )
+}
+
+fn read_baseline(path: &Path) -> Result<Baseline, String> {
+    let text = fs::read_to_string(path).map_err(|_| {
+        format!(
+            "no baseline at {}. Run `sc analyze --write-baseline` first.",
+            path.display()
+        )
+    })?;
+    let baseline: Baseline = serde_json::from_str(&text)
+        .map_err(|err| format!("cannot parse {}: {err}", path.display()))?;
+    if baseline.version != BASELINE_VERSION {
+        return Err(format!(
+            "{} is baseline version {}, expected {BASELINE_VERSION}. Run `sc analyze --write-baseline` again.",
+            path.display(),
+            baseline.version
+        ));
+    }
+    Ok(baseline)
+}
+
+fn write_baseline_file(path: &Path, findings: &[Finding]) -> Result<usize, String> {
+    let baseline = Baseline::from_findings(findings);
+    let text = serde_json::to_string_pretty(&baseline).map_err(|err| err.to_string())?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|err| format!("{}: {err}", parent.display()))?;
+    }
+    fs::write(path, format!("{text}\n")).map_err(|err| format!("{}: {err}", path.display()))?;
+    Ok(baseline.fingerprints.len())
 }
 
 fn write_reports(
@@ -703,5 +846,132 @@ mod stdout_body_format_tests {
                 "format={format} has_out={has_out} tty={tty}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod baseline_gate_tests {
+    use super::*;
+    use sc_core::Gate;
+    use serde_json::json;
+
+    fn finding(engine: &str, message: &str) -> Finding {
+        Finding {
+            id: format!("{engine}-{message}"),
+            rule: format!("{engine}.rule"),
+            engine: engine.into(),
+            severity: "error".into(),
+            file: "src/lib.rs".into(),
+            span: None,
+            symbol: None,
+            message: message.into(),
+            evidence: json!({}),
+            suggested_action: None,
+            disposition: String::new(),
+        }
+    }
+
+    /// `tests` (selected by --fail-on) and `lint` (not selected) both fail.
+    /// The known finding is in the baseline; `new_engine` gets a new one.
+    fn outcome(new_engine: &str) -> AnalyzeOutput {
+        let known = finding("tests", "known failure");
+        let mut scorecard = Scorecard::skeleton("repo", 30);
+        scorecard.fail_on = vec!["tests".into()];
+        scorecard.measures.gates = ["tests", "lint"]
+            .iter()
+            .map(|id| Gate {
+                id: (*id).into(),
+                pass: false,
+                enforced: true,
+                reason: None,
+            })
+            .collect();
+        scorecard.sections.findings = vec![known.clone(), finding(new_engine, "new failure")];
+        AnalyzeOutput {
+            scorecard,
+            status: RunStatus::GateFailed,
+        }
+    }
+
+    fn baseline() -> Baseline {
+        Baseline::from_findings(&[finding("tests", "known failure")])
+    }
+
+    #[test]
+    fn a_new_finding_outside_fail_on_does_not_block() {
+        let mut out = outcome("lint");
+        finish_baseline(
+            &mut out,
+            false,
+            Some(&baseline()),
+            Path::new(".sc/baseline.json"),
+        );
+        assert!(
+            matches!(out.status, RunStatus::Passed),
+            "lint must not block"
+        );
+    }
+
+    #[test]
+    fn a_new_finding_in_a_selected_gate_blocks() {
+        let mut out = outcome("tests");
+        finish_baseline(
+            &mut out,
+            false,
+            Some(&baseline()),
+            Path::new(".sc/baseline.json"),
+        );
+        assert!(
+            matches!(out.status, RunStatus::GateFailed),
+            "tests must block"
+        );
+    }
+}
+
+#[cfg(test)]
+mod trend_line_tests {
+    use super::*;
+
+    #[test]
+    fn names_each_changed_score_and_the_finding_movement() {
+        let trend = sc_core::Trend {
+            scores: vec![("maintainability", 1.0, 0.75)],
+            new_findings: 1,
+            resolved_findings: 0,
+        };
+        assert_eq!(
+            trend_line(&trend),
+            "sc: vs previous run: maintainability 1.00 -> 0.75; 1 new findings, 0 resolved"
+        );
+    }
+
+    #[test]
+    fn says_so_when_no_score_moved() {
+        let trend = sc_core::Trend {
+            scores: Vec::new(),
+            new_findings: 0,
+            resolved_findings: 2,
+        };
+        assert_eq!(
+            trend_line(&trend),
+            "sc: vs previous run: no score change; 0 new findings, 2 resolved"
+        );
+    }
+
+    #[test]
+    fn previous_run_reads_a_saved_report_and_none_when_absent() {
+        let root = std::env::temp_dir().join(format!("sc-prev-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(previous_run(&root).is_none());
+        let card = sc_core::Scorecard::skeleton("repo", 30);
+        std::fs::create_dir_all(root.join(".sc")).unwrap();
+        std::fs::write(
+            root.join(".sc/last-scorecard.json"),
+            serde_json::to_string(&card).unwrap(),
+        )
+        .unwrap();
+        let read = previous_run(&root).unwrap();
+        assert_eq!(read.identity.repo, "repo");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
