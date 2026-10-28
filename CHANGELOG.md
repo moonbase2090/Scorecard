@@ -4,6 +4,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `sc export --waypoint` exports saved findings to Waypoint, grouped by file and symbol, with fingerprint-based retry deduplication.
+
+### Fixed
+
+- On Windows, `APPDATA` applies only to the native `USERPROFILE`; a `HOME` override resolves config under that profile's roaming directory instead of the signed-in account's AppData folder.
+
 ## [0.1.12] - 2026-10-27
 
 ### Fixed
