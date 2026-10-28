@@ -1013,33 +1013,59 @@ fn analyze_rust(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
     } else {
         selection.workspace_root
     };
-    let mut state = RustState::new(workspace_root, request.config.toolchain.clone());
-    if let Some(err) = &select_error {
-        state.findings.push(unavailable("scope", err));
-    }
-    state.analyzer_error = select_error.is_some();
+    let build = || {
+        let mut state = RustState::new(workspace_root, request.config.toolchain.clone());
+        if let Some(err) = &select_error {
+            state.findings.push(unavailable("scope", err));
+        }
+        state.analyzer_error = select_error.is_some();
 
-    let manifest = root.join("Cargo.toml");
-    if !manifest.is_file() {
-        missing_manifest(&mut state);
-    } else {
-        report(&request, "Checking types (cargo check)");
-        compile_phase(root, &manifest, deadline, &mut state);
+        let manifest = root.join("Cargo.toml");
+        if !manifest.is_file() {
+            missing_manifest(&mut state);
+        } else {
+            report(&request, "Checking types (cargo check)");
+            compile_phase(root, &manifest, deadline, &mut state);
 
-        report(&request, "Running tests (cargo test)");
-        test_phase(root, &selection, &manifest, deadline, &mut state);
-        report(&request, "Measuring coverage");
-        coverage_phase(
-            root,
+            report(&request, "Running tests (cargo test)");
+            test_phase(root, &selection, &manifest, deadline, &mut state);
+            report(&request, "Measuring coverage");
+            coverage_phase(
+                root,
+                &selection,
+                &manifest,
+                deadline,
+                request.config.engines.coverage,
+                &mut state,
+            );
+        }
+        state
+    };
+    let sca = || scan_rust_dependencies(root, &selection, request.config.engines.sca);
+    let secrets = || {
+        scan_rust_secrets(
             &selection,
-            &manifest,
-            deadline,
-            request.config.engines.coverage,
-            &mut state,
-        );
-    }
+            root,
+            &request.config.scope.exclude,
+            &request.config.scope.include_generated,
+        )
+    };
+    let (state, independent) = if request.config.engines.parallel {
+        with_independent_scans(build, sca, secrets)
+    } else {
+        let state = build();
+        (state, (sca(), secrets()))
+    };
 
-    assemble_rust_report(&request, &selection, threshold, deadline, state, git)
+    assemble_rust_report(
+        &request,
+        &selection,
+        threshold,
+        deadline,
+        state,
+        independent,
+        git,
+    )
 }
 
 struct RustState {
@@ -1424,6 +1450,7 @@ fn assemble_rust_report(
     threshold: u32,
     deadline: Instant,
     mut state: RustState,
+    independent: (DependencyScan, Vec<Finding>),
     git: GitInfo,
 ) -> AnalyzeOutput {
     let root = &request.root;
@@ -1478,23 +1505,16 @@ fn assemble_rust_report(
     state.findings.extend(crap.findings);
 
     report(request, "Checking dependencies");
-    let undeclared = import_findings(
-        root,
-        selection,
-        request.config.engines.sca,
-        &mut state.ran,
-        &mut state.skipped,
-        &mut state.findings,
-    );
+    let undeclared = independent.0.count;
+    if independent.0.enabled {
+        state.ran.push("sca".into());
+    } else {
+        state.skipped.push("sca".into());
+    }
+    state.findings.extend(independent.0.findings);
     report(request, "Checking secrets");
-    secret_and_perf(
-        selection,
-        root,
-        &request.config.scope.exclude,
-        &request.config.scope.include_generated,
-        &mut state.ran,
-        &mut state.findings,
-    );
+    state.ran.extend(["secrets".into(), "perf".into()]);
+    state.findings.extend(independent.1);
     report(request, "Checking spec");
     let mut spec = spec_engine(
         request,
@@ -2319,35 +2339,83 @@ fn crap_gate(coverage_complete: bool, over: u64, untested: u64, untested_cc: u32
     gate("crap", over == 0 && untested == 0, &reason)
 }
 
-fn import_findings(
-    root: &Path,
-    selection: &Selection,
-    sca_enabled: bool,
-    ran: &mut Vec<String>,
-    skipped: &mut Vec<String>,
-    findings: &mut Vec<Finding>,
-) -> u64 {
-    if !sca_enabled {
-        skipped.push("sca".into());
-        return 0;
+struct DependencyScan {
+    enabled: bool,
+    count: u64,
+    findings: Vec<Finding>,
+}
+
+/// Run independent read-only scans while a build closure performs the serial
+/// Cargo phases. Scoped workers can borrow the selected source tree safely.
+fn with_independent_scans<B, S, P, BR, SR, PR>(build: B, sca: S, secrets: P) -> (BR, (SR, PR))
+where
+    B: FnOnce() -> BR + Send,
+    S: FnOnce() -> SR + Send,
+    P: FnOnce() -> PR + Send,
+    BR: Send,
+    SR: Send,
+    PR: Send,
+{
+    std::thread::scope(|scope| {
+        let sca = scope.spawn(sca);
+        let secrets = scope.spawn(secrets);
+        let built = build();
+        (
+            built,
+            (
+                sca.join().expect("SCA scan worker panicked"),
+                secrets.join().expect("secrets scan worker panicked"),
+            ),
+        )
+    })
+}
+
+fn scan_rust_dependencies(root: &Path, selection: &Selection, enabled: bool) -> DependencyScan {
+    if !enabled {
+        return DependencyScan {
+            enabled,
+            count: 0,
+            findings: Vec::new(),
+        };
     }
-    // First segments that resolve inside the crate are never external:
-    // declared `mod` names, `extern crate` aliases, and file modules
-    // (`src/score.rs`, `src/foo/mod.rs`) across the analyzed sources.
-    let mut local: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    // First segments resolving inside the crate are never external.
+    let mut local = BTreeSet::new();
     for file in &selection.files {
         local.extend(file.local_names.iter().cloned());
         if let Some(module) = file_module(&file.rel) {
             local.insert(module);
         }
     }
-    ran.push("sca".into());
-    let mut count = 0u64;
+    let mut findings = Vec::new();
+    let mut count = 0;
     for file in &selection.files {
         let allowed = crate::manifest::declared_for_file(root, &file.rel);
-        count += undeclared_imports(file, &allowed, &local, findings);
+        count += undeclared_imports(file, &allowed, &local, &mut findings);
     }
-    count
+    DependencyScan {
+        enabled,
+        count,
+        findings,
+    }
+}
+
+#[cfg(test)]
+fn import_findings(
+    root: &Path,
+    selection: &Selection,
+    enabled: bool,
+    ran: &mut Vec<String>,
+    skipped: &mut Vec<String>,
+    findings: &mut Vec<Finding>,
+) -> u64 {
+    let scan = scan_rust_dependencies(root, selection, enabled);
+    if scan.enabled {
+        ran.push("sca".into());
+    } else {
+        skipped.push("sca".into());
+    }
+    findings.extend(scan.findings);
+    scan.count
 }
 
 fn undeclared_imports(
@@ -2413,21 +2481,13 @@ fn file_module(rel: &str) -> Option<String> {
     Some(stem.to_string())
 }
 
-fn secret_and_perf(
+fn scan_rust_secrets(
     selection: &Selection,
     root: &Path,
     exclude: &[String],
     include_generated: &[String],
-    ran: &mut Vec<String>,
-    findings: &mut Vec<Finding>,
-) {
-    ran.push("secrets".into());
-    ran.push("perf".into());
-    findings.extend(crate::pack::text_secrets_with_generated(
-        root,
-        exclude,
-        include_generated,
-    ));
+) -> Vec<Finding> {
+    let mut findings = crate::pack::text_secrets_with_generated(root, exclude, include_generated);
     for file in &selection.files {
         for hit in &file.perf {
             findings.push(Finding {
@@ -2445,6 +2505,7 @@ fn secret_and_perf(
             });
         }
     }
+    findings
 }
 
 struct SpecRun {
@@ -3019,6 +3080,86 @@ fn unique_ids(findings: &mut [Finding]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn independent_scans_overlap_the_build_work() {
+        let rendezvous = std::sync::Arc::new(std::sync::Barrier::new(3));
+        let build_barrier = rendezvous.clone();
+        let sca_barrier = rendezvous.clone();
+        let secrets_barrier = rendezvous.clone();
+        let (built, (sca, secrets)) = with_independent_scans(
+            move || {
+                build_barrier.wait();
+                "build"
+            },
+            move || {
+                sca_barrier.wait();
+                "sca"
+            },
+            move || {
+                secrets_barrier.wait();
+                "secrets"
+            },
+        );
+        assert_eq!((built, sca, secrets), ("build", "sca", "secrets"));
+    }
+
+    #[test]
+    fn parallel_rust_analysis_keeps_dependency_and_secret_findings() {
+        let dir = git_repo("sc-parallel-rust");
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"parallel_fixture\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let key = format!("AKIA{}{}", "0Z3VS5J4", "AB3KQM9Z");
+        std::fs::write(
+            dir.join("src/main.rs"),
+            format!("use undeclared_crate::Thing;\nconst KEY: &str = \"{key}\";\nfn main() {{}}\n"),
+        )
+        .unwrap();
+        let config: Config = toml::from_str(
+            "pack = \"rust\"\n[engines]\nparallel = true\ncoverage = false\n[commands]\nlint = \"\"\n",
+        )
+        .unwrap();
+        let output = analyze(AnalyzeRequest {
+            root: dir.clone(),
+            repo: "parallel_fixture".into(),
+            fail_on: Vec::new(),
+            budget: Duration::from_secs(60),
+            config,
+            diff_base: None,
+            diff_head: None,
+            path_list: Vec::new(),
+            spec_path: None,
+            mutation_override: None,
+            llm_override: Some(false),
+            intent: None,
+            progress: None,
+        });
+        let findings = &output.scorecard.sections.findings;
+        assert!(findings.iter().any(|finding| {
+            finding.rule == "sca.undeclared_dependency"
+                && finding.symbol.as_deref() == Some("undeclared_crate")
+        }));
+        assert!(findings
+            .iter()
+            .any(|finding| finding.rule == "secrets.aws_access_key"));
+        assert!(output
+            .scorecard
+            .engines
+            .engines_run
+            .iter()
+            .any(|engine| engine == "sca"));
+        assert!(output
+            .scorecard
+            .engines
+            .engines_run
+            .iter()
+            .any(|engine| engine == "secrets"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     use sc_core::{Config, Span};
 
     fn sample_fn(file: &str, symbol: &str, line: u32) -> FunctionInfo {

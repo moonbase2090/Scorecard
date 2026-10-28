@@ -48,6 +48,9 @@ max_tool_rounds = 36
 [engines]
 coverage = true
 sca = true
+# Off by default. When true, Rust dependency and secrets scans run while Cargo
+# check, test, and coverage phases run. Cargo commands remain sequential.
+parallel = false
 # Off by default. When true, Rust nested loops and clones inside a loop are
 # perf.* findings (disposition ignore). Test modules (inline, out-of-line
 # #[cfg(test)] mod, tests/benches, src/tests.rs) stay skipped.

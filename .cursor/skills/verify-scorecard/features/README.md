@@ -5,6 +5,7 @@ Start with [Launch and Doctor](../SKILL.md). Commands run in the same Bash shell
 1. [Analysis and gate exits](analysis.md): passing input, failing input, report-only exit, persisted result, and an invalid path.
 2. [Reports](reports.md): pretty output and JSON, Markdown, SARIF, and HTML files through `--format all --out`.
 3. [Scope](scope.md): path lists, uncommitted Git changes against `HEAD`, and a missing diff base.
+4. [Parallel Rust engines](rust-parallel.md): dependency and secrets findings remain present when their scans overlap Cargo phases.
 
 Capture every entry in a feature when that feature changes. A passing convenient format is not proof for another format. Keep action/output/exit evidence outside scratch state and confirm it survives Cleanup.
 

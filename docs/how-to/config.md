@@ -21,6 +21,11 @@ exclude = ["src/generated/**"]
 # Remove or negate a matching .gitignore rule too.
 # include_generated = ["build/**"]
 
+[engines]
+# Run read-only Rust dependency and secrets scans alongside Cargo phases.
+# Cargo commands remain sequential; this is off by default.
+parallel = false
+
 [commands]
 # Lint command for the Rust and command packs. Empty skips lint.
 lint = "cargo clippy --workspace --all-targets -- -D warnings"

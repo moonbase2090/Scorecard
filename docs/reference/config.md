@@ -54,6 +54,7 @@ If exclusions leave no files for secrets scanning, `secrets.empty_scope` fails t
 |---|---|---|
 | `engines.coverage` | `true` | Run tests with coverage. `false` skips coverage; no CRAP scores are reported and nothing is treated as 0% coverage. |
 | `engines.sca` | `true` | Check that imports are declared dependencies. |
+| `engines.parallel` | `false` | Run read-only Rust dependency and secrets scans alongside Cargo check, test, and coverage phases. Cargo commands remain sequential. |
 | `engines.perf` | `false` | When true, Rust nested loops and `.clone()` inside a loop become `perf.*` findings (disposition `ignore`). Paths under `tests/` or `benches/`, `src/test.rs` / `src/tests.rs`, inline `#[cfg(test)]` / `#[…::test]` items, files from an out-of-line `#[cfg(test)] mod name;` (whole-tree lookup, including `--diff`), and children under that module's directory, are not scanned. Off by default so ordinary Rust does not change the report. |
 
 ### `[commands]`
