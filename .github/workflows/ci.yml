@@ -177,6 +177,8 @@ jobs:
         run: cargo fmt --check
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked
       - name: test
         run: cargo test --workspace --locked
 
