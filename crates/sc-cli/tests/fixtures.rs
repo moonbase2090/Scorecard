@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
 
@@ -1427,4 +1427,83 @@ fn sc_with_home(home: &std::path::Path, args: &[&str]) -> (i32, String, String) 
         String::from_utf8_lossy(&output.stdout).to_string(),
         String::from_utf8_lossy(&output.stderr).to_string(),
     )
+}
+
+fn copy_fixture(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name();
+        if name == "target" {
+            continue;
+        }
+        let dest = to.join(&name);
+        if entry.file_type().unwrap().is_dir() {
+            copy_fixture(&entry.path(), &dest);
+        } else {
+            std::fs::copy(entry.path(), dest).unwrap();
+        }
+    }
+}
+
+#[test]
+fn baseline_fails_only_on_findings_missing_from_the_baseline() {
+    let dir = std::env::temp_dir().join(format!("sc-baseline-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    copy_fixture(&workspace().join("testdata/failing_test"), &dir);
+    let root = dir.display().to_string();
+    let write = [
+        root.as_str(),
+        "--format",
+        "json",
+        "--fail-on",
+        "tests",
+        "--budget-seconds",
+        "180",
+        "--write-baseline",
+    ];
+    let (code, _, stderr) = analyze_raw(&write);
+    assert_eq!(code, 1, "{stderr}");
+    assert!(dir.join(".sc/baseline.json").is_file(), "{stderr}");
+
+    let gate = [
+        root.as_str(),
+        "--format",
+        "json",
+        "--fail-on",
+        "tests",
+        "--budget-seconds",
+        "180",
+        "--baseline",
+    ];
+    let (code, _, stderr) = analyze_raw(&gate);
+    assert_eq!(code, 0, "{stderr}");
+    assert!(stderr.contains("fails only on findings in"), "{stderr}");
+    assert!(
+        !stderr.contains("although enforced gates failed"),
+        "{stderr}"
+    );
+
+    // Same test binary as the known failure: `cargo test` stops after the first
+    // failing binary, so a failure in tests/ would never run.
+    let mut lib = std::fs::read_to_string(dir.join("src/lib.rs")).unwrap();
+    lib.push_str(
+        "\n#[cfg(test)]\nmod brand_new {\n    #[test]\n    fn brand_new_failure() {\n        assert_eq!(1, 2);\n    }\n}\n",
+    );
+    std::fs::write(dir.join("src/lib.rs"), lib).unwrap();
+    let (code, _, stderr) = analyze_raw(&gate);
+    assert_eq!(code, 1, "{stderr}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn baseline_without_a_file_exits_2_and_names_the_fix() {
+    let dir = std::env::temp_dir().join(format!("sc-baseline-missing-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    copy_fixture(&workspace().join("testdata/failing_test"), &dir);
+    let root = dir.display().to_string();
+    let (code, _, stderr) = analyze_raw(&[root.as_str(), "--baseline", "--budget-seconds", "180"]);
+    assert_eq!(code, 2, "{stderr}");
+    assert!(stderr.contains("sc analyze --write-baseline"), "{stderr}");
+    let _ = std::fs::remove_dir_all(&dir);
 }

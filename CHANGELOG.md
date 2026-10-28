@@ -4,6 +4,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `sc analyze --write-baseline` stores each finding's fingerprint in `.sc/baseline.json`, and `sc analyze --baseline` exits 1 only when a failing gate fails on a finding not in that file. Known findings stay in the report. Off by default. Metric regressions are not gated yet.
+
 ## [0.1.12] - 2026-10-27
 
 ### Fixed
