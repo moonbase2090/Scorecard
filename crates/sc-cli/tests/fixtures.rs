@@ -1229,14 +1229,18 @@ fn config_init_writes_a_starter_and_does_not_overwrite() {
     assert!(std::fs::read_to_string(&cfg)
         .unwrap()
         .starts_with("# Scorecard configuration."));
+    // On Windows the profile falls back to USERPROFILE and APPDATA applies, so
+    // every profile source must go for the init to have no home to write to.
     let missing = Command::new(env!("CARGO_BIN_EXE_sc"))
         .env_remove("HOME")
+        .env_remove("USERPROFILE")
+        .env_remove("APPDATA")
         .args(["config", "init"])
         .output()
         .unwrap();
     assert_ne!(missing.status.code(), Some(0));
     let err = String::from_utf8_lossy(&missing.stderr);
-    assert!(err.contains("HOME is not set"), "{err}");
+    assert!(err.contains("is not set"), "{err}");
     assert!(err.contains("sc config init"), "{err}");
     let _ = std::fs::remove_dir_all(&home);
 }
