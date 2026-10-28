@@ -1203,7 +1203,10 @@ fn config_init_writes_a_starter_and_does_not_overwrite() {
     // A HOME override has no APPDATA of its own, so Windows uses the profile's
     // AppData\Roaming default.
     let cfg = if cfg!(windows) {
-        home.join("AppData/Roaming/sc/analyzer.toml")
+        home.join("AppData")
+            .join("Roaming")
+            .join("sc")
+            .join("analyzer.toml")
     } else {
         home.join(".config/sc/analyzer.toml")
     };
