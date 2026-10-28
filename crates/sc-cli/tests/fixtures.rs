@@ -967,8 +967,10 @@ fn require_on_path(tool: &str) {
     let found = std::env::var_os("PATH")
         .map(|path| {
             std::env::split_paths(&path).any(|dir| {
-                // Windows installs node.exe, so the bare name never matches there.
-                dir.join(tool).is_file() || dir.join(format!("{tool}.exe")).is_file()
+                // Windows installs node.exe and npm.cmd, so the bare name never matches there.
+                dir.join(tool).is_file()
+                    || dir.join(format!("{tool}.exe")).is_file()
+                    || dir.join(format!("{tool}.cmd")).is_file()
             })
         })
         .unwrap_or(false);
