@@ -488,7 +488,7 @@ pub struct ScorecardIdentity {
     pub version: String,
     pub id: String,
     pub repo: String,
-    /// `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, `command`, `unknown`, or `ambiguous`.
+    /// A pack name, `multi`, `unknown`, or `ambiguous`.
     #[serde(default)]
     pub pack: String,
     /// `rust-tests` selects Rust `#[test]` names. `diff-tests` is the Python

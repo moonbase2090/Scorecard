@@ -69,7 +69,7 @@ struct AnalyzeArgs {
     /// Known findings still appear in the report. Exits 2 when there is no baseline.
     #[arg(long)]
     baseline: bool,
-    /// Pack override when several manifests match: rust, node, python, bash, go, java, csharp, php, cpp, web, or command.
+    /// Pack override when several manifests match, or `multi` to analyze pack roots in a monorepo.
     #[arg(long, value_name = "PACK")]
     pack: Option<String>,
     /// Score only the git diff against BASE. Omit BASE for AUTO (HEAD~1, else

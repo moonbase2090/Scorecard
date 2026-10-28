@@ -66,6 +66,19 @@ fn doctor_names_the_fix_when_no_pack_matches() {
     );
 }
 
+#[test]
+fn doctor_explains_multi_pack_tool_checks() {
+    let root = project("multi", "Cargo.toml");
+    let output = Command::new(env!("CARGO_BIN_EXE_sc"))
+        .args(["doctor", "--pack", "multi"])
+        .arg(&root)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("run `sc doctor` in each pack root to check its tools"));
+}
+
 fn fake_tool(dir: &std::path::Path, name: &str) {
     let path = dir.join(name);
     std::fs::write(&path, "#!/bin/sh\nexit 1\n").unwrap();

@@ -7,8 +7,8 @@
 # Install the Scorecard agent skill from automatic installer hooks.
 install_agent_skills = true
 
-# Set this when the repo contains more than one manifest. Same as --pack.
-# pack = "rust"   # rust, node, python, bash, go, java, csharp, php, cpp, web, or command
+# Override detection, or set "multi" for separate language-pack roots in a monorepo.
+# pack = "rust"   # rust, node, python, bash, go, java, csharp, php, cpp, web, command, or multi
 
 [gates]
 # `spec` and `mutation` run only when `--spec` or `--mutation` asks for them.

@@ -27,7 +27,7 @@ pub struct Config {
     pub html: HtmlConfig,
     pub links: LinksConfig,
     pub a11y: A11yConfig,
-    /// Empty detects a pack from the tree: `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, `web`, or `command`.
+    /// Empty detects a pack from the tree; `multi` opts into sequential monorepo analysis.
     pub pack: String,
     /// Rustup channel for check, test, coverage, and lint. Empty uses
     /// `rust-toolchain.toml` / `rust-toolchain` in the project root.
