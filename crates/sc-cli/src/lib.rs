@@ -516,7 +516,7 @@ fn finish_baseline(output: &mut AnalyzeOutput, write: bool, known: Option<&Basel
             output.status = RunStatus::Passed;
             let _ = writeln!(
                 io::stderr(),
-                "sc: exit 0: every failing gate fails only on findings in {}",
+                "sc: exit 0: every failing --fail-on gate fails only on findings in {}",
                 file.display()
             );
         }
