@@ -163,7 +163,7 @@ class AttributionTests(unittest.TestCase):
         self.assertIn("prohibited attribution", result.stderr)
 
     def test_historical_exemption_list_is_exact_shas(self):
-        self.assertEqual(len(check.HISTORICAL_EXEMPT), 11)
+        self.assertEqual(len(check.HISTORICAL_EXEMPT), 13)
         for sha in check.HISTORICAL_EXEMPT:
             self.assertRegex(sha, r"^[0-9a-f]{40}$")
 
