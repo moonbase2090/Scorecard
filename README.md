@@ -129,6 +129,7 @@ Next:
 - Run `sc setup` so coding agents on this machine can use `sc` ([agents](docs/how-to/agents.md)).
 - Install just the agent instructions with `sc skills install --agent detected`; see [skill installation](docs/how-to/agents.md#install-the-skill).
 - Write a user config with `sc config init`, or put `analyzer.toml` at the project root ([configure](docs/how-to/config.md)).
+- Rust projects can opt into overlapping dependency and secrets scans with `[engines] parallel = true`; Cargo commands remain sequential and the setting is off by default.
 
 The secrets scan also finds PEM private keys split across source string literals, including Go or Java concatenations and YAML lists. See [PEM examples](examples/README.md#pem-keys-in-source-files).
 
