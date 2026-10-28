@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0     # --diff needs the base commit
-      - uses: moonbase2090/Scorecard/action@v0.1.10
+      - uses: moonbase2090/Scorecard/action@v0.1.12
         with:
           diff: origin/${{ github.base_ref }}
 ```
@@ -43,7 +43,7 @@ Do not extract a release tarball inside your repository checkout. The archive co
 Download and install outside the checkout (example uses `$RUNNER_TEMP` on GitHub Actions):
 
 ```bash doctest network
-VER=0.1.10
+VER=0.1.12
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64) TRIPLE=aarch64-apple-darwin ;;
   Darwin-x86_64) TRIPLE=x86_64-apple-darwin ;;

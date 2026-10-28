@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 use crate::report::Outcome;
-use sc_core::Scorecard;
+use sc_core::{RunRecord, Scorecard};
 
 /// Render a scorecard as pretty JSON.
 ///
@@ -64,6 +64,7 @@ fn push_llm_markdown(out: &mut String, card: &Scorecard) {
 pub fn to_markdown(card: &Scorecard) -> String {
     let mut out = String::new();
     push_markdown_header(&mut out, card);
+    push_markdown_timing(&mut out, card);
     push_llm_markdown(&mut out, card);
     push_markdown_gates(&mut out, card);
     push_markdown_scores(&mut out, card);
@@ -71,6 +72,49 @@ pub fn to_markdown(card: &Scorecard) -> String {
     push_markdown_generated_files(&mut out, card);
     push_markdown_findings(&mut out, card);
     out
+}
+
+/// Time spent per engine, summed over its runs, in the order each engine first ran.
+fn push_markdown_timing(out: &mut String, card: &Scorecard) {
+    let totals = engine_totals(&card.runs);
+    if totals.is_empty() {
+        return;
+    }
+    out.push_str("## Engine timing\n\n| Engine | Runs | Time |\n| --- | ---: | ---: |\n");
+    for (engine, runs, ms) in &totals {
+        out.push_str(&format!(
+            "| {} | {runs} | {} |\n",
+            cell(engine),
+            format_duration_ms(*ms)
+        ));
+    }
+    let all: u64 = totals.iter().map(|(_, _, ms)| ms).sum();
+    out.push_str(&format!(
+        "| **Total** | | {} |\n\n",
+        format_duration_ms(all)
+    ));
+}
+
+fn engine_totals(runs: &[RunRecord]) -> Vec<(String, usize, u64)> {
+    let mut totals: Vec<(String, usize, u64)> = Vec::new();
+    for run in runs {
+        match totals.iter_mut().find(|(engine, ..)| *engine == run.engine) {
+            Some(total) => {
+                total.1 += 1;
+                total.2 += run.duration_ms;
+            }
+            None => totals.push((run.engine.clone(), 1, run.duration_ms)),
+        }
+    }
+    totals
+}
+
+fn format_duration_ms(ms: u64) -> String {
+    if ms < 1000 {
+        format!("{ms} ms")
+    } else {
+        format!("{:.1} s", ms as f64 / 1000.0)
+    }
 }
 
 fn push_markdown_generated_files(out: &mut String, card: &Scorecard) {
@@ -298,6 +342,36 @@ mod tests {
     use sc_core::{
         CrapFunction, CrapSection, Finding, Gate, GeneratedFilesWarning, LlmSection, Scorecard,
     };
+
+    #[test]
+    fn markdown_reports_time_per_engine_summed_over_runs() {
+        let mut card = Scorecard::skeleton("repo", 30);
+        let run = |engine: &str, duration_ms| RunRecord {
+            engine: engine.into(),
+            command: String::new(),
+            exit_code: Some(0),
+            duration_ms,
+            budget_ms: None,
+        };
+        card.runs = vec![
+            run("compile", 84),
+            run("tests", 80),
+            run("tests", 20),
+            run("coverage", 1500),
+        ];
+        let md = to_markdown(&card);
+        assert!(md.contains("| Engine | Runs | Time |"), "{md}");
+        assert!(md.contains("| compile | 1 | 84 ms |"), "{md}");
+        assert!(md.contains("| tests | 2 | 100 ms |"), "{md}");
+        assert!(md.contains("| coverage | 1 | 1.5 s |"), "{md}");
+        assert!(md.contains("| **Total** | | 1.7 s |"), "{md}");
+    }
+
+    #[test]
+    fn markdown_omits_timing_without_runs() {
+        let card = Scorecard::skeleton("repo", 30);
+        assert!(!to_markdown(&card).contains("## Engine timing"));
+    }
 
     #[test]
     fn generated_files_warning_appears_in_every_report_format() {
