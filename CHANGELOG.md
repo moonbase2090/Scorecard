@@ -4,6 +4,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.14] - 2026-10-28
+
 ### Added
 
 - `sc-mcp` adds `rerun_gate` (one gate re-run with its findings), `doctor` (tools that could not run, with the fix), and `compare_to_baseline` (new and resolved findings against `.sc/baseline.json`) for agents (SC-39).
