@@ -4,6 +4,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- On a terminal, `sc analyze` prints one line against the previous run: changed scores and new or resolved findings (SC-49).
+
 ## [0.1.13] - 2026-10-28
 
 ### Added
