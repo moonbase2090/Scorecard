@@ -152,23 +152,22 @@ The secrets scan also finds PEM private keys split across source string literals
 
 ## Install
 
-Published release [v0.1.13](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.13). Each `.tar.gz` holds a top-level directory `sc-v<version>-<target>/` with `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md`.
+Published release [v0.1.14](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.14). Each `.tar.gz` holds a top-level directory `sc-v<version>-<target>/` with `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md`.
 
 | Platform | Asset |
 |---|---|
-| macOS, Apple silicon | `sc-v0.1.13-aarch64-apple-darwin.tar.gz` |
-| macOS, Intel | `sc-v0.1.13-x86_64-apple-darwin.tar.gz` |
-| macOS installer | `sc-v0.1.13-macos.pkg`, or `sc-v0.1.13-universal-apple-darwin.dmg`. Installs `sc` and `sc-mcp` to `/usr/local/bin` |
-| Linux, arm64 | `sc-v0.1.13-aarch64-unknown-linux-gnu.tar.gz` |
-| Linux, x86_64 | `sc-v0.1.13-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS, Apple silicon | `sc-v0.1.14-aarch64-apple-darwin.tar.gz` |
+| macOS, Intel | `sc-v0.1.14-x86_64-apple-darwin.tar.gz` |
+| macOS installer | `sc-v0.1.14-macos.pkg`, or `sc-v0.1.14-universal-apple-darwin.dmg`. Installs `sc` and `sc-mcp` to `/usr/local/bin` |
+| Linux, arm64 | `sc-v0.1.14-aarch64-unknown-linux-gnu.tar.gz` |
+| Linux, x86_64 | `sc-v0.1.14-x86_64-unknown-linux-gnu.tar.gz` |
 
 ### Homebrew
 
-Tap this repository and install the formula:
+Install the formula from the Scorecard tap:
 
 ```bash
-brew tap moonbase2090/scorecard https://github.com/moonbase2090/Scorecard
-brew trust --formula moonbase2090/scorecard/sc
+brew tap moonbase2090/scorecard
 brew install moonbase2090/scorecard/sc
 ```
 
@@ -177,7 +176,7 @@ The formula installs `sc` and `sc-mcp` for macOS and Linux on arm64 and x86_64. 
 To check a download, fetch `SHA256SUMS` into the same directory and verify only the files you have:
 
 ```bash
-curl -fsSLO https://github.com/moonbase2090/Scorecard/releases/download/v0.1.13/SHA256SUMS
+curl -fsSLO https://github.com/moonbase2090/Scorecard/releases/download/v0.1.14/SHA256SUMS
 shasum -a 256 -c --ignore-missing SHA256SUMS   # Linux: sha256sum -c --ignore-missing SHA256SUMS
 ```
 

@@ -8,44 +8,39 @@ fi
 
 version=${1#v}
 branch="chore/homebrew-v$version"
+tap_repo=moonbase2090/homebrew-scorecard
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
 git config --local --unset-all http.https://github.com/.extraheader || true
 gh auth setup-git
-git fetch origin develop
-if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
-  git fetch origin "+refs/heads/$branch:refs/remotes/origin/$branch"
-  git checkout -B "$branch" "origin/$branch"
+gh repo view "$tap_repo" --json name >/dev/null
+gh repo clone "$tap_repo" "$tmp/tap"
+base=$(gh repo view "$tap_repo" --json defaultBranchRef --jq '.defaultBranchRef.name')
+git -C "$tmp/tap" fetch origin "+refs/heads/$base:refs/remotes/origin/$base"
+if git -C "$tmp/tap" ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+  git -C "$tmp/tap" fetch origin "+refs/heads/$branch:refs/remotes/origin/$branch"
+  git -C "$tmp/tap" checkout -B "$branch" "origin/$branch"
 else
-  git checkout -B "$branch" origin/develop
+  git -C "$tmp/tap" checkout -b "$branch" "origin/$base"
 fi
 
-python3 scripts/update-homebrew-formula.py "$version" "$2" Formula/sc.rb
-git add Formula/sc.rb
-if ! git diff --cached --quiet; then
-  git config user.name "MB2090"
-  git config user.email "322824348+mb2090@users.noreply.github.com"
-  git commit -m "Update Homebrew formula to $version"
-  git push --set-upstream origin "$branch"
+python3 scripts/update-homebrew-formula.py "$version" "$2" "$tmp/tap/Formula/sc.rb"
+git -C "$tmp/tap" add Formula/sc.rb
+if ! git -C "$tmp/tap" diff --cached --quiet; then
+  git -C "$tmp/tap" config user.name "MB2090"
+  git -C "$tmp/tap" config user.email "322824348+mb2090@users.noreply.github.com"
+  git -C "$tmp/tap" commit -m "Update Scorecard formula to $version"
+  git -C "$tmp/tap" push --set-upstream origin "$branch"
 fi
 
-existing_pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --base develop --head "$branch" --json url --jq '.[0].url // empty')
+existing_pr=$(gh pr list --repo "$tap_repo" --base "$base" --head "$branch" --json url --jq '.[0].url // empty')
 if [ -n "$existing_pr" ]; then
   echo "Updated Homebrew formula PR: $existing_pr"
-elif git diff origin/develop --quiet -- Formula/sc.rb; then
+elif git -C "$tmp/tap" diff "origin/$base" --quiet -- Formula/sc.rb; then
   echo "Homebrew formula already matches v$version; no PR is needed."
 else
-  gh pr create --repo "$GITHUB_REPOSITORY" --base develop --head "$branch" \
-    --label trunk \
-    --title "Update Homebrew formula to $version" \
-    --body "## What
-Updates the Homebrew formula to Scorecard v$version.
-
-## Class
-trunk; the formula changes the supported binary distribution path.
-
-## Proof
-The formula URLs and SHA-256 checksums are generated from the published release assets' SHA256SUMS file. The release workflow runs this generator after it publishes those assets.
-
-## Risks / follow-ups
-None."
+  gh pr create --repo "$tap_repo" --base "$base" --head "$branch" \
+    --title "Update Scorecard formula to $version" \
+    --body "Updates Formula/sc.rb to Scorecard v$version using SHA256SUMS from the published release assets."
 fi
