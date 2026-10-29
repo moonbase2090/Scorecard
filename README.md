@@ -23,7 +23,7 @@ summary to scrollback or a pipe with `sc tui --inline`. See [Browse a saved anal
 Download `sc` for your platform and run it on a project:
 
 ```bash doctest network
-VERSION=v0.1.13
+VERSION=v0.1.14
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64) TARGET=aarch64-apple-darwin ;;
   Darwin-x86_64) TARGET=x86_64-apple-darwin ;;
