@@ -164,7 +164,7 @@ Published release [v0.1.14](https://github.com/moonbase2090/Scorecard/releases/t
 
 ### Homebrew
 
-Install the formula from the Scorecard tap:
+Install the formula from the `moonbase2090/homebrew-scorecard` tap:
 
 ```bash
 brew tap moonbase2090/scorecard

@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- The release workflow now opens Homebrew formula update pull requests in the Scorecard tap after signed releases.
+- The release workflow now opens Homebrew formula update pull requests in `moonbase2090/homebrew-scorecard` after signed releases.
 
 ## [0.1.14] - 2026-10-28
 
