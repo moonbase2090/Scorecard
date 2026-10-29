@@ -60,8 +60,8 @@ def formula(version: str, checksums: dict[str, str]) -> str:
         '    bin.install "sc", "sc-mcp"\n'
         "  end\n\n"
         "  test do\n"
-        '    assert_match version.to_s, shell_output("#{bin}/sc --version")\n'
-        '    assert_match version.to_s, shell_output("#{bin}/sc-mcp --version")\n'
+        '    assert_equal "sc #{version}", shell_output("#{bin}/sc --version").strip\n'
+        '    assert_equal version.to_s, shell_output("#{bin}/sc-mcp --version").strip\n'
         "  end\n"
         "end\n"
     )

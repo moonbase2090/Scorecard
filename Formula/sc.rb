@@ -30,7 +30,7 @@ class Sc < Formula
   end
 
   test do
-    assert_match version.to_s, shell_output("#{bin}/sc --version")
-    assert_match version.to_s, shell_output("#{bin}/sc-mcp --version")
+    assert_equal "sc #{version}", shell_output("#{bin}/sc --version").strip
+    assert_equal version.to_s, shell_output("#{bin}/sc-mcp --version").strip
   end
 end
