@@ -152,6 +152,7 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -187,4 +188,35 @@ jobs:
           case "$GITHUB_REF_NAME" in
             *-*) set -- "$@" --prerelease ;;
           esac
-          gh release create "$GITHUB_REF_NAME" "$@" *
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists; continuing with formula update."
+          else
+            gh release create "$GITHUB_REF_NAME" "$@" *
+          fi
+      - id: homebrew-app-config
+        name: Check Homebrew formula PR credentials
+        env:
+          APP_ID: ${{ vars.MOONBASE_AGENTS_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.MOONBASE_AGENTS_APP_PRIVATE_KEY }}
+        run: |
+          if [ -n "$APP_ID" ] && [ -n "$APP_PRIVATE_KEY" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Homebrew formula update skipped; set Actions variable MOONBASE_AGENTS_APP_ID and secret MOONBASE_AGENTS_APP_PRIVATE_KEY to enable release formula PRs."
+          fi
+      - id: homebrew-app-token
+        if: steps.homebrew-app-config.outputs.configured == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.MOONBASE_AGENTS_APP_ID }}
+          private-key: ${{ secrets.MOONBASE_AGENTS_APP_PRIVATE_KEY }}
+          owner: moonbase2090
+          repositories: Scorecard,homebrew-scorecard
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Open Homebrew formula update PR
+        if: steps.homebrew-app-config.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ steps.homebrew-app-token.outputs.token }}
+        run: sh scripts/update-homebrew-formula-pr.sh "$GITHUB_REF_NAME" dist/SHA256SUMS

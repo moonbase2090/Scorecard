@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Terminal tables and finding locations keep both ends of a long path or symbol and elide the middle, so the file name and final symbol stay readable (SC-50).
 
+### Added
+
+- The release workflow now opens Homebrew formula update pull requests in `moonbase2090/homebrew-scorecard` after signed releases.
+
 ## [0.1.14] - 2026-10-28
 
 ### Added
