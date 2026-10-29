@@ -284,15 +284,21 @@ fn push_crap(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize
             "--".into()
         };
         let loc = location_for(card, &row.file, &row.symbol);
-        let line = format!(
-            "  {:>4}  {:>3}  {:>4}  {:<16}  {}",
+        let prefix = format!(
+            "  {:>4}  {:>3}  {:>4}  {:<16}  ",
             fmt_crap(row.crap),
             row.cc,
             cov,
             fit_middle(&row.symbol, 16, opts.color),
-            loc
         );
-        out.push_str(&fit(&line, width, opts.color));
+        // The location goes last, so it takes the rest of the width and keeps
+        // both ends: a long symbol must not hide the file name.
+        let loc = fit_middle(
+            &loc,
+            width.saturating_sub(prefix.chars().count()),
+            opts.color,
+        );
+        out.push_str(&fit(&format!("{prefix}{loc}"), width, opts.color));
         out.push('\n');
     }
     out.push('\n');
