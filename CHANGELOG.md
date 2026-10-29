@@ -4,6 +4,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.15] - 2026-10-29
+
 ### Changed
 
 - Terminal tables and finding locations keep both ends of a long path or symbol and elide the middle, so the file name and final symbol stay readable (SC-50).
