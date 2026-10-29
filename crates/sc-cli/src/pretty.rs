@@ -133,7 +133,7 @@ fn push_generated_files(out: &mut String, card: &Scorecard, opts: &PrettyOpts, w
             out.push_str(heading);
             out.push('\n');
             for file in files {
-                out.push_str(&fit(&format!("  {file}"), width, opts.color));
+                out.push_str(&fit_middle(&format!("  {file}"), width, opts.color));
                 out.push('\n');
             }
         }
@@ -289,7 +289,7 @@ fn push_crap(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize
             fmt_crap(row.crap),
             row.cc,
             cov,
-            fit(&row.symbol, 16, opts.color),
+            fit_middle(&row.symbol, 16, opts.color),
             loc
         );
         out.push_str(&fit(&line, width, opts.color));
@@ -374,7 +374,7 @@ fn finding_block(finding: &Finding, opts: &PrettyOpts, width: usize) -> String {
     let mut block = format!("  {}\n", finding.rule);
     let place = finding_place(finding);
     block.push_str("  ");
-    block.push_str(&fit(&place, width.saturating_sub(2), opts.color));
+    block.push_str(&fit_middle(&place, width.saturating_sub(2), opts.color));
     block.push('\n');
     if let Some(action) = finding.suggested_action.as_deref() {
         if !action.is_empty() {
@@ -552,6 +552,24 @@ fn fit(text: &str, width: usize, unicode: bool) -> String {
     out
 }
 
+/// Like `fit`, but keeps both ends. A long path or symbol loses its middle, so
+/// the file name and the final symbol stay readable.
+fn fit_middle(text: &str, width: usize, unicode: bool) -> String {
+    let width = width.max(1);
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= width {
+        return text.to_string();
+    }
+    let mark = if unicode { '…' } else { '~' };
+    let keep = width - 1;
+    let head = keep - keep / 2;
+    let tail = keep / 2;
+    let mut out: String = chars[..head].iter().collect();
+    out.push(mark);
+    out.extend(chars[chars.len() - tail..].iter());
+    out
+}
+
 fn paint(color: bool, style: Style, text: &str) -> String {
     if !color {
         return text.to_string();
@@ -589,6 +607,21 @@ fn severity_style(severity: &str) -> Style {
 mod tests {
     use super::*;
     use sc_core::LlmSection;
+
+    #[test]
+    fn fit_middle_keeps_both_ends_of_a_long_path() {
+        assert_eq!(
+            fit_middle("crates/sc-cli/src/pretty.rs", 16, true),
+            "crates/s…etty.rs"
+        );
+        assert_eq!(
+            fit_middle("crates/sc-cli/src/pretty.rs", 16, false),
+            "crates/s~etty.rs"
+        );
+        assert_eq!(fit_middle("short", 16, true), "short");
+        assert_eq!(fit_middle("abcdef", 1, true), "…");
+        assert_eq!(fit_middle("abcdef", 4, true).chars().count(), 4);
+    }
 
     #[test]
     fn pretty_shows_llm_notes_and_a_plain_skip_reason() {
