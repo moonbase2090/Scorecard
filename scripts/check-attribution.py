@@ -44,6 +44,7 @@ HISTORICAL_EXEMPT = {
     "f3232fe173f5057f0a3a70831e271e0793de5625": "agents-bot squash merge: owner co-author trailer from merge tooling: Stop Windows command descendants with job objects (#312)",
     "ff58f4ae456f5c141015bde55851ba4b9f8d875c": "agents-bot squash merge: owner co-author trailer from merge tooling: Run independent Rust scans alongside Cargo phases (#339)",
     "4c8202e7ab8db860760bf8628c202fa1dec10eb2": "agents-bot squash merge: owner co-author trailer from merge tooling: Add opt-in multi-pack analysis (#343)",
+    "0b82391146ca5e7a85fd7221679da405aa83f2d7": "agents-bot squash merge: owner co-author trailer from merge tooling: Add Homebrew distribution support (#356)",
 }
 SHA = re.compile(r"[0-9a-f]{40}")
 REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
