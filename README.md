@@ -167,7 +167,7 @@ Published release [v0.1.14](https://github.com/moonbase2090/Scorecard/releases/t
 Install the formula from the Scorecard tap:
 
 ```bash
-brew tap moonbase2090/scorecard https://github.com/moonbase2090/scorecard
+brew tap moonbase2090/scorecard
 brew install moonbase2090/scorecard/sc
 ```
 
