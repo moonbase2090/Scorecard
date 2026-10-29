@@ -212,7 +212,7 @@ jobs:
           app-id: ${{ vars.MOONBASE_AGENTS_APP_ID }}
           private-key: ${{ secrets.MOONBASE_AGENTS_APP_PRIVATE_KEY }}
           owner: moonbase2090
-          repositories: Scorecard,homebrew-scorecard
+          repositories: Scorecard
           permission-contents: write
           permission-pull-requests: write
       - name: Open Homebrew formula update PR
