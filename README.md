@@ -162,6 +162,18 @@ Published release [v0.1.13](https://github.com/moonbase2090/Scorecard/releases/t
 | Linux, arm64 | `sc-v0.1.13-aarch64-unknown-linux-gnu.tar.gz` |
 | Linux, x86_64 | `sc-v0.1.13-x86_64-unknown-linux-gnu.tar.gz` |
 
+### Homebrew
+
+Tap this repository and install the formula:
+
+```bash
+brew tap moonbase2090/scorecard https://github.com/moonbase2090/Scorecard
+brew trust --formula moonbase2090/scorecard/sc
+brew install moonbase2090/scorecard/sc
+```
+
+The formula installs `sc` and `sc-mcp` for macOS and Linux on arm64 and x86_64. The release workflow opens a formula update pull request after each signed release. See [Homebrew formula maintenance](docs/homebrew.md) for workflow setup.
+
 To check a download, fetch `SHA256SUMS` into the same directory and verify only the files you have:
 
 ```bash
