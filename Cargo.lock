@@ -702,9 +702,9 @@ dependencies = [
 
 [[package]]
 name = "ignore"
-version = "0.4.33"
+version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00b69833ed729dc5aa7d19541d96d6cf8e9137194207a04916d658e43168402f"
+checksum = "484be5657551d7868d67587df967fb4fcbe9d266a761cc855aaa148fda0b3cc7"
 dependencies = [
  "crossbeam-deque",
  "globset",
@@ -859,7 +859,7 @@ source = "git+https://github.com/moonbase2090/lunatui?rev=dbf6f6d6575b4caf45c40b
 dependencies = [
  "lunatui-core",
  "lunatui-term",
- "vt100",
+ "vt100 0.16.2",
 ]
 
 [[package]]
@@ -1611,16 +1611,16 @@ dependencies = [
 
 [[package]]
 name = "termlens"
-version = "0.11.6"
+version = "0.11.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75f93de4ed8715daa9a9d2ab3dab24edba0d44ea754f1cde9185467ce766cbff"
+checksum = "ceec406e2953f35eb0aeedb2bcf1129765bca4debdc1157c8b46ee8ae8dc5ca1"
 dependencies = [
  "libc",
  "portable-pty",
  "thiserror 2.0.21",
  "unicode-normalization",
  "unicode-width",
- "vt100",
+ "vt100 0.18.1",
 ]
 
 [[package]]
@@ -1838,6 +1838,17 @@ name = "vt100"
 version = "0.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "054ff75fb8fa83e609e685106df4faeffdf3a735d3c74ebce97ec557d5d36fd9"
+dependencies = [
+ "itoa",
+ "unicode-width",
+ "vte",
+]
+
+[[package]]
+name = "vt100"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb05cdd19ae8707bf6a0a269972c07e6358103a7079faec749dec318a5b3dc23"
 dependencies = [
  "itoa",
  "unicode-width",
