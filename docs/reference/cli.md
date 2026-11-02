@@ -2,6 +2,7 @@
 
 ```text
 sc analyze [PATH] [OPTIONS]
+sc badge [--input PATH]
 sc doctor [PATH] [--pack PACK]
 sc tui [PATH] [--inline]    # requires the tui Cargo feature
 sc config path
@@ -18,6 +19,7 @@ sc help [COMMAND]
 
 | Flag | Default | Meaning |
 |---|---|---|
+| `--overall-score` | off | Add the overall finding-based score and grade to every report format and the saved JSON. Enables `overall_score` for this run. See [mapping](../report.md#overall-score-and-badge). |
 | `--format FORMAT` | `pretty` on a terminal, `json` otherwise | `json`, `pretty`, `md`, `sarif`, `html`, or `all`. See [Output](#output). |
 | `--out PATH` | none | Also write the report to `PATH`. Stdout prints the short summary, including when it is not a terminal. Without this flag, stdout is the chosen `--format`. |
 | `--fail-on LIST` | `types,tests,crap,secrets,lint` | Comma-separated [gates](gates.md) whose failures set exit 1. Use `none` by itself to suppress gate failures from the exit code. Empty or blank lists are invalid. Overrides `gates.fail_on`; already enforced failures remain in the report verdict. |
@@ -42,6 +44,16 @@ While analysis runs, a spinner with the current step and elapsed time animates o
 When a report has more than eight findings, pretty output groups findings that need a fix by rule and suggested action. It shows the five most frequent fix types first, then the findings list. The complete report remains in `.sc/last-scorecard.json` or the path passed to `--out`.
 
 Command-line flags override the matching config keys.
+
+## sc badge
+
+Prints [Shields.io endpoint JSON](https://shields.io/badges/endpoint-badge) derived from a saved report's dimension scores. Does not run analysis, contact the network, or change the saved report. Works with reports saved without `--overall-score` and recomputes any cached overall value. The grade is a finding summary, independent of the report verdict.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--input PATH` | `.sc/last-scorecard.json` | Saved Scorecard JSON report to read. |
+
+Writes JSON to stdout. Exits 0 after writing the badge, including when the saved report's verdict is `fail`. Exits 2 when the report is missing or invalid, no engines ran, any dimension is outside 0 to 1, or output cannot be written. See [Overall score and badge](../report.md#overall-score-and-badge).
 
 ## sc tui
 

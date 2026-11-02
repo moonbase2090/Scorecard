@@ -3,6 +3,7 @@
 //!
 //! User-facing analyze output is the scorecard, rendered as JSON and/or Markdown.
 
+mod badge;
 mod console;
 mod doctor;
 mod format;
@@ -47,6 +48,9 @@ struct Cli {
 
 #[derive(Args)]
 struct AnalyzeArgs {
+    /// Include the overall finding-based score and A-F grade in reports.
+    #[arg(long)]
+    overall_score: bool,
     /// Project directory. Defaults to `.`.
     path: Option<PathBuf>,
     /// `json`, `pretty`, `md`, `sarif`, `html`, or `all`.
@@ -147,6 +151,12 @@ enum ConfigCmd {
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum Commands {
+    /// Print Shields.io endpoint JSON for a saved report's overall score and grade.
+    Badge {
+        /// Saved Scorecard JSON report. Run sc analyze first.
+        #[arg(long, default_value = ".sc/last-scorecard.json")]
+        input: PathBuf,
+    },
     /// Export findings from a saved report to an external tracker.
     Export(ExportArgs),
     /// Browse a saved scorecard in an interactive terminal.
@@ -211,6 +221,7 @@ pub fn run() -> i32 {
     let _vt = console::enable_console_vt();
     let cli = Cli::parse();
     match cli.command {
+        Commands::Badge { input } => badge::run(&input),
         Commands::Export(args) => waypoint_export::run(args),
         Commands::Doctor { path, pack } => doctor::run(path, pack),
         #[cfg(feature = "tui")]
@@ -229,6 +240,7 @@ pub fn run() -> i32 {
 
 fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
     let AnalyzeArgs {
+        overall_score,
         path,
         format,
         out,
@@ -360,6 +372,7 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
         }
     }
 
+    loaded.overall_score |= overall_score;
     if let Some(pack) = pack {
         loaded.pack = pack;
     }

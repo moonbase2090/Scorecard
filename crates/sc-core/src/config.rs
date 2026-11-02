@@ -16,6 +16,8 @@ pub const KNOWN_GATES: &[&str] = &[
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct Config {
+    /// Include the overall finding-based score and grade in reports. Off by default.
+    pub overall_score: bool,
     /// Install or update the Scorecard agent skill during automatic install hooks.
     pub install_agent_skills: bool,
     pub gates: GatesConfig,
@@ -37,6 +39,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            overall_score: false,
             install_agent_skills: true,
             gates: GatesConfig::default(),
             scope: ScopeConfig::default(),

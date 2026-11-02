@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Opt-in overall scores and letter grades in reports with `--overall-score` or `overall_score = true`. `sc badge` emits Shields.io endpoint JSON from a saved report.
 - Local cargo-binstall metadata for both release binaries and a checker that verifies every target with dry runs. Registry publication remains disabled.
 
 ## [0.1.15] - 2026-10-29
