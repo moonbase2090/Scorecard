@@ -25,7 +25,7 @@ Install the skill for an agent with `sc skills install --agent codex`; see [Skil
 
 ## Commands
 
-The top-level commands are `sc analyze`, `sc config`, `sc doctor`, `sc export`, `sc setup`, `sc skills`, and `sc help [COMMAND]`. Builds with the optional `tui` Cargo feature also provide `sc tui [PATH]` for interactive browsing of `PATH/.sc/last-scorecard.json`. On Findings, use Up/Down, PageUp/PageDown, and Home/End to browse rows. Existing files inside the project have OSC 8 file-and-line links. `sc tui [PATH] --inline` prints up to eight gates and five findings without entering the alternate screen. Redirected inline output is plain text. Use `sc analyze --format json` for automation.
+The top-level commands are `sc analyze`, `sc badge`, `sc config`, `sc doctor`, `sc export`, `sc setup`, `sc skills`, and `sc help [COMMAND]`. Builds with the optional `tui` Cargo feature also provide `sc tui [PATH]` for interactive browsing of `PATH/.sc/last-scorecard.json`. On Findings, use Up/Down, PageUp/PageDown, and Home/End to browse rows. Existing files inside the project have OSC 8 file-and-line links. `sc tui [PATH] --inline` prints up to eight gates and five findings without entering the alternate screen. Redirected inline output is plain text. Use `sc analyze --format json` for automation.
 
 ### `sc analyze [PATH] [OPTIONS]`
 
@@ -33,6 +33,7 @@ Analyze `PATH` (default `.`). The default output is pretty text on a terminal an
 
 | Flag | Values and default | Purpose |
 |---|---|---|
+| `--overall-score` | off | Include the finding-based overall score and grade in reports and saved JSON. |
 | `--format FORMAT` | `json`, `pretty`, `md`, `sarif`, `html`, `all`; auto-selects pretty/JSON when omitted | Choose stdout and report format. |
 | `--out PATH` | none | Also write the report to a file. Stdout prints a short summary even when it is not a terminal. `all` writes `.json`, `.md`, `.sarif`, and `.html` siblings. |
 | `--fail-on LIST` | `types,tests,crap,secrets,lint` | Comma-separated gates whose failure sets exit 1: `types`, `tests`, `crap`, `secrets`, `sca`, `spec`, `mutation`, `lint`, `html`, `links`, or `a11y`. Use `none` by itself to suppress gate failures from the exit code. |
@@ -48,6 +49,12 @@ Analyze `PATH` (default `.`). The default output is pretty text on a terminal an
 | `--config PATH` | project `analyzer.toml`, then `~/.config/sc/analyzer.toml` | Read a specific config file. |
 
 Command flags override matching config settings. Every run writes `.sc/last-scorecard.json`.
+
+### `sc badge [--input PATH]`
+
+Read saved dimension scores from `PATH` (default `.sc/last-scorecard.json`) and print Shields.io endpoint JSON without scanning or network access. The overall score equally averages all five dimensions, rounds to 0 to 100, and grades A at 90, B at 80, C at 70, D at 60, and F below 60. This summarizes findings; skipped engines can leave dimensions unpenalized. Gates still decide the verdict. Exit 2 means the report is missing or invalid, no engines ran, or output failed.
+
+Verify changes to overall scoring with `cargo test -p sc-core --lib overall` and `cargo test -p sc-cli --test overall`. Then analyze a real project with `--overall-score --format all --out REPORT`, check the JSON `overall` against the displayed rows, and run `sc badge --input REPORT.json` to inspect the badge.
 
 ### `sc config`
 
@@ -103,6 +110,7 @@ Config resolution is `--config PATH`, then `analyzer.toml` in the analyzed direc
 
 | Section or key | Purpose |
 |---|---|
+| `overall_score` | Include the overall finding-based score and grade in reports (`false`). `--overall-score` enables it for one run. |
 | `install_agent_skills` | Allow automatic agent skill installation; default `true`. Installer hooks read it only from `~/.config/sc/analyzer.toml`. |
 | `pack`, `toolchain` | Select the language pack (`detected` by default) and Rustup toolchain (empty uses project toolchain files). |
 | `[gates] fail_on`, `crap_threshold`, `new_fn_untested_cc` | Choose failing gates (default `types,tests,crap,secrets,lint`), maximum CRAP score (`30`), and the complexity floor for an untested function (`15`). |

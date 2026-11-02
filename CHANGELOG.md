@@ -4,6 +4,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in overall scores and letter grades in reports with `--overall-score` or `overall_score = true`. `sc badge` emits Shields.io endpoint JSON from a saved report.
+
 ## [0.1.15] - 2026-10-29
 
 ### Changed
