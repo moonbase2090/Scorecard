@@ -7,6 +7,9 @@
 # Install the Scorecard agent skill from automatic installer hooks.
 install_agent_skills = true
 
+# Include the finding-based overall score and grade in reports.
+overall_score = false
+
 # Override detection, or set "multi" for separate language-pack roots in a monorepo.
 # pack = "rust"   # rust, node, python, bash, go, java, csharp, php, cpp, web, command, or multi
 

@@ -37,7 +37,7 @@ pub fn to_sarif(card: &Scorecard) -> String {
             })
         })
         .collect();
-    let doc = json!({
+    let mut doc = json!({
         "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
         "version": "2.1.0",
         "runs": [{
@@ -58,6 +58,9 @@ pub fn to_sarif(card: &Scorecard) -> String {
             },
         }]
     });
+    if let Some(overall) = card.measures.overall {
+        doc["runs"][0]["properties"]["overall"] = json!(overall);
+    }
     serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".into())
 }
 

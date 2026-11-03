@@ -186,7 +186,13 @@ fn analyze_multi(request: AnalyzeRequest, generated_paths: &[PathBuf]) -> Analyz
         return output;
     }
     let outputs = run_multi_roots(&request, &root, roots, started);
-    combine_multi_outputs(root, git, outputs, &request.fail_on)
+    combine_multi_outputs(
+        root,
+        git,
+        outputs,
+        &request.fail_on,
+        request.config.overall_score,
+    )
 }
 
 type MultiOutput = (String, AnalyzeOutput);
@@ -291,6 +297,7 @@ fn combine_multi_outputs(
     git: GitInfo,
     outputs: Vec<MultiOutput>,
     fail_on: &[String],
+    overall: bool,
 ) -> AnalyzeOutput {
     let mut card = outputs[0].1.scorecard.clone();
     card.identity.pack = "multi".into();
@@ -317,7 +324,14 @@ fn combine_multi_outputs(
         analyzer_error |= output.status == RunStatus::AnalyzerError;
         merge_multi_part(&mut card, &prefix, output.scorecard, &mut gate_reasons);
     }
-    finalize_multi_card(&root, &mut card, fail_on, analyzer_error, gate_reasons)
+    finalize_multi_card(
+        &root,
+        &mut card,
+        fail_on,
+        analyzer_error,
+        gate_reasons,
+        overall,
+    )
 }
 
 fn merge_multi_part(
@@ -536,6 +550,7 @@ fn finalize_multi_card(
     fail_on: &[String],
     analyzer_error: bool,
     mut gate_reasons: std::collections::BTreeMap<String, Vec<String>>,
+    overall: bool,
 ) -> AnalyzeOutput {
     for gate in &mut card.measures.gates {
         if !gate.pass {
@@ -582,6 +597,11 @@ fn finalize_multi_card(
         .worst
         .sort_by(|a, b| b.crap.total_cmp(&a.crap));
     card.measures.scores = compute_scores(&card.sections.findings);
+    card.measures.overall = if overall && !analyzer_error {
+        sc_core::overall_score(&card.measures.scores)
+    } else {
+        None
+    };
     card.verdict = if card
         .measures
         .gates
@@ -691,6 +711,7 @@ fn analyze_blocked(
     ];
     report(&request, "Writing report");
     finish(Draft {
+        overall_score: request.config.overall_score,
         root: request.root.clone(),
         repo: request.repo,
         pack: pack.to_string(),
@@ -873,6 +894,7 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
     ];
     report(&request, "Writing report");
     finish(Draft {
+        overall_score: request.config.overall_score,
         root: request.root.clone(),
         repo: request.repo,
         pack: "web".into(),
@@ -1242,6 +1264,7 @@ fn analyze_unsupported(
     ));
     report(&request, "Writing report");
     finish(Draft {
+        overall_score: request.config.overall_score,
         root: request.root.clone(),
         repo: request.repo,
         pack: pack.as_str().to_string(),
@@ -1412,6 +1435,7 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
     let diff = scoped.py.is_some();
     let paths: Vec<String> = scoped.py.unwrap_or_default().into_iter().collect();
     finish(Draft {
+        overall_score: request.config.overall_score,
         root: request.root.clone(),
         repo: request.repo,
         pack: "python".into(),
@@ -1468,6 +1492,7 @@ fn python_scope_error(request: AnalyzeRequest, git: GitInfo, err: String) -> Ana
     ];
     report(&request, "Writing report");
     finish(Draft {
+        overall_score: request.config.overall_score,
         root: request.root.clone(),
         repo: request.repo,
         pack: "python".into(),
@@ -2098,6 +2123,7 @@ fn assemble_rust_report(
 
     report(request, "Writing report");
     finish(Draft {
+        overall_score: request.config.overall_score,
         root: root.to_path_buf(),
         repo: request.repo.clone(),
         pack: "rust".into(),
@@ -2135,6 +2161,7 @@ fn assemble_rust_report(
 }
 
 struct Draft {
+    overall_score: bool,
     root: PathBuf,
     repo: String,
     pack: String,
@@ -2200,6 +2227,11 @@ fn finish(mut draft: Draft) -> AnalyzeOutput {
             engines_skipped: draft.skipped,
         },
         measures: sc_core::ScorecardMeasures {
+            overall: if draft.overall_score && !draft.analyzer_error {
+                sc_core::overall_score(&scores)
+            } else {
+                None
+            },
             scores,
             gates: draft.gates,
             metrics: draft.metrics,

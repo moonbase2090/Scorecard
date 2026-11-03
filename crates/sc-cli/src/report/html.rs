@@ -417,6 +417,12 @@ fn write_a11y_item(out: &mut String, finding: &sc_core::Finding) {
 
 fn scores_metrics(out: &mut String, card: &Scorecard) {
     out.push_str("<h2>scores</h2>\n<div class=\"card\"><table>");
+    if let Some(overall) = card.measures.overall {
+        out.push_str(&format!(
+            "<tr><th>overall</th><td colspan=\"2\">{}/100, grade {}</td></tr>",
+            overall.score, overall.grade
+        ));
+    }
     for (label, value) in [
         ("correctness", card.measures.scores.correctness),
         ("efficiency", card.measures.scores.efficiency),

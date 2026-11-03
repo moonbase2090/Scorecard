@@ -217,6 +217,12 @@ fn gate_row(gate: &Gate, opts: &PrettyOpts, width: usize) -> String {
 
 fn push_scores(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize) {
     out.push_str("scores\n");
+    if let Some(overall) = card.measures.overall {
+        out.push_str(&format!(
+            "  overall          {}/100  grade {}\n",
+            overall.score, overall.grade
+        ));
+    }
     score_line(
         out,
         "correctness",
