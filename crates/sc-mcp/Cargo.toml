@@ -20,3 +20,13 @@ path = "src/main.rs"
 sc-core = { path = "../sc-core" }
 sc-engines = { path = "../sc-engines" }
 serde_json.workspace = true
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/sc-v{ version }-{ target }.tar.gz"
+pkg-fmt = "tgz"
+bin-dir = "sc-v{ version }-{ target }/{ bin }{ binary-ext }"
+disabled-strategies = ["quick-install", "compile"]
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-url = "{ repo }/releases/download/v{ version }/sc-v{ version }-{ target }.zip"
+pkg-fmt = "zip"

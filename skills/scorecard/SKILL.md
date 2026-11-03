@@ -174,6 +174,10 @@ Publish `scorecard.sarif` to the CI code-scanning service when configured. Use a
 - Do not use `--force` on a skill install unless the user wants the existing copy replaced.
 - Do not claim checks ran when the report marks an engine skipped or unavailable.
 
+## Verify distribution metadata
+
+Run `python3 scripts/check-binstall.py` after changing the binary manifests or release archive layout. It verifies both binary manifests against all five release targets with `cargo-binstall --dry-run`; it requires published assets matching the workspace version. Registry publication remains disabled. See `docs/how-to/cargo-binstall.md` for the separate publication prerequisites.
+
 ## Verify TUI source changes
 
 For changes to the optional browser, run `bash scripts/verify-tui.sh` for styled

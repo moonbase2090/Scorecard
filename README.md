@@ -187,6 +187,8 @@ cargo install --locked --path crates/sc-cli
 cargo install --locked --path crates/sc-mcp
 ```
 
+The local binary manifests also support `cargo-binstall` from GitHub releases. Run `cargo binstall --manifest-path crates/sc-cli/Cargo.toml --dry-run --no-confirm sc-cli` to verify the CLI download without installing it. See [cargo-binstall checks](docs/how-to/cargo-binstall.md) for both binaries and all release targets. Registry publication remains disabled; `cargo install sc-cli` selects an unrelated package.
+
 Rust coverage needs `rustup component add llvm-tools` and `cargo install cargo-llvm-cov`. Without them `sc` still runs and reports coverage as not measured. Other packs need their own tools; see [packs](docs/packs.md).
 
 For Python projects with a `src/` layout, `sc` prepends each source root to `PYTHONPATH` while tests and coverage run. Pytest then imports the checkout files that Scorecard measures, even when another package copy is installed.
