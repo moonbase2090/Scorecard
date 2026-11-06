@@ -8,7 +8,7 @@ CRAP(m) = CC(m)^2 * (1 - cov(m))^3 + CC(m)
 
 `cov` is that function's line coverage, in `0..1`. The default threshold is 30 (`gates.crap_threshold` in `analyzer.toml`). A score equal to the threshold passes. Only a score above it fails the `crap` gate (`crap.over_threshold`).
 
-The `crap` gate is advisory by default. A failure is reported, with its findings and the worst-CRAP table, and does not change the report verdict or the exit code. To make it fail the run, name `crap` in `gates.fail_on` or pass `--fail-on types,tests,crap,secrets,lint`. This repository's `analyzer.toml` keeps the default threshold and leaves CRAP advisory.
+The `crap` gate is advisory by default. A failure is reported, with its findings and the worst-CRAP table, and does not change the report verdict or the exit code. To make it fail the run, name `crap` in `gates.fail_on` or pass `--fail-on types,tests,crap,secrets,lint`. This repository's `analyzer.toml` keeps the default threshold and names `crap` in `fail_on`, so its own analysis enforces CRAP.
 
 Coverage needed to stay at or under 30:
 
