@@ -126,7 +126,6 @@ impl Default for GatesConfig {
             fail_on: vec![
                 "types".into(),
                 "tests".into(),
-                "crap".into(),
                 "secrets".into(),
                 "lint".into(),
             ],
@@ -417,7 +416,7 @@ mod tests {
         assert!(config.install_agent_skills);
         assert_eq!(
             config.gates.fail_on,
-            vec!["types", "tests", "crap", "secrets", "lint"]
+            vec!["types", "tests", "secrets", "lint"]
         );
         assert_eq!(config.gates.crap_threshold, 30);
         assert!(config.engines.coverage);
@@ -444,7 +443,7 @@ mod tests {
         let config = load_config_file(Some(&path)).unwrap();
         assert_eq!(
             config.gates.fail_on,
-            vec!["types", "tests", "crap", "secrets", "lint"]
+            vec!["types", "tests", "secrets", "lint"]
         );
         assert_eq!(config.gates.crap_threshold, 30);
         assert!(config.scope.exclude.is_empty());

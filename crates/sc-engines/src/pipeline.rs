@@ -881,6 +881,7 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
             crap.over,
             crap.untested,
             request.config.gates.new_fn_untested_cc,
+            crap_enforced(&request.fail_on),
         ),
         gate(
             "secrets",
@@ -1048,11 +1049,17 @@ fn html_gate_enforced(config: &sc_core::Config, fail_on: &[String]) -> bool {
         "off" | "false" | "advisory" => false,
         _ => {
             fail_on.iter().any(|gate| gate == "html") || {
-                let builtin = ["types", "tests", "crap", "secrets", "lint"];
-                fail_on.len() == builtin.len()
-                    && builtin
-                        .iter()
-                        .all(|gate| fail_on.iter().any(|item| item == gate))
+                [
+                    &["types", "tests", "secrets", "lint"][..],
+                    &["types", "tests", "crap", "secrets", "lint"][..],
+                ]
+                .iter()
+                .any(|builtin| {
+                    fail_on.len() == builtin.len()
+                        && builtin
+                            .iter()
+                            .all(|gate| fail_on.iter().any(|item| item == gate))
+                })
             }
         }
     }
@@ -1252,6 +1259,7 @@ fn analyze_unsupported(
         crap.over,
         crap.untested,
         request.config.gates.new_fn_untested_cc,
+        crap_enforced(&request.fail_on),
     ));
     gates.push(gate(
         "secrets",
@@ -1406,6 +1414,7 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
             outcome.crap.over,
             outcome.crap.untested,
             request.config.gates.new_fn_untested_cc,
+            crap_enforced(&request.fail_on),
         ),
         advisory_detail(
             "sca",
@@ -2045,6 +2054,7 @@ fn assemble_rust_report(
         crap.over,
         crap.untested,
         untested_cc,
+        crap_enforced(&request.fail_on),
     );
     state.findings.extend(crap.findings);
 
@@ -2867,7 +2877,20 @@ fn crap_gate_reason(over: u64, untested: u64, untested_cc: u32) -> String {
     }
 }
 
-fn crap_gate(coverage_complete: bool, over: u64, untested: u64, untested_cc: u32) -> Gate {
+/// CRAP is advisory unless `fail_on` names it.
+fn crap_enforced(fail_on: &[String]) -> bool {
+    fail_on.iter().any(|gate| gate == "crap")
+}
+
+const CRAP_ADVISORY_SUFFIX: &str = " (advisory; does not fail the process)";
+
+fn crap_gate(
+    coverage_complete: bool,
+    over: u64,
+    untested: u64,
+    untested_cc: u32,
+    enforce: bool,
+) -> Gate {
     // A function with no coverage record is not scored. It must not hide a
     // measured failure, so the gate is advisory only when none failed.
     if !coverage_complete && over == 0 && untested == 0 {
@@ -2887,7 +2910,20 @@ fn crap_gate(coverage_complete: bool, over: u64, untested: u64, untested_cc: u32
             reason = format!("{reason}; {note}");
         }
     }
-    gate("crap", over == 0 && untested == 0, &reason)
+    let pass = over == 0 && untested == 0;
+    if enforce {
+        return gate("crap", pass, &reason);
+    }
+    Gate {
+        id: "crap".into(),
+        pass,
+        enforced: false,
+        reason: if pass {
+            None
+        } else {
+            Some(format!("{reason}{CRAP_ADVISORY_SUFFIX}"))
+        },
+    }
 }
 
 struct DependencyScan {
@@ -5085,24 +5121,67 @@ mod tests {
 
     #[test]
     fn one_unscored_function_does_not_hide_a_measured_crap_failure() {
-        let gate = crap_gate(false, 1, 0, 15);
+        let gate = crap_gate(false, 1, 0, 15, true);
         assert!(!gate.pass);
         assert!(gate.enforced);
         let reason = gate.reason.unwrap();
         assert!(reason.contains("1 function over threshold"), "{reason}");
         assert!(reason.contains("no coverage record"), "{reason}");
 
-        let untested = crap_gate(false, 0, 1, 15);
+        let untested = crap_gate(false, 0, 1, 15, true);
         assert!(!untested.pass);
         assert!(untested.enforced);
 
-        let clear = crap_gate(false, 0, 0, 15);
+        let clear = crap_gate(false, 0, 0, 15, true);
         assert!(!clear.pass);
         assert!(!clear.enforced);
         assert_eq!(
             clear.reason.as_deref(),
             Some("some functions have no coverage record and were not scored")
         );
+    }
+
+    #[test]
+    fn crap_is_advisory_unless_fail_on_names_it() {
+        let default: Vec<String> = ["types", "tests", "secrets", "lint"]
+            .map(String::from)
+            .to_vec();
+        assert!(!crap_enforced(&default));
+        assert!(!crap_enforced(&[]));
+        assert!(crap_enforced(&["types".into(), "crap".into()]));
+
+        let over = crap_gate(true, 2, 0, 15, false);
+        assert!(!over.pass);
+        assert!(!over.enforced);
+        assert_eq!(
+            over.reason.as_deref(),
+            Some("2 functions over threshold (advisory; does not fail the process)")
+        );
+
+        let untested = crap_gate(true, 0, 1, 15, false);
+        assert!(!untested.pass);
+        assert!(!untested.enforced);
+        assert_eq!(
+            untested.reason.as_deref(),
+            Some(
+                "1 function at or above CC 15 with no coverage (advisory; does not fail the process)"
+            )
+        );
+
+        let clean = crap_gate(true, 0, 0, 15, false);
+        assert!(clean.pass);
+        assert!(!clean.enforced);
+        assert_eq!(clean.reason, None);
+
+        let enforced = crap_gate(true, 2, 0, 15, true);
+        assert!(!enforced.pass);
+        assert!(enforced.enforced);
+        assert_eq!(
+            enforced.reason.as_deref(),
+            Some("2 functions over threshold")
+        );
+        let enforced_clean = crap_gate(true, 0, 0, 15, true);
+        assert!(enforced_clean.pass && enforced_clean.enforced);
     }
 
     #[test]

@@ -63,7 +63,7 @@ struct AnalyzeArgs {
     out: Option<PathBuf>,
     /// Gates that set exit 1 when they fail. Use `none` by itself to suppress every gate failure.
     /// An empty list is invalid. The report verdict still reflects every enforced gate.
-    /// Default: types,tests,crap,secrets,lint.
+    /// Default: types,tests,secrets,lint. `crap` is advisory unless named here.
     #[arg(long, value_name = "LIST")]
     fail_on: Option<String>,
     /// Write every finding's fingerprint to `.sc/baseline.json` in the project.
