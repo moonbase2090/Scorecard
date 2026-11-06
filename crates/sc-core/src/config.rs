@@ -456,7 +456,7 @@ mod tests {
         let config = load_config_file(Some(&path)).unwrap();
         assert_eq!(config.gates.crap_threshold, 30);
         assert_eq!(config.gates.new_fn_untested_cc, 15);
-        assert!(!config.gates.fail_on.iter().any(|gate| gate == "crap"));
+        assert!(config.gates.fail_on.iter().any(|gate| gate == "crap"));
         assert_eq!(config.pack, "rust");
     }
 

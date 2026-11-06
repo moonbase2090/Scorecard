@@ -12,8 +12,8 @@ pack = "rust"
 [scope]
 exclude = ["target/**", "generated/**", "testdata/**"]
 
-# CRAP is advisory: it is reported and does not fail the run. Threshold 30,
-# untested CC 15. Add "crap" to fail_on to enforce it.
+# CRAP uses the defaults: threshold 30, untested CC 15. The product default
+# leaves it advisory; this repository enforces it on itself.
 
 [gates]
-fail_on = ["types", "tests", "secrets", "lint"]
+fail_on = ["types", "tests", "crap", "secrets", "lint"]
