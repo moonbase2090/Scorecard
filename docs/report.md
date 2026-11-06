@@ -49,7 +49,7 @@ worst crap  threshold 30
   75.7    9    6%  Config.from_ssm   src/vectorvault/config.py:56
 ```
 
-The functions with the highest [CRAP](crap.md) score: cyclomatic complexity (CC) weighted by missing test coverage (COV). A score above the threshold fails the `crap` gate. When coverage was not measured at all, the table is empty (`(none)`) and a note says no CRAP scores are reported and nothing is treated as 0% coverage.
+The functions with the highest [CRAP](crap.md) score: cyclomatic complexity (CC) weighted by missing test coverage (COV). A score above the threshold is reported by the `crap` gate, which is advisory unless `fail_on` names `crap`. When coverage was not measured at all, the table is empty (`(none)`) and a note says no CRAP scores are reported and nothing is treated as 0% coverage.
 
 ```text
 findings

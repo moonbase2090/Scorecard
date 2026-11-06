@@ -26,7 +26,7 @@ Every run generates JSON, Markdown, SARIF, and HTML reports, emits finding annot
 
 | Input | Default | Meaning |
 |---|---|---|
-| `fail-on` | `types,tests,crap,secrets,lint` | Comma-separated gates whose failures fail the job. Use `none` by itself to suppress gate failures from the exit code. Empty is invalid. |
+| `fail-on` | `types,tests,secrets,lint` | Comma-separated gates whose failures fail the job. Use `none` by itself to suppress gate failures from the exit code. Empty is invalid. |
 | `diff` | `""` | Base ref for `--diff`. Empty scores the whole tree. On a pull request, pass the base ref so the report covers changed code and a one-line count of the rest of the tree. |
 | `format` | `sarif` | Upload selection: `sarif` uploads code scanning results on public repositories; `html` uploads all reports as an artifact; `all` does both; `json` and `md` skip uploads. Every selection generates all reports, annotations, and the job summary. |
 | `spec` | `""` | Path for `--spec` |

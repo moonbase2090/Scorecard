@@ -5,7 +5,7 @@ PASS
 gates
   [ok]  types            enforced
   [ok]  tests            enforced
-  [ok]  crap             enforced
+  [ok]  crap             advisory
   [ok]  sca              advisory
   [ok]  secrets          enforced
   [ok]  lint             enforced
