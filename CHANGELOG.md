@@ -4,6 +4,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `install.sh` downloads the release archive for the host OS and architecture, verifies `SHA256SUMS`, and installs `sc` and `sc-mcp` into `~/.local/bin`.
+- A multi-stage Dockerfile builds a small runtime image. CI builds it on pull requests and pushes `ghcr.io/moonbase2090/scorecard` on release tags.
+
 ## [0.1.15] - 2026-10-29
 
 ### Changed

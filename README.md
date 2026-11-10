@@ -154,6 +154,14 @@ The secrets scan also finds PEM private keys split across source string literals
 
 Published release [v0.1.14](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.14). Each `.tar.gz` holds a top-level directory `sc-v<version>-<target>/` with `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md`.
 
+Install `sc` and `sc-mcp` into `~/.local/bin`. The script picks the release archive for this OS and architecture and checks it against `SHA256SUMS` before copying either binary:
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/moonbase2090/Scorecard/main/install.sh | sh
+```
+
+Set `SC_VERSION=0.1.14` to pin that release. With no pin, the script installs the latest release. Linux and macOS use the `.tar.gz` assets (arm64 and x86_64). Windows x86_64 uses the `.zip` when the script runs under Git Bash or another Unix shell. The script stops before it installs anything when the checksum does not match, the platform has no asset, or neither `sha256sum` nor `shasum` is available. When `~/.local/bin` is not on `PATH`, the script prints the `export` line to add.
+
 | Platform | Asset |
 |---|---|
 | macOS, Apple silicon | `sc-v0.1.14-aarch64-apple-darwin.tar.gz` |
@@ -180,7 +188,27 @@ curl -fsSLO https://github.com/moonbase2090/Scorecard/releases/download/v0.1.14/
 shasum -a 256 -c --ignore-missing SHA256SUMS   # Linux: sha256sum -c --ignore-missing SHA256SUMS
 ```
 
-From source (Rust 1.88 or newer), in a clone of this repository:
+### Docker
+
+`Dockerfile` builds `sc` and `sc-mcp` in a Rust stage and copies them onto Debian slim with `git` and CA certificates. Language pack compilers are not in the image.
+
+```bash
+docker build -t sc .
+docker run --rm sc --version
+docker run --rm -v "$PWD:/work" -w /work sc analyze .
+```
+
+`sc-mcp` is at `/usr/local/bin/sc-mcp`.
+
+Pull requests build this image and do not push it. A `v*` release tag pushes `ghcr.io/moonbase2090/scorecard:<tag>` with the workflow `GITHUB_TOKEN`. A final tag (no prerelease suffix) also pushes `ghcr.io/moonbase2090/scorecard:latest`. The pushed image is `linux/amd64`.
+
+```bash
+docker pull ghcr.io/moonbase2090/scorecard:latest
+```
+
+### From source
+
+Rust 1.88 or newer, in a clone of this repository:
 
 ```bash
 cargo install --locked --path crates/sc-cli
