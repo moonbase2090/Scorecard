@@ -33,9 +33,10 @@ Analyze `PATH` (default `.`). The default output is pretty text on a terminal an
 
 | Flag | Values and default | Purpose |
 |---|---|---|
+| `--overall-score` | off | Include the finding-based overall score and grade in reports and saved JSON. |
 | `--format FORMAT` | `json`, `pretty`, `md`, `sarif`, `html`, `all`; auto-selects pretty/JSON when omitted | Choose stdout and report format. |
 | `--out PATH` | none | Also write the report to a file. Stdout prints a short summary even when it is not a terminal. `all` writes `.json`, `.md`, `.sarif`, and `.html` siblings. |
-| `--fail-on LIST` | `types,tests,crap,secrets,lint` | Comma-separated gates whose failure sets exit 1: `types`, `tests`, `crap`, `secrets`, `sca`, `spec`, `mutation`, `lint`, `html`, `links`, or `a11y`. Use `none` by itself to suppress gate failures from the exit code. |
+| `--fail-on LIST` | `types,tests,secrets,lint` | Comma-separated gates whose failure sets exit 1: `types`, `tests`, `crap`, `secrets`, `sca`, `spec`, `mutation`, `lint`, `html`, `links`, or `a11y`. Use `none` by itself to suppress gate failures from the exit code. |
 | `--pack PACK` | detected | Select `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, `web`, or `command`. Useful when multiple project markers match. |
 | `--diff [BASE]` | off; omitted base tries `HEAD~1`, then `main`, then `master`, skipping a candidate that is `HEAD`, and exits 2 when none remain | Analyze changes against a Git base. Uncommitted changes count. A depth-1 `main` or `master` checkout, a missing base, or any other unresolvable base exits 2 with verdict `fail` and one stderr line naming `fetch-depth: 0`. An explicit `--diff HEAD` still works. |
 | `--diff-head REV` | worktree | Compare a diff base to a commit instead of the worktree; use with `--diff`. |
@@ -51,7 +52,9 @@ Command flags override matching config settings. Every run writes `.sc/last-scor
 
 ### `sc badge [--input PATH]`
 
-Read a saved scorecard (`PATH`, default `.sc/last-scorecard.json`) and print Shields.io endpoint JSON. No scan and no network. A finished run averages the five dimension scores, rounds to 0–100, and grades A at 90, B at 80, C at 70, D at 60, and F below 60. When the report has `analyzer_error` set, the badge message is `error` and there is no letter grade, even if the dimension scores are perfect. Exit 2 means the report is missing or invalid, no engines ran, or a dimension is outside 0 to 1. An analyzer error still exits 0: the badge shows `error`.
+Read saved dimension scores from `PATH` (default `.sc/last-scorecard.json`) and print Shields.io endpoint JSON without scanning or network access. The overall score equally averages all five dimensions, rounds to 0 to 100, and grades A at 90, B at 80, C at 70, D at 60, and F below 60. This summarizes findings; skipped engines can leave dimensions unpenalized. Gates still decide the verdict. When the report has `analyzer_error` set, the badge message is `error` and there is no letter grade, even if the dimension scores are perfect. Exit 2 means the report is missing or invalid, no engines ran, or a dimension is outside 0 to 1. An analyzer error still exits 0: the badge shows `error`.
+
+Verify changes to overall scoring with `cargo test -p sc-core --lib overall` and `cargo test -p sc-cli --test overall`. Then analyze a real project with `--overall-score --format all --out REPORT`, check the JSON `overall` against the displayed rows, and run `sc badge --input REPORT.json` to inspect the badge.
 
 ### `sc config`
 
@@ -87,7 +90,7 @@ A passing gate must mean the code is better, not that the check was dodged. `sc`
 
 Do:
 
-- Fix the cause. For a CRAP offender, add tests that exercise the function's branches, or split the function so each part is simpler.
+- Fix the cause. CRAP is advisory by default, so a CRAP offender does not fail the run unless `crap` is in `fail_on`; fix it anyway when you touch that code. For a CRAP offender, add tests that exercise the function's branches, or split the function so each part is simpler.
 - Keep every assertion a test had. If behavior changed on purpose, change the expected value and say why in the commit message.
 - Write tests that can fail: assert on a specific result from the code under test.
 - When a finding is a false positive, say so in your report and leave the code alone, or narrow the scope as described below.
@@ -107,9 +110,10 @@ Config resolution is `--config PATH`, then `analyzer.toml` in the analyzed direc
 
 | Section or key | Purpose |
 |---|---|
+| `overall_score` | Include the overall finding-based score and grade in reports (`false`). `--overall-score` enables it for one run. |
 | `install_agent_skills` | Allow automatic agent skill installation; default `true`. Installer hooks read it only from `~/.config/sc/analyzer.toml`. |
 | `pack`, `toolchain` | Select the language pack (`detected` by default) and Rustup toolchain (empty uses project toolchain files). |
-| `[gates] fail_on`, `crap_threshold`, `new_fn_untested_cc` | Choose failing gates (default `types,tests,crap,secrets,lint`), maximum CRAP score (`30`), and the complexity floor for an untested function (`15`). |
+| `[gates] fail_on`, `crap_threshold`, `new_fn_untested_cc` | Choose failing gates (default `types,tests,secrets,lint`; `crap` is advisory unless named), maximum CRAP score (`30`), and the complexity floor for an untested function (`15`). |
 | `[scope] exclude`, `include_generated` | Exclude paths (default empty) or opt selected generated/vendor paths back into scanning (default empty). |
 | `[mutation] mode`, `max_mutants`, `budget_seconds` | Configure mutation checks (`off`, `50`, and `180` by default). |
 | `[llm] enabled`, `backend`, `endpoint`, `model`, `base_url`, `api_key_env`, `max_tool_rounds` | Configure optional spec/intent review. `backend` is `ollama`, `openai-compatible`, or `cursor`; review is disabled by default. Keep API keys in their named environment variable, not in the config file. |
@@ -177,6 +181,10 @@ Publish `scorecard.sarif` to the CI code-scanning service when configured. Use a
 - Do not put API keys in `analyzer.toml`, command output, or committed files.
 - Do not use `--force` on a skill install unless the user wants the existing copy replaced.
 - Do not claim checks ran when the report marks an engine skipped or unavailable.
+
+## Verify distribution metadata
+
+Run `python3 scripts/check-binstall.py` after changing the binary manifests or release archive layout. It verifies both binary manifests against all five release targets with `cargo-binstall --dry-run`; it requires published assets matching the workspace version. Registry publication remains disabled. See `docs/how-to/cargo-binstall.md` for the separate publication prerequisites.
 
 ## Verify TUI source changes
 

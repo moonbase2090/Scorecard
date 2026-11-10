@@ -19,9 +19,10 @@ sc help [COMMAND]
 
 | Flag | Default | Meaning |
 |---|---|---|
+| `--overall-score` | off | Add the overall finding-based score and grade to every report format and the saved JSON. Enables `overall_score` for this run. See [mapping](../report.md#overall-score-and-badge). |
 | `--format FORMAT` | `pretty` on a terminal, `json` otherwise | `json`, `pretty`, `md`, `sarif`, `html`, or `all`. See [Output](#output). |
 | `--out PATH` | none | Also write the report to `PATH`. Stdout prints the short summary, including when it is not a terminal. Without this flag, stdout is the chosen `--format`. |
-| `--fail-on LIST` | `types,tests,crap,secrets,lint` | Comma-separated [gates](gates.md) whose failures set exit 1. Use `none` by itself to suppress gate failures from the exit code. Empty or blank lists are invalid. Overrides `gates.fail_on`; already enforced failures remain in the report verdict. |
+| `--fail-on LIST` | `types,tests,secrets,lint` | Comma-separated [gates](gates.md) whose failures set exit 1. Use `none` by itself to suppress gate failures from the exit code. Empty or blank lists are invalid. Overrides `gates.fail_on`; already enforced failures remain in the report verdict. |
 | `--write-baseline` | off | Write each finding's fingerprint to `.sc/baseline.json` under the project. Run it once on the state you accept, then gate with `--baseline`. Cannot be combined with `--baseline`. |
 | `--baseline` | off | Exit 1 only when a failing gate fails on a finding not in `.sc/baseline.json`. Known findings stay in the report. Exits 2 with a fix hint when there is no baseline file. Does not gate on metric regressions yet. |
 | `--pack PACK` | detected | `rust`, `node`, `python`, `bash`, `go`, `java`, `csharp`, `php`, `cpp`, `web`, `command`, or `multi`. Use `multi` to opt into sequential analysis of monorepo pack roots. See [packs](../packs.md). |
@@ -46,17 +47,17 @@ Command-line flags override the matching config keys.
 
 ## sc badge
 
-Prints [Shields.io endpoint JSON](https://shields.io/badges/endpoint-badge) for a saved report. It does not run analysis or contact the network.
+Prints [Shields.io endpoint JSON](https://shields.io/badges/endpoint-badge) derived from a saved report's dimension scores. Does not run analysis, contact the network, or change the saved report. Works with reports saved without `--overall-score` and recomputes any cached overall value. The grade is a finding summary, independent of the report verdict.
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--input PATH` | `.sc/last-scorecard.json` | Saved scorecard JSON to read. |
+| `--input PATH` | `.sc/last-scorecard.json` | Saved Scorecard JSON report to read. |
 
-A finished report gets a letter grade from the five dimension scores: the equal-weight mean times 100, rounded to an integer. A is 90 to 100, B is 80 to 89, C is 70 to 79, D is 60 to 69, and F is 0 to 59. The message looks like `B (85/100)`. Colors are brightgreen, green, yellow, orange, and red. The grade does not change the verdict.
+A finished report gets a letter grade from the five dimension scores: the equal-weight mean times 100, rounded to an integer. A is 90 to 100, B is 80 to 89, C is 70 to 79, D is 60 to 69, and F is 0 to 59. The message looks like `B (85/100)`. Colors are brightgreen, green, yellow, orange, and red.
 
 When the report has `analyzer_error` set to `true`, the badge message is `error` and the color is `lightgrey`. There is no letter grade, including when the dimension scores are all `1.0`. See [Analyzer errors and the badge](../report.md#analyzer-errors-and-the-badge).
 
-Writes JSON to stdout. Exits 0 after writing the badge, including a failing verdict and an analyzer error. Exits 2 when the report is missing or invalid, no engines ran, any dimension is outside 0 to 1, or output cannot be written.
+Writes JSON to stdout. Exits 0 after writing the badge, including a failing verdict and an analyzer error. Exits 2 when the report is missing or invalid, no engines ran, any dimension is outside 0 to 1, or output cannot be written. See [Overall score and badge](../report.md#overall-score-and-badge).
 
 ## sc tui
 

@@ -4,9 +4,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- The optional `tui` build of `sc tui` follows lunatui `c47b6e98`. Empty cells inside a block keep that line's color. The feature stays off unless the build enables `tui`.
+- The `crap` gate is advisory by default (minor release). `gates.fail_on` and `--fail-on` default to `types,tests,secrets,lint`; a CRAP failure is reported with its findings and worst-CRAP table, and changes neither the verdict nor the exit code. Name `crap` in `fail_on` to enforce it again. The GitHub Action's `fail-on` default, the example config, the docs and the agent skill follow the advisory default. This repository's own `analyzer.toml` is an explicit exception: it keeps `crap` in `fail_on`, so its self-analysis still enforces CRAP. The CRAP engine, thresholds, findings and scores are unchanged.
+
 ### Added
 
-- Reports set `analyzer_error` when an analyzer cannot finish. Terminal, Markdown, and HTML show `ERROR`. `sc badge` prints Shields.io endpoint JSON: a letter grade for a finished run, and `error` with no letter when `analyzer_error` is set.
+- Opt-in overall scores and letter grades in reports with `--overall-score` or `overall_score = true`. `sc badge` emits Shields.io endpoint JSON from a saved report.
+- Reports set `analyzer_error` when an analyzer cannot finish. Terminal, Markdown, and HTML show `ERROR`. `sc badge` prints `error` with no letter when `analyzer_error` is set, and a letter grade for a finished run.
+- Local cargo-binstall metadata for both release binaries and a checker that verifies every target with dry runs. Registry publication remains disabled.
+
+### Fixed
+
+- A long symbol on a terminal finding line no longer hides the file name. The location and the symbol are elided separately, and a shortened path keeps its whole file name and line number. On a narrow terminal, the CRAP table's symbol column shrinks before the location loses the file name.
 
 ## [0.1.15] - 2026-10-29
 

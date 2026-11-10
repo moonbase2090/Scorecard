@@ -48,6 +48,9 @@ struct Cli {
 
 #[derive(Args)]
 struct AnalyzeArgs {
+    /// Include the overall finding-based score and A-F grade in reports.
+    #[arg(long)]
+    overall_score: bool,
     /// Project directory. Defaults to `.`.
     path: Option<PathBuf>,
     /// `json`, `pretty`, `md`, `sarif`, `html`, or `all`.
@@ -60,7 +63,7 @@ struct AnalyzeArgs {
     out: Option<PathBuf>,
     /// Gates that set exit 1 when they fail. Use `none` by itself to suppress every gate failure.
     /// An empty list is invalid. The report verdict still reflects every enforced gate.
-    /// Default: types,tests,crap,secrets,lint.
+    /// Default: types,tests,secrets,lint. `crap` is advisory unless named here.
     #[arg(long, value_name = "LIST")]
     fail_on: Option<String>,
     /// Write every finding's fingerprint to `.sc/baseline.json` in the project.
@@ -148,7 +151,7 @@ enum ConfigCmd {
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum Commands {
-    /// Print a Shields.io badge for a saved report. An analyzer error has no letter grade.
+    /// Print Shields.io endpoint JSON for a saved report. An analyzer error has no letter grade.
     Badge {
         /// Saved scorecard JSON. Defaults to `.sc/last-scorecard.json` in the current directory.
         #[arg(long, default_value = ".sc/last-scorecard.json")]
@@ -237,6 +240,7 @@ pub fn run() -> i32 {
 
 fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
     let AnalyzeArgs {
+        overall_score,
         path,
         format,
         out,
@@ -350,6 +354,7 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
         }
     }
 
+    loaded.overall_score |= overall_score;
     if let Some(pack) = pack {
         loaded.pack = pack;
     }

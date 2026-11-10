@@ -133,7 +133,8 @@ fn push_generated_files(out: &mut String, card: &Scorecard, opts: &PrettyOpts, w
             out.push_str(heading);
             out.push('\n');
             for file in files {
-                out.push_str(&fit_middle(&format!("  {file}"), width, opts.color));
+                out.push_str("  ");
+                out.push_str(&fit_path(file, width.saturating_sub(2), opts.color));
                 out.push('\n');
             }
         }
@@ -225,6 +226,12 @@ fn gate_row(gate: &Gate, opts: &PrettyOpts, width: usize) -> String {
 
 fn push_scores(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize) {
     out.push_str("scores\n");
+    if let Some(overall) = card.measures.overall {
+        out.push_str(&format!(
+            "  overall          {}/100  grade {}\n",
+            overall.score, overall.grade
+        ));
+    }
     score_line(
         out,
         "correctness",
@@ -284,25 +291,36 @@ fn push_crap(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize
         out.push_str("  (none)\n\n");
         return;
     }
-    out.push_str("  CRAP   CC   COV  SYMBOL            LOCATION\n");
-    for row in rows {
+    let locs: Vec<String> = rows
+        .iter()
+        .map(|row| location_for(card, &row.file, &row.symbol))
+        .collect();
+    // On a narrow terminal the symbol column gives up width first, so every
+    // row keeps its file name in the location column.
+    let need = locs.iter().map(|loc| path_min(loc)).max().unwrap_or(0);
+    let sym_col = width
+        .saturating_sub(CRAP_METRIC_COLS + 2 + need)
+        .clamp(SYMBOL_MIN, SYMBOL_COL);
+    out.push_str(&format!(
+        "  CRAP   CC   COV  {:<sym_col$}  LOCATION\n",
+        "SYMBOL"
+    ));
+    for (row, loc) in rows.iter().zip(&locs) {
         let cov = if measured {
             format!("{}%", (row.coverage.clamp(0.0, 1.0) * 100.0).round() as i64)
         } else {
             "--".into()
         };
-        let loc = location_for(card, &row.file, &row.symbol);
         let prefix = format!(
-            "  {:>4}  {:>3}  {:>4}  {:<16}  ",
+            "  {:>4}  {:>3}  {:>4}  {:<sym_col$}  ",
             fmt_crap(row.crap),
             row.cc,
             cov,
-            fit_middle(&row.symbol, 16, opts.color),
+            fit_middle(&row.symbol, sym_col, opts.color),
         );
-        // The location goes last, so it takes the rest of the width and keeps
-        // both ends: a long symbol must not hide the file name.
-        let loc = fit_middle(
-            &loc,
+        // The location goes last and takes the rest of the width.
+        let loc = fit_path(
+            loc,
             width.saturating_sub(prefix.chars().count()),
             opts.color,
         );
@@ -386,9 +404,8 @@ fn push_findings(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: u
 
 fn finding_block(finding: &Finding, opts: &PrettyOpts, width: usize) -> String {
     let mut block = format!("  {}\n", finding.rule);
-    let place = finding_place(finding);
     block.push_str("  ");
-    block.push_str(&fit_middle(&place, width.saturating_sub(2), opts.color));
+    block.push_str(&finding_place(finding, width.saturating_sub(2), opts.color));
     block.push('\n');
     if let Some(action) = finding.suggested_action.as_deref() {
         if !action.is_empty() {
@@ -544,15 +561,87 @@ fn location_for(card: &Scorecard, file: &str, symbol: &str) -> String {
     }
 }
 
-fn finding_place(finding: &Finding) -> String {
+/// The finding's `file:line  symbol`, fitted to `width`. The location and the
+/// symbol are fitted separately, so a long symbol cannot hide the file name.
+/// The symbol keeps up to `SYMBOL_COL` columns before the directory part of the
+/// path gives anything up. It is dropped only when too few columns are left
+/// to show any of it.
+fn finding_place(finding: &Finding, width: usize, unicode: bool) -> String {
     let loc = match finding.span.as_ref() {
         Some(span) => format!("{}:{}", finding.file, span.start_line),
         None => finding.file.clone(),
     };
-    match finding.symbol.as_deref() {
-        Some(symbol) if !symbol.is_empty() => format!("{loc}  {symbol}"),
-        _ => loc,
+    let symbol = match finding.symbol.as_deref() {
+        Some(symbol) if !symbol.is_empty() => symbol,
+        _ => return fit_path(&loc, width, unicode),
+    };
+    let loc_len = loc.chars().count();
+    let sym_len = symbol.chars().count();
+    // When both fit, `loc_w` is the whole location and `sym_w` covers the
+    // whole symbol, so neither is cut.
+    let avail = width.saturating_sub(2);
+    let sym_want = sym_len.min(SYMBOL_COL);
+    let loc_w = loc_len.min(avail.saturating_sub(sym_want).max(path_min(&loc)));
+    let sym_w = avail.saturating_sub(loc_w);
+    if sym_w < sym_len.min(SYMBOL_MIN) {
+        return fit_path(&loc, width, unicode);
     }
+    format!(
+        "{}  {}",
+        fit_path(&loc, loc_w, unicode),
+        fit_middle(symbol, sym_w, unicode)
+    )
+}
+
+/// Width of the CRAP table's symbol column, and of the symbol share a finding
+/// line keeps when its path is long.
+const SYMBOL_COL: usize = 16;
+/// Fewest columns a symbol is shown in; "SYMBOL" is the column header.
+const SYMBOL_MIN: usize = 6;
+/// The CRAP table's columns before the symbol: `  CRAP   CC   COV  `.
+const CRAP_METRIC_COLS: usize = 19;
+
+/// Start of the file name: just after the last `/` or `\`.
+fn name_start(chars: &[char]) -> usize {
+    chars
+        .iter()
+        .rposition(|c| *c == '/' || *c == '\\')
+        .map_or(0, |i| i + 1)
+}
+
+/// Fewest columns `fit_path` needs to keep the whole file name: the path
+/// itself when it is short, else the mark plus the file name (with any
+/// `:line`).
+fn path_min(path: &str) -> usize {
+    let chars: Vec<char> = path.chars().collect();
+    let name = chars.len() - name_start(&chars);
+    if name == chars.len() {
+        name
+    } else {
+        name + 1
+    }
+}
+
+/// Like `fit_middle`, but for a path: the file name (with any `:line`) is kept
+/// whole and the directories after the first few columns are elided, so at 20
+/// columns `crates/sc-cli/src/pretty.rs:42` becomes `crates/…pretty.rs:42`.
+/// When even the file name does not fit, the file name loses its middle.
+fn fit_path(path: &str, width: usize, unicode: bool) -> String {
+    let width = width.max(1);
+    let chars: Vec<char> = path.chars().collect();
+    if chars.len() <= width {
+        return path.to_string();
+    }
+    let start = name_start(&chars);
+    let name: String = chars[start..].iter().collect();
+    let name_len = chars.len() - start;
+    if name_len >= width {
+        return fit_middle(&name, width, unicode);
+    }
+    let mut out: String = chars[..width - 1 - name_len].iter().collect();
+    out.push(if unicode { '…' } else { '~' });
+    out.push_str(&name);
+    out
 }
 
 fn fit(text: &str, width: usize, unicode: bool) -> String {
@@ -635,6 +724,137 @@ mod tests {
         assert_eq!(fit_middle("short", 16, true), "short");
         assert_eq!(fit_middle("abcdef", 1, true), "…");
         assert_eq!(fit_middle("abcdef", 4, true).chars().count(), 4);
+    }
+
+    #[test]
+    fn fit_path_keeps_the_whole_file_name() {
+        let path = "crates/sc-cli/src/pretty.rs:42";
+        assert_eq!(fit_path(path, 20, true), "crates/…pretty.rs:42");
+        assert_eq!(fit_path(path, 20, false), "crates/~pretty.rs:42");
+        assert_eq!(fit_path(path, 13, true), "…pretty.rs:42");
+        assert_eq!(fit_path(path, 40, true), path);
+        assert_eq!(
+            fit_path("crates\\sc-cli\\pretty.rs", 12, false),
+            "cr~pretty.rs"
+        );
+        // Only when the file name itself is too wide does it lose its middle.
+        assert_eq!(
+            fit_path("src/a_very_long_file_name.rs", 10, true),
+            "a_ver…e.rs"
+        );
+        assert_eq!(fit_path("pretty.rs:42", 8, true), "pret…:42");
+        assert_eq!(path_min(path), 13);
+        assert_eq!(path_min("lib.rs"), 6);
+    }
+
+    fn located(file: &str, line: u32, symbol: &str) -> Finding {
+        Finding {
+            id: "crap:x".into(),
+            rule: "crap.over_threshold".into(),
+            engine: "crap".into(),
+            severity: "error".into(),
+            file: file.into(),
+            span: Some(sc_core::Span {
+                start_line: line,
+                start_col: 1,
+                end_line: line,
+                end_col: 1,
+            }),
+            symbol: Some(symbol.into()),
+            message: String::new(),
+            evidence: serde_json::Value::Null,
+            suggested_action: None,
+            disposition: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_long_symbol_does_not_hide_the_file_name_on_a_finding_line() {
+        let finding = located(
+            "crates/sc-engines/src/pipeline.rs",
+            1510,
+            "sc_engines::assemble_rust_report",
+        );
+        // 38 columns of location and 32 of symbol in 40: the path gives up
+        // its middle directories, the symbol keeps 16 columns.
+        assert_eq!(
+            finding_place(&finding, 40, true),
+            "crate…pipeline.rs:1510  sc_engin…_report"
+        );
+        // Too narrow for any useful part of the symbol: the location keeps
+        // the line to itself.
+        assert_eq!(finding_place(&finding, 20, true), "cra…pipeline.rs:1510");
+        // A short symbol stays whole and the path gives up the rest.
+        let short = located("crates/sc-engines/src/pipeline.rs", 1510, "run");
+        assert_eq!(
+            finding_place(&short, 30, true),
+            "crates/s…pipeline.rs:1510  run"
+        );
+        // 12 + 2 + 3 = 17 columns: whole at 17, cut at 16.
+        let exact = located("src/lib.rs", 1, "run");
+        assert_eq!(finding_place(&exact, 17, true), "src/lib.rs:1  run");
+        assert_eq!(finding_place(&exact, 16, true), "sr…lib.rs:1  run");
+        // An empty symbol adds no separator.
+        let empty = located("src/lib.rs", 1, "");
+        assert_eq!(finding_place(&empty, 40, true), "src/lib.rs:1");
+        let wide = finding_place(&finding, 80, true);
+        assert_eq!(
+            wide,
+            "crates/sc-engines/src/pipeline.rs:1510  sc_engines::assemble_rust_report"
+        );
+
+        let mut card = Scorecard::skeleton("demo", 30);
+        card.sections.findings.push(finding);
+        let text = to_pretty(
+            &card,
+            &PrettyOpts {
+                color: false,
+                width: 42,
+                version: "0.1.0".into(),
+                report: None,
+                exit_code: 1,
+            },
+        );
+        assert!(
+            text.contains("\n  crate~pipeline.rs:1510  sc_engin~_report\n"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_narrow_crap_row_keeps_the_file_name() {
+        let mut card = Scorecard::skeleton("demo", 30);
+        card.engines.engines_run.push("coverage".into());
+        card.sections.crap.worst = vec![CrapFunction {
+            symbol: "assemble_rust_report".into(),
+            file: "crates/sc-engines/src/pipeline.rs".into(),
+            cc: 11,
+            coverage: 0.0,
+            crap: 132.0,
+        }];
+        let opts = PrettyOpts {
+            color: false,
+            width: 40,
+            version: "0.1.0".into(),
+            report: None,
+            exit_code: 0,
+        };
+        // At 40 columns the symbol column shrinks from 16 to 7, so the
+        // location still has room for `~pipeline.rs`.
+        let text = to_pretty(&card, &opts);
+        assert!(
+            text.contains(
+                "  CRAP   CC   COV  SYMBOL   LOCATION\n   132   11    0%  ass~ort  ~pipeline.rs\n"
+            ),
+            "{text}"
+        );
+        let wide = to_pretty(&card, &PrettyOpts { width: 120, ..opts });
+        assert!(
+            wide.contains(
+                "  CRAP   CC   COV  SYMBOL            LOCATION\n   132   11    0%  assemble~_report  crates/sc-engines/src/pipeline.rs\n"
+            ),
+            "{wide}"
+        );
     }
 
     #[test]

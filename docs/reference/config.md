@@ -14,6 +14,7 @@ Only the first file found is read. Command-line flags override the matching keys
 
 | Key | Default | Meaning |
 |---|---|---|
+| `overall_score` | `false` | Add the overall finding-based score and grade to reports. `--overall-score` enables it for one run. See [mapping](../report.md#overall-score-and-badge). |
 | `install_agent_skills` | `true` | Allow installer hooks to install the Scorecard skill for detected agents. Hooks read this from the user config `~/.config/sc/analyzer.toml`. Set it to `false` to opt out. `SCORECARD_NO_AGENT_SKILLS=1` also skips automatic installation. |
 | `pack` | detected | Language pack when the tree has more than one marker. Same values as `--pack`. |
 | `toolchain` | empty | Rustup channel for check, test, coverage, and lint (`1.85.0`, `stable`, …). When set, Cargo uses that channel. When empty, a `rust-toolchain.toml` / `rust-toolchain` at or above the project clears an inherited `RUSTUP_TOOLCHAIN` so rustup reads the file; with no file, the inherited variable is left alone. |
@@ -22,7 +23,7 @@ Only the first file found is read. Command-line flags override the matching keys
 
 | Key | Default | Meaning |
 |---|---|---|
-| `gates.fail_on` | `["types", "tests", "crap", "secrets", "lint"]` | [Gates](gates.md) whose failures set exit 1. Set it to `["none"]` to suppress gate failures from the exit code. An empty list, blank value, mixed `none` list, or unknown gate is an error (exit 2). Enforced failures remain in the report verdict. |
+| `gates.fail_on` | `["types", "tests", "secrets", "lint"]` | [Gates](gates.md) whose failures set exit 1. Set it to `["none"]` to suppress gate failures from the exit code. An empty list, blank value, mixed `none` list, or unknown gate is an error (exit 2). Enforced failures remain in the report verdict. |
 | `gates.crap_threshold` | `30` | A function with a [CRAP](../crap.md) score above this fails the `crap` gate. |
 | `gates.new_fn_untested_cc` | `15` | A function at or above this complexity with 0% measured coverage fails the `crap` gate (`complexity.untested`). With `--diff`, only new functions count. |
 

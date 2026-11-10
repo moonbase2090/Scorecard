@@ -6,6 +6,8 @@
 sc analyze testdata/good_crate --format html --out scorecard.html
 ```
 
+Add `--overall-score` to show the overall score and letter grade in the scores table. See [Overall score and badge](report.md#overall-score-and-badge).
+
 That command writes `scorecard.html`. Stdout prints the short summary, not the HTML page.
 
 Without `--out`, `--format all` prints JSON, then Markdown, on stdout. With `--out`, stdout is the short summary and these siblings are written next to the path you give:
