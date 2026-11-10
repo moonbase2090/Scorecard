@@ -111,6 +111,10 @@ jobs:
           bash scripts/test-check-release-text.sh
       - name: release install staging
         run: bash scripts/test-release-install-staging.sh
+      - name: install script
+        run: bash scripts/test-install.sh
+      - name: container image contract
+        run: bash scripts/test-docker.sh
 
   tui-perf:
     runs-on: ubuntu-latest

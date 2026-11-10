@@ -2,6 +2,8 @@
 
 Releases are cut from `main` by pushing a `vX.Y.Z` tag; see `.github/workflows/release.yml`.
 
+The same tag builds the runtime image and pushes `ghcr.io/moonbase2090/scorecard:<tag>`. A final tag also updates `:latest`. Pull requests build the image and do not push it. That job uses the workflow `GITHUB_TOKEN` and does not use the Apple signing secrets.
+
 ## Public release text
 
 Release text and artifacts must not reference private infrastructure, hostnames, personal paths, or internal tooling. That includes release titles and bodies, tag messages, `CHANGELOG.md`, README and docs, and strings embedded in shipped binaries and archives.
