@@ -218,7 +218,14 @@ def check_invocations(options: dict[str, set[str]]) -> list[str]:
 
 def config_keys() -> set[str]:
     text = (ROOT / "crates/sc-core/src/config.rs").read_text()
-    keys = {"pack", "toolchain"}
+    config_body = re.search(r"pub struct Config \{(.*?)^\}", text, re.S | re.M)
+    if not config_body:
+        raise SystemExit("config.rs: struct Config not found")
+    nested = set(SECTIONS.values())
+    keys = set()
+    for field in re.findall(r"pub (\w+):", config_body.group(1)):
+        if field not in nested:
+            keys.add(field)
     for name, section in SECTIONS.items():
         body = re.search(rf"pub struct {name} \{{(.*?)^\}}", text, re.S | re.M)
         if not body:

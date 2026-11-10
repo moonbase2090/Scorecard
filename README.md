@@ -64,14 +64,14 @@ Export a saved report to Waypoint with `sc export --waypoint --project PROJECT`.
 In a terminal the report looks like this (from `testdata/good_crate`):
 
 ```text
-sc 0.1.15  testdata/good_crate  rust  5ac851c clean  scope tree
+sc 0.2.0  testdata/good_crate  rust  5ac851c clean  scope tree
 
 PASS
 
 gates
   [ok]  types            enforced
   [ok]  tests            enforced
-  [ok]  crap             enforced
+  [ok]  crap             advisory
   [ok]  sca              advisory
   [ok]  secrets          enforced
   [ok]  lint             enforced
@@ -96,6 +96,10 @@ exit 0: enforced gates passed
 ```
 
 Exit status: `1` a gate selected by `--fail-on` failed; `0` none did; `2` `sc` could not run. Use `--fail-on none` to return 0 for every gate while keeping failures in the report. If an enforced gate fails while the exit code is 0, `sc` writes one stderr warning with the failed gate names. An empty or blank `--fail-on` selection is invalid. Omit the option to use the default gates. [Reading the report](docs/report.md) explains every section.
+
+Use `sc analyze . --overall-score` to add an overall score and letter grade to reports. The score averages all five dimensions and rounds to 0 to 100; gates still decide pass or fail. `sc badge` prints [Shields.io endpoint JSON](https://shields.io/badges/endpoint-badge) from the last saved report without running analysis. See [Overall score and badge](docs/report.md#overall-score-and-badge) for the mapping and examples.
+
+An analyzer error (exit 2) sets `analyzer_error` on the report and shows `ERROR`. `sc badge` prints `A` through `F` when the run finished, and `error` with no letter when an analyzer did not. See [Analyzer errors and the badge](docs/report.md#analyzer-errors-and-the-badge).
 
 For reports with more than eight findings, the terminal output puts the five most frequent fix types before the findings list. The full report stays in `.sc/last-scorecard.json`.
 
@@ -131,6 +135,7 @@ Next:
 - Run `sc setup` so coding agents on this machine can use `sc` ([agents](docs/how-to/agents.md)).
 - Install just the agent instructions with `sc skills install --agent detected`; see [skill installation](docs/how-to/agents.md#install-the-skill).
 - Write a user config with `sc config init`, or put `analyzer.toml` at the project root ([configure](docs/how-to/config.md)).
+- Rust projects can pass extra `cargo test` arguments with `commands.test_args`, and set the analysis budget with `budget_seconds`. Leave them unset to keep `cargo test` and the 120-second budget.
 - Rust projects can opt into overlapping dependency and secrets scans with `[engines] parallel = true`; Cargo commands remain sequential and the setting is off by default.
 
 The secrets scan also finds PEM private keys split across source string literals, including Go or Java concatenations and YAML lists. See [PEM examples](examples/README.md#pem-keys-in-source-files).
@@ -214,6 +219,8 @@ Rust 1.88 or newer, in a clone of this repository:
 cargo install --locked --path crates/sc-cli
 cargo install --locked --path crates/sc-mcp
 ```
+
+The local binary manifests also support `cargo-binstall` from GitHub releases. Run `cargo binstall --manifest-path crates/sc-cli/Cargo.toml --dry-run --no-confirm sc-cli` to verify the CLI download without installing it. See [cargo-binstall checks](docs/how-to/cargo-binstall.md) for both binaries and all release targets. Registry publication remains disabled; `cargo install sc-cli` selects an unrelated package.
 
 Rust coverage needs `rustup component add llvm-tools` and `cargo install cargo-llvm-cov`. Without them `sc` still runs and reports coverage as not measured. Other packs need their own tools; see [packs](docs/packs.md).
 

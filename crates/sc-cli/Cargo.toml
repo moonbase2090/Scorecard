@@ -21,11 +21,11 @@ default = []
 tui = ["dep:lunatui-core", "dep:lunatui-runtime", "dep:lunatui-term", "dep:lunatui-theme", "dep:lunatui-widgets", "dep:terminal_size"]
 
 [dependencies]
-lunatui-core = { git = "https://github.com/moonbase2090/lunatui", rev = "dbf6f6d6575b4caf45c40b39c7567103a1a185f0", optional = true }
-lunatui-runtime = { git = "https://github.com/moonbase2090/lunatui", rev = "dbf6f6d6575b4caf45c40b39c7567103a1a185f0", optional = true, features = ["app"] }
-lunatui-term = { git = "https://github.com/moonbase2090/lunatui", rev = "dbf6f6d6575b4caf45c40b39c7567103a1a185f0", optional = true }
-lunatui-theme = { git = "https://github.com/moonbase2090/lunatui", rev = "dbf6f6d6575b4caf45c40b39c7567103a1a185f0", optional = true }
-lunatui-widgets = { git = "https://github.com/moonbase2090/lunatui", rev = "dbf6f6d6575b4caf45c40b39c7567103a1a185f0", optional = true }
+lunatui-core = { git = "https://github.com/moonbase2090/lunatui", rev = "c47b6e98bc3815b641f010303cfaf4dc77426c62", optional = true }
+lunatui-runtime = { git = "https://github.com/moonbase2090/lunatui", rev = "c47b6e98bc3815b641f010303cfaf4dc77426c62", optional = true, features = ["app"] }
+lunatui-term = { git = "https://github.com/moonbase2090/lunatui", rev = "c47b6e98bc3815b641f010303cfaf4dc77426c62", optional = true }
+lunatui-theme = { git = "https://github.com/moonbase2090/lunatui", rev = "c47b6e98bc3815b641f010303cfaf4dc77426c62", optional = true }
+lunatui-widgets = { git = "https://github.com/moonbase2090/lunatui", rev = "c47b6e98bc3815b641f010303cfaf4dc77426c62", optional = true }
 url = "2"
 terminal_size = { version = "0.4", optional = true }
 sc-core = { path = "../sc-core" }
@@ -47,9 +47,19 @@ windows-sys = { version = "0.61", features = [
 
 [dev-dependencies]
 insta = { version = "1.43", default-features = false }
-lunatui-test = { git = "https://github.com/moonbase2090/lunatui", rev = "dbf6f6d6575b4caf45c40b39c7567103a1a185f0" }
-termlens = { version = "=0.11.6", default-features = false }
+lunatui-test = { git = "https://github.com/moonbase2090/lunatui", rev = "c47b6e98bc3815b641f010303cfaf4dc77426c62" }
+termlens = { version = "=0.11.8", default-features = false }
 
 [[test]]
 name = "tui"
 required-features = ["tui"]
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/sc-v{ version }-{ target }.tar.gz"
+pkg-fmt = "tgz"
+bin-dir = "sc-v{ version }-{ target }/{ bin }{ binary-ext }"
+disabled-strategies = ["quick-install", "compile"]
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-url = "{ repo }/releases/download/v{ version }/sc-v{ version }-{ target }.zip"
+pkg-fmt = "zip"

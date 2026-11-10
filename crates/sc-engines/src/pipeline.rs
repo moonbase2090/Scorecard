@@ -23,6 +23,7 @@ use crate::coverage::parse_coverage_json;
 use crate::crap::{evaluate, unmatched_functions};
 
 use crate::mutation::run_mutation;
+use crate::rust_test_args::{coverage_invocation, test_invocation};
 use crate::scope::{empty_selection, Selection};
 use crate::spec_check::{check_spec, gap_value};
 use crate::weakening::run_weakening;
@@ -186,7 +187,13 @@ fn analyze_multi(request: AnalyzeRequest, generated_paths: &[PathBuf]) -> Analyz
         return output;
     }
     let outputs = run_multi_roots(&request, &root, roots, started);
-    combine_multi_outputs(root, git, outputs, &request.fail_on)
+    combine_multi_outputs(
+        root,
+        git,
+        outputs,
+        &request.fail_on,
+        request.config.overall_score,
+    )
 }
 
 type MultiOutput = (String, AnalyzeOutput);
@@ -291,6 +298,7 @@ fn combine_multi_outputs(
     git: GitInfo,
     outputs: Vec<MultiOutput>,
     fail_on: &[String],
+    overall: bool,
 ) -> AnalyzeOutput {
     let mut card = outputs[0].1.scorecard.clone();
     card.identity.pack = "multi".into();
@@ -317,7 +325,14 @@ fn combine_multi_outputs(
         analyzer_error |= output.status == RunStatus::AnalyzerError;
         merge_multi_part(&mut card, &prefix, output.scorecard, &mut gate_reasons);
     }
-    finalize_multi_card(&root, &mut card, fail_on, analyzer_error, gate_reasons)
+    finalize_multi_card(
+        &root,
+        &mut card,
+        fail_on,
+        analyzer_error,
+        gate_reasons,
+        overall,
+    )
 }
 
 fn merge_multi_part(
@@ -536,6 +551,7 @@ fn finalize_multi_card(
     fail_on: &[String],
     analyzer_error: bool,
     mut gate_reasons: std::collections::BTreeMap<String, Vec<String>>,
+    overall: bool,
 ) -> AnalyzeOutput {
     for gate in &mut card.measures.gates {
         if !gate.pass {
@@ -582,6 +598,11 @@ fn finalize_multi_card(
         .worst
         .sort_by(|a, b| b.crap.total_cmp(&a.crap));
     card.measures.scores = compute_scores(&card.sections.findings);
+    card.measures.overall = if overall && !analyzer_error {
+        sc_core::overall_score(&card.measures.scores)
+    } else {
+        None
+    };
     card.verdict = if card
         .measures
         .gates
@@ -593,6 +614,10 @@ fn finalize_multi_card(
         "pass"
     }
     .into();
+    card.analyzer_error = analyzer_error;
+    if analyzer_error {
+        card.verdict = "fail".into();
+    }
     card.identity.test_selection = "multi-pack".into();
     card.sections.crap.worst.truncate(10);
     let status = if analyzer_error {
@@ -691,6 +716,7 @@ fn analyze_blocked(
     ];
     report(&request, "Writing report");
     finish(Draft {
+        overall_score: request.config.overall_score,
         root: request.root.clone(),
         repo: request.repo,
         pack: pack.to_string(),
@@ -860,6 +886,7 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
             crap.over,
             crap.untested,
             request.config.gates.new_fn_untested_cc,
+            crap_enforced(&request.fail_on),
         ),
         gate(
             "secrets",
@@ -873,6 +900,7 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
     ];
     report(&request, "Writing report");
     finish(Draft {
+        overall_score: request.config.overall_score,
         root: request.root.clone(),
         repo: request.repo,
         pack: "web".into(),
@@ -1026,11 +1054,17 @@ fn html_gate_enforced(config: &sc_core::Config, fail_on: &[String]) -> bool {
         "off" | "false" | "advisory" => false,
         _ => {
             fail_on.iter().any(|gate| gate == "html") || {
-                let builtin = ["types", "tests", "crap", "secrets", "lint"];
-                fail_on.len() == builtin.len()
-                    && builtin
-                        .iter()
-                        .all(|gate| fail_on.iter().any(|item| item == gate))
+                [
+                    &["types", "tests", "secrets", "lint"][..],
+                    &["types", "tests", "crap", "secrets", "lint"][..],
+                ]
+                .iter()
+                .any(|builtin| {
+                    fail_on.len() == builtin.len()
+                        && builtin
+                            .iter()
+                            .all(|gate| fail_on.iter().any(|item| item == gate))
+                })
             }
         }
     }
@@ -1230,6 +1264,7 @@ fn analyze_unsupported(
         crap.over,
         crap.untested,
         request.config.gates.new_fn_untested_cc,
+        crap_enforced(&request.fail_on),
     ));
     gates.push(gate(
         "secrets",
@@ -1242,6 +1277,7 @@ fn analyze_unsupported(
     ));
     report(&request, "Writing report");
     finish(Draft {
+        overall_score: request.config.overall_score,
         root: request.root.clone(),
         repo: request.repo,
         pack: pack.as_str().to_string(),
@@ -1383,6 +1419,7 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
             outcome.crap.over,
             outcome.crap.untested,
             request.config.gates.new_fn_untested_cc,
+            crap_enforced(&request.fail_on),
         ),
         advisory_detail(
             "sca",
@@ -1412,6 +1449,7 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
     let diff = scoped.py.is_some();
     let paths: Vec<String> = scoped.py.unwrap_or_default().into_iter().collect();
     finish(Draft {
+        overall_score: request.config.overall_score,
         root: request.root.clone(),
         repo: request.repo,
         pack: "python".into(),
@@ -1468,6 +1506,7 @@ fn python_scope_error(request: AnalyzeRequest, git: GitInfo, err: String) -> Ana
     ];
     report(&request, "Writing report");
     finish(Draft {
+        overall_score: request.config.overall_score,
         root: request.root.clone(),
         repo: request.repo,
         pack: "python".into(),
@@ -1533,7 +1572,11 @@ fn analyze_rust(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         selection.workspace_root
     };
     let build = || {
-        let mut state = RustState::new(workspace_root, request.config.toolchain.clone());
+        let mut state = RustState::new(
+            workspace_root,
+            request.config.toolchain.clone(),
+            request.config.commands.test_args.clone(),
+        );
         if let Some(err) = &select_error {
             state.findings.push(unavailable("scope", err));
         }
@@ -1602,10 +1645,12 @@ struct RustState {
     workspace_root: bool,
     /// From `analyzer.toml` `toolchain` (empty means use the project file pin).
     toolchain_pin: String,
+    /// Extra `cargo test` / `cargo llvm-cov` arguments from `commands.test_args`.
+    test_args: Vec<String>,
 }
 
 impl RustState {
-    fn new(workspace_root: bool, toolchain_pin: String) -> Self {
+    fn new(workspace_root: bool, toolchain_pin: String, test_args: Vec<String>) -> Self {
         Self {
             findings: Vec::new(),
             runs: Vec::new(),
@@ -1620,6 +1665,7 @@ impl RustState {
             line_rate: 0.0,
             workspace_root,
             toolchain_pin,
+            test_args,
         }
     }
 }
@@ -1741,9 +1787,12 @@ fn test_phase(
         root,
         manifest,
         deadline,
-        state.workspace_root,
         &targeted,
-        &state.toolchain_pin,
+        &TestCommand {
+            workspace_root: state.workspace_root,
+            toolchain_pin: &state.toolchain_pin,
+            test_args: &state.test_args,
+        },
         &mut state.runs,
     ) {
         Ok(captured) => {
@@ -1756,24 +1805,20 @@ fn test_phase(
             }
             state.findings.extend(failures);
         }
-        Err(err @ (CommandError::Timeout { .. } | CommandError::BudgetExhausted)) => {
+        Err((err @ (CommandError::Timeout { .. } | CommandError::BudgetExhausted), command)) => {
             state.analyzer_error = true;
             state.tests_pass = false;
-            state.tests_reason = err.message(&cargo_gate_command("test", state.workspace_root, ""));
-            state.findings.push(timed_out(
-                "tests",
-                &err,
-                &cargo_gate_command("test", state.workspace_root, ""),
-            ));
+            state.tests_reason = err.message(&command);
+            state.findings.push(timed_out("tests", &err, &command));
             state.skipped.push("tests".into());
         }
-        Err(err) => {
+        Err((err, command)) => {
             state.analyzer_error = true;
             state.tests_pass = false;
             state.tests_reason = "toolchain unavailable".into();
             state
                 .findings
-                .push(unavailable("tests", &err.message("cargo test")));
+                .push(unavailable("tests", &err.message(&command)));
             state.skipped.push("tests".into());
         }
     }
@@ -1801,6 +1846,7 @@ fn coverage_phase(
         deadline,
         state.workspace_root,
         &state.toolchain_pin,
+        &state.test_args,
         &mut state.runs,
     ) {
         Ok(data) => record_coverage_success(selection, data, state),
@@ -2020,6 +2066,7 @@ fn assemble_rust_report(
         crap.over,
         crap.untested,
         untested_cc,
+        crap_enforced(&request.fail_on),
     );
     state.findings.extend(crap.findings);
 
@@ -2098,6 +2145,7 @@ fn assemble_rust_report(
 
     report(request, "Writing report");
     finish(Draft {
+        overall_score: request.config.overall_score,
         root: root.to_path_buf(),
         repo: request.repo.clone(),
         pack: "rust".into(),
@@ -2135,6 +2183,7 @@ fn assemble_rust_report(
 }
 
 struct Draft {
+    overall_score: bool,
     root: PathBuf,
     repo: String,
     pack: String,
@@ -2194,12 +2243,18 @@ fn finish(mut draft: Draft) -> AnalyzeOutput {
             "pass"
         }
         .to_string(),
+        analyzer_error: draft.analyzer_error,
         fail_on: draft.fail_on,
         engines: sc_core::ScorecardEngines {
             engines_run: draft.ran,
             engines_skipped: draft.skipped,
         },
         measures: sc_core::ScorecardMeasures {
+            overall: if draft.overall_score && !draft.analyzer_error {
+                sc_core::overall_score(&scores)
+            } else {
+                None
+            },
             scores,
             gates: draft.gates,
             metrics: draft.metrics,
@@ -2265,69 +2320,32 @@ fn note_run_with_budget(
     }
 }
 
+struct TestCommand<'a> {
+    workspace_root: bool,
+    toolchain_pin: &'a str,
+    test_args: &'a [String],
+}
+
 fn run_test_set(
     root: &Path,
     manifest: &Path,
     deadline: Instant,
-    workspace_root: bool,
     names: &[String],
-    toolchain_pin: &str,
+    command: &TestCommand<'_>,
     runs: &mut Vec<RunRecord>,
-) -> Result<TestCapture, CommandError> {
+) -> Result<TestCapture, (CommandError, String)> {
+    let manifest_arg = manifest.to_string_lossy().to_string();
     if names.is_empty() {
-        let started = Instant::now();
-        let result = run_tests(root, manifest, deadline, workspace_root, toolchain_pin);
-        match &result {
-            Ok(captured) => note_run(
-                runs,
-                "tests",
-                &cargo_gate_command("test", workspace_root, ""),
-                captured.status.code(),
-                captured.elapsed,
-            ),
-            Err(_) => note_run(
-                runs,
-                "tests",
-                &cargo_gate_command("test", workspace_root, ""),
-                None,
-                started.elapsed(),
-            ),
-        }
-        let captured = result?;
-        return Ok(TestCapture {
-            success: captured.status.success(),
-            stdout: captured.stdout,
-            stderr: captured.stderr,
-        });
+        return run_recorded_test(root, deadline, command, None, &manifest_arg, runs);
     }
     let mut stdout = String::new();
     let mut stderr = String::new();
     let mut success = true;
     for name in names {
-        let started = Instant::now();
-        let command = format!("{} {name}", cargo_gate_command("test", workspace_root, ""));
-        let result = run_one_test(
-            root,
-            manifest,
-            deadline,
-            workspace_root,
-            name,
-            toolchain_pin,
-        );
-        match &result {
-            Ok(captured) => note_run(
-                runs,
-                "tests",
-                &command,
-                captured.status.code(),
-                captured.elapsed,
-            ),
-            Err(_) => note_run(runs, "tests", &command, None, started.elapsed()),
-        }
-        let captured = result?;
+        let captured = run_recorded_test(root, deadline, command, Some(name), &manifest_arg, runs)?;
         stdout.push_str(&captured.stdout);
         stderr.push_str(&captured.stderr);
-        success &= captured.status.success();
+        success &= captured.success;
     }
     Ok(TestCapture {
         stdout,
@@ -2336,19 +2354,43 @@ fn run_test_set(
     })
 }
 
-fn run_one_test(
+fn run_recorded_test(
     root: &Path,
-    manifest: &Path,
     deadline: Instant,
-    workspace_root: bool,
-    name: &str,
+    command: &TestCommand<'_>,
+    name: Option<&str>,
+    manifest: &str,
+    runs: &mut Vec<RunRecord>,
+) -> Result<TestCapture, (CommandError, String)> {
+    let invocation = test_invocation(command.workspace_root, command.test_args, name, manifest);
+    let started = Instant::now();
+    let result = run_invoked(root, &invocation, deadline, command.toolchain_pin);
+    match &result {
+        Ok(captured) => note_run(
+            runs,
+            "tests",
+            &invocation.display,
+            captured.status.code(),
+            captured.elapsed,
+        ),
+        Err(_) => note_run(runs, "tests", &invocation.display, None, started.elapsed()),
+    }
+    let captured = result.map_err(|err| (err, invocation.display))?;
+    Ok(TestCapture {
+        success: captured.status.success(),
+        stdout: captured.stdout,
+        stderr: captured.stderr,
+    })
+}
+
+fn run_invoked(
+    root: &Path,
+    invocation: &crate::rust_test_args::CargoInvocation,
+    deadline: Instant,
     toolchain_pin: &str,
 ) -> Result<crate::command::Captured, CommandError> {
-    let manifest = manifest.to_string_lossy().to_string();
-    let mut args = vec!["test"];
-    add_workspace_arg(&mut args, workspace_root);
-    args.extend([name, "--manifest-path", &manifest, "--color", "never"]);
-    run_cargo(root, &args, deadline, toolchain_pin)
+    let refs: Vec<&str> = invocation.args.iter().map(String::as_str).collect();
+    run_cargo(root, &refs, deadline, toolchain_pin)
 }
 
 struct LintSink<'a> {
@@ -2513,20 +2555,6 @@ fn run_check(
     run_cargo(root, &args, deadline, toolchain_pin)
 }
 
-fn run_tests(
-    root: &Path,
-    manifest: &Path,
-    deadline: Instant,
-    workspace_root: bool,
-    toolchain_pin: &str,
-) -> Result<crate::command::Captured, CommandError> {
-    let manifest = manifest.to_string_lossy().to_string();
-    let mut args = vec!["test"];
-    add_workspace_arg(&mut args, workspace_root);
-    args.extend(["--manifest-path", &manifest, "--color", "never"]);
-    run_cargo(root, &args, deadline, toolchain_pin)
-}
-
 /// Remove coverage profiles without deleting the instrumented build.
 ///
 /// `cargo llvm-cov --no-clean` skips its usual `cargo clean`, which is what
@@ -2556,6 +2584,7 @@ fn run_coverage(
     deadline: Instant,
     workspace_root: bool,
     toolchain_pin: &str,
+    test_args: &[String],
     runs: &mut Vec<RunRecord>,
 ) -> Result<crate::coverage::CoverageData, String> {
     let out_path = root.join("target").join("sc-coverage.json");
@@ -2570,22 +2599,13 @@ fn run_coverage(
     clear_stale_llvm_cov_profiles(root);
     let started = Instant::now();
     let budget = deadline.saturating_duration_since(started);
-    let mut args = vec!["llvm-cov"];
-    add_workspace_arg(&mut args, workspace_root);
-    args.extend([
-        "--json",
-        "--output-path",
-        &out_s,
-        "--manifest-path",
-        &manifest_s,
-        "--no-clean",
-    ]);
-    let captured = run_cargo(root, &args, deadline, toolchain_pin);
+    let invocation = coverage_invocation(workspace_root, test_args, &manifest_s, &out_s);
+    let captured = run_invoked(root, &invocation, deadline, toolchain_pin);
     match &captured {
         Ok(captured) => note_run_with_budget(
             runs,
             "coverage",
-            &cargo_gate_command("llvm-cov", workspace_root, "--json"),
+            &invocation.display,
             captured.status.code(),
             captured.elapsed,
             budget,
@@ -2593,7 +2613,7 @@ fn run_coverage(
         Err(_) => note_run_with_budget(
             runs,
             "coverage",
-            &cargo_gate_command("llvm-cov", workspace_root, "--json"),
+            &invocation.display,
             None,
             started.elapsed(),
             budget,
@@ -2835,7 +2855,20 @@ fn crap_gate_reason(over: u64, untested: u64, untested_cc: u32) -> String {
     }
 }
 
-fn crap_gate(coverage_complete: bool, over: u64, untested: u64, untested_cc: u32) -> Gate {
+/// CRAP is advisory unless `fail_on` names it.
+fn crap_enforced(fail_on: &[String]) -> bool {
+    fail_on.iter().any(|gate| gate == "crap")
+}
+
+const CRAP_ADVISORY_SUFFIX: &str = " (advisory; does not fail the process)";
+
+fn crap_gate(
+    coverage_complete: bool,
+    over: u64,
+    untested: u64,
+    untested_cc: u32,
+    enforce: bool,
+) -> Gate {
     // A function with no coverage record is not scored. It must not hide a
     // measured failure, so the gate is advisory only when none failed.
     if !coverage_complete && over == 0 && untested == 0 {
@@ -2855,7 +2888,20 @@ fn crap_gate(coverage_complete: bool, over: u64, untested: u64, untested_cc: u32
             reason = format!("{reason}; {note}");
         }
     }
-    gate("crap", over == 0 && untested == 0, &reason)
+    let pass = over == 0 && untested == 0;
+    if enforce {
+        return gate("crap", pass, &reason);
+    }
+    Gate {
+        id: "crap".into(),
+        pass,
+        enforced: false,
+        reason: if pass {
+            None
+        } else {
+            Some(format!("{reason}{CRAP_ADVISORY_SUFFIX}"))
+        },
+    }
 }
 
 struct DependencyScan {
@@ -3863,7 +3909,7 @@ mod tests {
         let manifest = root.join("Cargo.toml");
         let deadline = Instant::now() + Duration::from_secs(180);
         let mut runs = Vec::new();
-        let first = run_coverage(&root, &manifest, deadline, true, "", &mut runs)
+        let first = run_coverage(&root, &manifest, deadline, true, "", &[], &mut runs)
             .expect("first coverage run");
         assert_eq!(coverage_rate(&first, "covered"), 1.0, "{first:?}");
         assert_eq!(coverage_rate(&first, "missed"), 0.0, "{first:?}");
@@ -3871,7 +3917,7 @@ mod tests {
         let inode = std::fs::metadata(&rlib).unwrap().ino();
 
         std::fs::write(root.join("tests/call.rs"), call_missed).unwrap();
-        let second = run_coverage(&root, &manifest, deadline, true, "", &mut runs)
+        let second = run_coverage(&root, &manifest, deadline, true, "", &[], &mut runs)
             .expect("warm coverage run");
         let warm_rlib = library_rlib(&root);
         assert_eq!(
@@ -3922,7 +3968,7 @@ mod tests {
 
     #[test]
     fn record_coverage_tool_missing_skips_and_names_the_fix() {
-        let mut state = RustState::new(false, String::new());
+        let mut state = RustState::new(false, String::new(), Vec::new());
         record_coverage_tool_missing("cargo: no such command `llvm-cov`".into(), &mut state);
         assert!(state.skipped.iter().any(|engine| engine == "coverage"));
         let finding = state
@@ -4445,12 +4491,51 @@ mod tests {
         });
         assert_eq!(output.status, RunStatus::AnalyzerError);
         assert_eq!(output.scorecard.verdict, "fail");
+        assert!(output.scorecard.analyzer_error);
+        let saved: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.join(".sc/last-scorecard.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(saved["analyzer_error"], true);
+        assert_eq!(saved["verdict"], "fail");
         assert!(output.scorecard.sections.findings.iter().any(|finding| {
             finding.rule == "engine.unavailable"
                 && finding.message.contains("--pack")
                 && finding.message.contains("analyzer.toml")
         }));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_multi_pack_error_in_any_root_is_marked_on_the_combined_report() {
+        let root = std::env::temp_dir().join(format!("sc-multi-error-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut card = Scorecard::skeleton("multi", 30);
+        card.measures.scores = sc_core::Scores::perfect();
+        card.engines.engines_run.push("secrets".into());
+        card.verdict = "pass".into();
+        let output = finalize_multi_card(
+            &root,
+            &mut card,
+            &["secrets".into()],
+            true,
+            std::collections::BTreeMap::new(),
+            true,
+        );
+        assert_eq!(output.status, RunStatus::AnalyzerError);
+        assert!(output.scorecard.analyzer_error);
+        assert_eq!(output.scorecard.verdict, "fail");
+        assert!(output.scorecard.measures.overall.is_none());
+        assert_eq!(output.scorecard.measures.scores.security, 1.0);
+        let saved: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(root.join(".sc/last-scorecard.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(saved["analyzer_error"], true);
+        assert!(saved.get("overall").is_none());
+        assert_eq!(saved["scores"]["security"], 1.0);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -5053,24 +5138,67 @@ mod tests {
 
     #[test]
     fn one_unscored_function_does_not_hide_a_measured_crap_failure() {
-        let gate = crap_gate(false, 1, 0, 15);
+        let gate = crap_gate(false, 1, 0, 15, true);
         assert!(!gate.pass);
         assert!(gate.enforced);
         let reason = gate.reason.unwrap();
         assert!(reason.contains("1 function over threshold"), "{reason}");
         assert!(reason.contains("no coverage record"), "{reason}");
 
-        let untested = crap_gate(false, 0, 1, 15);
+        let untested = crap_gate(false, 0, 1, 15, true);
         assert!(!untested.pass);
         assert!(untested.enforced);
 
-        let clear = crap_gate(false, 0, 0, 15);
+        let clear = crap_gate(false, 0, 0, 15, true);
         assert!(!clear.pass);
         assert!(!clear.enforced);
         assert_eq!(
             clear.reason.as_deref(),
             Some("some functions have no coverage record and were not scored")
         );
+    }
+
+    #[test]
+    fn crap_is_advisory_unless_fail_on_names_it() {
+        let default: Vec<String> = ["types", "tests", "secrets", "lint"]
+            .map(String::from)
+            .to_vec();
+        assert!(!crap_enforced(&default));
+        assert!(!crap_enforced(&[]));
+        assert!(crap_enforced(&["types".into(), "crap".into()]));
+
+        let over = crap_gate(true, 2, 0, 15, false);
+        assert!(!over.pass);
+        assert!(!over.enforced);
+        assert_eq!(
+            over.reason.as_deref(),
+            Some("2 functions over threshold (advisory; does not fail the process)")
+        );
+
+        let untested = crap_gate(true, 0, 1, 15, false);
+        assert!(!untested.pass);
+        assert!(!untested.enforced);
+        assert_eq!(
+            untested.reason.as_deref(),
+            Some(
+                "1 function at or above CC 15 with no coverage (advisory; does not fail the process)"
+            )
+        );
+
+        let clean = crap_gate(true, 0, 0, 15, false);
+        assert!(clean.pass);
+        assert!(!clean.enforced);
+        assert_eq!(clean.reason, None);
+
+        let enforced = crap_gate(true, 2, 0, 15, true);
+        assert!(!enforced.pass);
+        assert!(enforced.enforced);
+        assert_eq!(
+            enforced.reason.as_deref(),
+            Some("2 functions over threshold")
+        );
+        let enforced_clean = crap_gate(true, 0, 0, 15, true);
+        assert!(enforced_clean.pass && enforced_clean.enforced);
     }
 
     #[test]

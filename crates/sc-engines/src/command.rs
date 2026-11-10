@@ -74,10 +74,9 @@ impl CommandError {
     }
 }
 
-const DEFAULT_BUDGET_SECS: u64 = 120;
-static RUN_BUDGET_SECS: AtomicU64 = AtomicU64::new(DEFAULT_BUDGET_SECS);
+static RUN_BUDGET_SECS: AtomicU64 = AtomicU64::new(sc_core::DEFAULT_BUDGET_SECONDS);
 
-/// Record the `--budget-seconds` of the run in progress so a timeout can
+/// Record the analysis budget of the run in progress so a timeout can
 /// suggest a larger one.
 pub fn set_run_budget(budget: Duration) {
     RUN_BUDGET_SECS.store(budget.as_secs().max(1), Ordering::Relaxed);
@@ -87,11 +86,11 @@ fn timeout_fix_text(what: &str, spent: bool, budget_secs: u64) -> String {
     let raised = budget_secs * 2;
     if spent {
         return format!(
-            "Re-run with --budget-seconds {raised}, or find the step that used the budget up in the report's runs."
+            "Re-run with --budget-seconds {raised}, or set budget_seconds = {raised} in analyzer.toml. The report's runs show which step used the budget."
         );
     }
     format!(
-        "Run `{what}` in the project to see what it waits on. If it only needs more time, re-run with --budget-seconds {raised}."
+        "Run `{what}` in the project to see what it waits on. If it only needs more time, re-run with --budget-seconds {raised} or set budget_seconds = {raised} in analyzer.toml."
     )
 }
 
@@ -410,13 +409,26 @@ mod tests {
 
     #[test]
     fn suggested_budget_is_twice_the_budget_of_the_run() {
+        let slow = super::timeout_fix_text("cargo test", false, 900);
+        assert!(slow.contains("--budget-seconds 1800"), "{slow}");
+        assert!(slow.contains("budget_seconds = 1800"), "{slow}");
+        assert!(slow.ends_with("analyzer.toml."), "{slow}");
+        let default_budget = super::timeout_fix_text("cargo test", false, 120);
         assert!(
-            super::timeout_fix_text("cargo test", false, 900).ends_with("--budget-seconds 1800.")
+            default_budget.contains("--budget-seconds 240"),
+            "{default_budget}"
         );
         assert!(
-            super::timeout_fix_text("cargo test", false, 120).ends_with("--budget-seconds 240.")
+            default_budget.contains("budget_seconds = 240"),
+            "{default_budget}"
         );
-        assert!(super::timeout_fix_text("cargo test", true, 900).contains("--budget-seconds 1800,"));
+        let spent = super::timeout_fix_text("cargo test", true, 900);
+        assert!(spent.contains("--budget-seconds 1800"), "{spent}");
+        assert!(spent.contains("budget_seconds = 1800"), "{spent}");
+        assert!(
+            spent.starts_with("Re-run with --budget-seconds "),
+            "{spent}"
+        );
     }
 
     #[test]

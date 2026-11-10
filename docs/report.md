@@ -15,7 +15,7 @@ The header: `sc` version, analyzed path, [pack](packs.md), git commit, and Git s
 PASS  2 advisory gates failing
 ```
 
-The verdict. `PASS` means every enforced gate passed. Advisory gates can still fail under a `PASS`; the note counts them. `FAIL` means at least one enforced gate failed. `--fail-on` controls the process exit code, so it can be 0 while the report says `FAIL` if an enforced failure is not selected. In that case, `sc` writes one stderr warning with the failed gate names. Naming an advisory gate can enforce it; omitting an already enforced gate from the exit list does not change the report verdict. `--fail-on none` selects no exit gates and leaves enforced failures visible: terminal, Markdown, and HTML still show `FAIL`, and stderr names the failed gates, even though the process exits 0. `REPORT ONLY` is reserved for reports where no provided gate is enforced and at least one advisory gate fails. An empty or blank selection is invalid. Omit `--fail-on` and `gates.fail_on` to use the defaults.
+The verdict. `PASS` means every enforced gate passed. Advisory gates can still fail under a `PASS`; the note counts them. `FAIL` means at least one enforced gate failed. `--fail-on` controls the process exit code, so it can be 0 while the report says `FAIL` if an enforced failure is not selected. In that case, `sc` writes one stderr warning with the failed gate names. Naming an advisory gate can enforce it; omitting an already enforced gate from the exit list does not change the report verdict. `--fail-on none` selects no exit gates and leaves enforced failures visible: terminal, Markdown, and HTML still show `FAIL`, and stderr names the failed gates, even though the process exits 0. `REPORT ONLY` is reserved for reports where no provided gate is enforced and at least one advisory gate fails. An empty or blank selection is invalid. Omit `--fail-on` and `gates.fail_on` to use the defaults. `ERROR` means an analyzer could not finish. JSON keeps `verdict` as `fail` and sets `analyzer_error` to `true`. Terminal, Markdown, and HTML show `ERROR` and the line "analyzer error: no letter grade; a check did not finish. Run `sc analyze .` again." Dimension scores stay in the report, and they are not a grade.
 
 ```text
 gates
@@ -49,7 +49,7 @@ worst crap  threshold 30
   75.7    9    6%  Config.from_ssm   src/vectorvault/config.py:56
 ```
 
-The functions with the highest [CRAP](crap.md) score: cyclomatic complexity (CC) weighted by missing test coverage (COV). A score above the threshold fails the `crap` gate. When coverage was not measured at all, the table is empty (`(none)`) and a note says no CRAP scores are reported and nothing is treated as 0% coverage.
+The functions with the highest [CRAP](crap.md) score: cyclomatic complexity (CC) weighted by missing test coverage (COV). A score above the threshold is reported by the `crap` gate, which is advisory unless `fail_on` names `crap`. When coverage was not measured at all, the table is empty (`(none)`) and a note says no CRAP scores are reported and nothing is treated as 0% coverage.
 
 ```text
 findings
@@ -67,11 +67,63 @@ engines skipped: complexity, mutation, llm
 exit 0: enforced gates passed
 ```
 
-Which checks ran, which did not, and the exit status. An engine is skipped when its tool is missing or when it is off by default (`mutation`, `llm`, `spec`). A skip caused by a missing tool also appears as an `engine.unavailable` finding with the reason.
+Which checks ran, which did not, and the exit status. An engine is skipped when its tool is missing or when it is off by default (`mutation`, `llm`, `spec`). A skip caused by a missing tool also appears as an `engine.unavailable` finding with the reason. `ERROR` is the label when a check could not finish (exit 2).
 
 When a terminal runs `sc analyze` and `.sc/last-scorecard.json` holds a report for the same repository, one stderr line says what changed since that run: each score that moved, and how many findings are new or resolved. Captured output and CI logs do not get the line.
 
-The Markdown report adds an **Engine timing** table after the header: time per engine, summed over its runs, and a total. Per-engine budgets are not available yet; `--budget-seconds` still applies to the whole run.
+The Markdown report adds an **Engine timing** table after the header: time per engine, summed over its runs, and a total. Per-engine budgets are not available yet; `budget_seconds` and `--budget-seconds` still apply to the whole run.
+
+## Overall score and badge
+
+`sc analyze . --overall-score` adds `overall: {"score": 100, "grade": "A"}` to JSON and an overall row to terminal, Markdown, and HTML reports. SARIF stores the same object in `runs[0].properties.overall`. Set `overall_score = true` at the top level of `analyzer.toml` to enable it for every run. The feature is off by default. Analyzer errors leave `overall` absent.
+
+![Overall score and grade in the HTML report](images/overall-score-report.png)
+
+The overall score is the equal-weight mean of correctness, efficiency, maintainability, security, and a11y, multiplied by 100 and rounded to the nearest integer. Half points round up. The rounded integer determines the grade:
+
+| Overall score | Grade |
+|---|---|
+| 90 to 100 | A |
+| 80 to 89 | B |
+| 70 to 79 | C |
+| 60 to 69 | D |
+| 0 to 59 | F |
+
+For example, dimension scores of 0.2, 0.4, 0.6, 0.8, and 1.0 give 60/100, grade D. All five dimensions count, including ones with no findings because an engine was disabled or skipped. The score summarizes the existing finding penalties; it does not measure test coverage or prove every check ran. Gates still decide the verdict and exit status, so a report can have grade A and verdict `fail`. In multi-pack reports, the score uses the combined dimensions after all findings are merged.
+
+```bash doctest
+sc analyze . --overall-score --format json > report.json
+jq -e '.overall == {"score": 100, "grade": "A"}' report.json
+sc badge > badge.json
+jq -e '.schemaVersion == 1 and .label == "scorecard" and .message == "A (100/100)" and .color == "brightgreen"' badge.json
+```
+
+`sc badge` reads `.sc/last-scorecard.json` and writes the [Shields.io endpoint schema](https://shields.io/badges/endpoint-badge). It also works with saved reports that omitted `overall`; badge generation always recomputes from the dimensions. Use `sc badge --input report.json` for a different report. No analysis or network request runs. Redirect the output to a JSON file and host that file at a public URL to use it with a Shields endpoint badge.
+
+```json
+{"schemaVersion":1,"label":"scorecard","message":"A (100/100)","color":"brightgreen"}
+```
+
+Badge colors are brightgreen for A, green for B, yellow for C, orange for D, and red for F. The command exits 2 when the report cannot be read, its dimensions are invalid, or no engines ran. Generate a report with `sc analyze .` before retrying.
+
+## Analyzer errors and the badge
+
+When any analyzer errors, the JSON report sets `analyzer_error` to `true`. The field is omitted when the run finishes. A finished run can still fail gates. That report has no `analyzer_error` field, and its badge may show a letter grade. An unfinished run must not. `--overall-score` does not add an `overall` object on an analyzer error.
+
+An `analyzer_error` report gets this badge instead, with no letter:
+
+```json
+{"schemaVersion":1,"label":"scorecard","message":"error","color":"lightgrey"}
+```
+
+```bash doctest
+sc analyze does-not-exist --format json > report.json || test $? -eq 2
+jq -e '.analyzer_error == true and .verdict == "fail"' report.json
+sc badge --input report.json > badge.json
+jq -e '.schemaVersion == 1 and .label == "scorecard" and .message == "error" and .color == "lightgrey"' badge.json
+```
+
+`sc badge` exits 0 for that badge. The error state is the badge, and the command itself succeeded.
 
 ## Dispositions
 
@@ -89,12 +141,14 @@ Top-level fields of `.sc/last-scorecard.json` and `--format json`:
 
 | Field | Contents |
 |---|---|
-| `verdict` | `pass` or `fail` |
+| `verdict` | `pass` or `fail`. An analyzer error keeps `fail` and sets `analyzer_error` |
+| `analyzer_error` | `true` when an analyzer could not finish. Omitted otherwise. The badge then says `error` and shows no letter grade |
 | `fail_on` | Gate ids whose failures set exit 1; an empty list means `none` was selected |
 | `pack`, `repo`, `scope` | What was analyzed |
 | `git` | `head`, `dirty`, and `dirty_paths` (all changed paths relative to the repository root; omitted when clean) |
 | `gates` | `id`, `pass`, `enforced`, and `reason` per gate |
 | `scores` | The score rows above |
+| `overall` | Optional `score` from 0 to 100 and `grade`; present when overall scoring is enabled |
 | `metrics` | Changed lines and files, `coverage_changed`, `crap_max`, `crap_over_threshold`, `hallucinated_imports` |
 | `crap` | Threshold and worst functions with `cc`, `coverage`, and `crap` |
 | `mutation` | `status`, `score`, `killed`, `survived`, `timeout`, `unviable` when `--mutation` is not `off` |

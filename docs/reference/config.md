@@ -14,15 +14,17 @@ Only the first file found is read. Command-line flags override the matching keys
 
 | Key | Default | Meaning |
 |---|---|---|
+| `overall_score` | `false` | Add the overall finding-based score and grade to reports. `--overall-score` enables it for one run. See [mapping](../report.md#overall-score-and-badge). |
 | `install_agent_skills` | `true` | Allow installer hooks to install the Scorecard skill for detected agents. Hooks read this from the user config `~/.config/sc/analyzer.toml`. Set it to `false` to opt out. `SCORECARD_NO_AGENT_SKILLS=1` also skips automatic installation. |
 | `pack` | detected | Language pack when the tree has more than one marker. Same values as `--pack`. |
 | `toolchain` | empty | Rustup channel for check, test, coverage, and lint (`1.85.0`, `stable`, …). When set, Cargo uses that channel. When empty, a `rust-toolchain.toml` / `rust-toolchain` at or above the project clears an inherited `RUSTUP_TOOLCHAIN` so rustup reads the file; with no file, the inherited variable is left alone. |
+| `budget_seconds` | `120` | Wall-clock budget for pack commands, in seconds. One clock for the whole run. `--budget-seconds` overrides it. `0` is an error. A command still running at the deadline is killed, including its child processes. |
 
 ### `[gates]`
 
 | Key | Default | Meaning |
 |---|---|---|
-| `gates.fail_on` | `["types", "tests", "crap", "secrets", "lint"]` | [Gates](gates.md) whose failures set exit 1. Set it to `["none"]` to suppress gate failures from the exit code. An empty list, blank value, mixed `none` list, or unknown gate is an error (exit 2). Enforced failures remain in the report verdict. |
+| `gates.fail_on` | `["types", "tests", "secrets", "lint"]` | [Gates](gates.md) whose failures set exit 1. Set it to `["none"]` to suppress gate failures from the exit code. An empty list, blank value, mixed `none` list, or unknown gate is an error (exit 2). Enforced failures remain in the report verdict. |
 | `gates.crap_threshold` | `30` | A function with a [CRAP](../crap.md) score above this fails the `crap` gate. |
 | `gates.new_fn_untested_cc` | `15` | A function at or above this complexity with 0% measured coverage fails the `crap` gate (`complexity.untested`). With `--diff`, only new functions count. |
 
@@ -62,6 +64,7 @@ If exclusions leave no files for secrets scanning, `secrets.empty_scope` fails t
 | Key | Default | Meaning |
 |---|---|---|
 | `commands.lint` | `cargo clippy --workspace` | Lint command for the Rust and `command` packs. At a workspace root, Cargo Clippy checks every member; analyzing a member keeps lint scoped to that package. Empty skips lint. Other packs use their own linter; see [packs](../packs.md). Add `-- -D warnings` to fail on warnings at the workspace root: `cargo clippy --workspace -- -D warnings`. |
+| `commands.test_args` | `[]` | Extra arguments for the Rust pack's `cargo test` and `cargo llvm-cov`. Empty keeps `cargo test` (`--workspace` at a workspace root). Each entry is one argument. Cargo options come first (`--locked`, `--features`). A single `--` then test-harness arguments: test-name filters and options such as `--test-threads=1`. A test-name filter before the `--` is rejected. Scorecard adds `--workspace` only at a workspace root and sets `--manifest-path` and `--color never` itself, so those flags are rejected. Other packs ignore this key. |
 
 ### `[mutation]`
 
