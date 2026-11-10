@@ -99,6 +99,8 @@ Exit status: `1` a gate selected by `--fail-on` failed; `0` none did; `2` `sc` c
 
 Use `sc analyze . --overall-score` to add an overall score and letter grade to reports. The score averages all five dimensions and rounds to 0 to 100; gates still decide pass or fail. `sc badge` prints [Shields.io endpoint JSON](https://shields.io/badges/endpoint-badge) from the last saved report without running analysis. See [Overall score and badge](docs/report.md#overall-score-and-badge) for the mapping and examples.
 
+An analyzer error (exit 2) sets `analyzer_error` on the report and shows `ERROR`. `sc badge` prints `A` through `F` when the run finished, and `error` with no letter when an analyzer did not. See [Analyzer errors and the badge](docs/report.md#analyzer-errors-and-the-badge).
+
 For reports with more than eight findings, the terminal output puts the five most frequent fix types before the findings list. The full report stays in `.sc/last-scorecard.json`.
 
 If the configured scope selects no files for secrets scanning, the report contains `secrets.empty_scope` and the secrets gate fails. Check the project path and exclusions before rerunning.

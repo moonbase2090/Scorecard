@@ -136,6 +136,39 @@ fn analyzer_errors_have_no_overall_score() {
 }
 
 #[test]
+fn a_failed_baseline_write_leaves_no_overall_grade_in_any_report() {
+    let project = Project::new("baseline-write");
+    std::fs::create_dir_all(project.0.join(".sc/baseline.json")).unwrap();
+    let output = project.run(&[
+        "analyze",
+        ".",
+        "--write-baseline",
+        "--overall-score",
+        "--format",
+        "all",
+        "--out",
+        "report",
+    ]);
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("grade A"));
+    for file in ["report.json", ".sc/last-scorecard.json"] {
+        let report = project.json(file);
+        assert_eq!(report["analyzer_error"], true, "{file}");
+        assert_eq!(report["verdict"], "fail", "{file}");
+        assert!(report.get("overall").is_none(), "{file}: {report}");
+    }
+    assert!(project.json("report.sarif")["runs"][0]["properties"]
+        .get("overall")
+        .is_none());
+    assert!(!std::fs::read_to_string(project.0.join("report.md"))
+        .unwrap()
+        .contains("Overall:"));
+    assert!(!std::fs::read_to_string(project.0.join("report.html"))
+        .unwrap()
+        .contains("grade A"));
+}
+
+#[test]
 fn badge_recomputes_saved_dimensions_and_does_not_change_a_failing_verdict() {
     let project = Project::new("badge");
     let mut card = Scorecard::skeleton("demo", 30);

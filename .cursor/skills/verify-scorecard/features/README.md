@@ -7,7 +7,7 @@ Start with [Launch and Doctor](../SKILL.md). Commands run in the same Bash shell
 3. [Scope](scope.md): path lists, uncommitted Git changes against `HEAD`, and a missing diff base.
 4. [Parallel Rust engines](rust-parallel.md): dependency and secrets findings remain present when their scans overlap Cargo phases.
 5. [Multi-pack monorepo analysis](multipack.md): sequential web and Go roots, combined root-relative report, and one persisted root report.
-5. [Multi-pack monorepo analysis](multipack.md): sequential web and Go roots, combined root-relative report, and one persisted root report.
+6. [Badge](badge.md): a finished run's letter grade, and an analyzer error that must not keep one.
 
 Capture every entry in a feature when that feature changes. A passing convenient format is not proof for another format. Keep action/output/exit evidence outside scratch state and confirm it survives Cleanup.
 

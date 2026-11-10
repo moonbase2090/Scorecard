@@ -1,4 +1,10 @@
 // SPDX-License-Identifier: MIT
+//! Shields.io endpoint JSON for a saved scorecard.
+//!
+//! A finished run gets an A–F grade from the dimension scores. An analyzer
+//! error is an explicit `error` badge with no letter, even when every
+//! dimension is still 1.0.
+
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
@@ -18,7 +24,9 @@ pub fn run(input: &Path) -> i32 {
         Ok(badge) => match writeln!(io::stdout().lock(), "{badge}") {
             Ok(()) => 0,
             Err(err) => {
-                eprintln!("sc: cannot write badge: {err}. Check the output destination and retry sc badge.");
+                eprintln!(
+                    "sc: cannot write badge: {err}. Check the output destination and retry sc badge."
+                );
                 2
             }
         },
@@ -33,6 +41,14 @@ pub fn run(input: &Path) -> i32 {
 }
 
 fn from_card(card: &Scorecard) -> Result<Value, String> {
+    if card.analyzer_error {
+        return Ok(json!({
+            "schemaVersion": 1,
+            "label": "scorecard",
+            "message": "error",
+            "color": "lightgrey",
+        }));
+    }
     if card.engines.engines_run.is_empty() {
         return Err("report has no completed engines; no overall score is available".into());
     }
@@ -51,4 +67,58 @@ fn from_card(card: &Scorecard) -> Result<Value, String> {
         "message": format!("{} ({}/100)", overall.grade, overall.score),
         "color": color,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sc_core::Scores;
+
+    fn graded(dimension: f64) -> Scorecard {
+        let mut card = Scorecard::skeleton("demo", 30);
+        card.engines.engines_run.push("secrets".into());
+        card.measures.scores = Scores {
+            correctness: dimension,
+            efficiency: dimension,
+            maintainability: dimension,
+            security: dimension,
+            a11y: dimension,
+        };
+        card
+    }
+
+    #[test]
+    fn a_finished_run_gets_a_letter_and_an_analyzer_error_does_not() {
+        let perfect = graded(1.0);
+        assert_eq!(from_card(&perfect).unwrap()["message"], "A (100/100)");
+        let mut errored = perfect;
+        errored.analyzer_error = true;
+        errored.measures.scores.correctness = 1.5;
+        errored.engines.engines_run.clear();
+        let badge = from_card(&errored).unwrap();
+        assert_eq!(
+            badge,
+            json!({"schemaVersion":1,"label":"scorecard","message":"error","color":"lightgrey"})
+        );
+        let message = badge["message"].as_str().unwrap();
+        assert!(
+            !message.chars().any(|ch| matches!(ch, 'A'..='F')),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn letter_colors_follow_the_grade() {
+        for (dimension, message, color) in [
+            (1.0, "A (100/100)", "brightgreen"),
+            (0.85, "B (85/100)", "green"),
+            (0.75, "C (75/100)", "yellow"),
+            (0.65, "D (65/100)", "orange"),
+            (0.1, "F (10/100)", "red"),
+        ] {
+            let badge = from_card(&graded(dimension)).unwrap();
+            assert_eq!(badge["message"], message, "{dimension}");
+            assert_eq!(badge["color"], color, "{dimension}");
+        }
+    }
 }

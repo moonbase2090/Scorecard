@@ -11,8 +11,9 @@
 //! - security: `secrets` and `sca` findings (`sca` warnings subtract 0.01)
 //! - a11y: `a11y` findings
 
-use crate::{Finding, Gate, Scorecard, Scores};
 use serde::{Deserialize, Serialize};
+
+use crate::{Finding, Gate, Scorecard, Scores};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Grade {
@@ -35,7 +36,7 @@ impl std::fmt::Display for Grade {
     }
 }
 
-/// Finding-based summary. Gates, rather than this score, determine the verdict.
+/// Finding-based summary. Gates decide the verdict. An analyzer error omits it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OverallScore {
     pub score: u8,

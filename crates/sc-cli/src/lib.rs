@@ -153,9 +153,9 @@ enum ConfigCmd {
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum Commands {
-    /// Print Shields.io endpoint JSON for a saved report's overall score and grade.
+    /// Print Shields.io endpoint JSON for a saved report. An analyzer error has no letter grade.
     Badge {
-        /// Saved Scorecard JSON report. Run sc analyze first.
+        /// Saved scorecard JSON. Defaults to `.sc/last-scorecard.json` in the current directory.
         #[arg(long, default_value = ".sc/last-scorecard.json")]
         input: PathBuf,
     },
@@ -328,13 +328,7 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
             Err(err) => {
                 let _ = writeln!(io::stderr(), "sc: {err}");
                 let card = early_card(&repo, "baseline.invalid", "baseline", &err);
-                return emit(
-                    &mut stdout,
-                    &view,
-                    out.as_deref(),
-                    &card,
-                    RunStatus::AnalyzerError,
-                );
+                return emit_analyzer_error(&mut stdout, &view, out.as_deref(), Some(&root), &card);
             }
         }
     } else {
@@ -347,13 +341,7 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
         Err(err) => {
             let _ = writeln!(io::stderr(), "sc: {err}");
             let card = early_card(&repo, "config.invalid", "config", &err);
-            return emit(
-                &mut stdout,
-                &view,
-                out.as_deref(),
-                &card,
-                RunStatus::AnalyzerError,
-            );
+            return emit_analyzer_error(&mut stdout, &view, out.as_deref(), Some(&root), &card);
         }
     };
 
@@ -363,13 +351,7 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
             Err(err) => {
                 let _ = writeln!(io::stderr(), "sc: {err}");
                 let card = early_card(&repo, "config.invalid", "config", &err);
-                return emit(
-                    &mut stdout,
-                    &view,
-                    out.as_deref(),
-                    &card,
-                    RunStatus::AnalyzerError,
-                );
+                return emit_analyzer_error(&mut stdout, &view, out.as_deref(), Some(&root), &card);
             }
         }
     }
@@ -394,13 +376,7 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
                     "config",
                     &format!("cannot read paths file: {err}"),
                 );
-                return emit(
-                    &mut stdout,
-                    &view,
-                    out.as_deref(),
-                    &card,
-                    RunStatus::AnalyzerError,
-                );
+                return emit_analyzer_error(&mut stdout, &view, out.as_deref(), Some(&root), &card);
             }
         },
         None => Vec::new(),
@@ -549,6 +525,12 @@ fn finish_baseline(output: &mut AnalyzeOutput, write: bool, known: Option<&Basel
             Err(err) => {
                 let _ = writeln!(io::stderr(), "sc: {err}");
                 output.status = RunStatus::AnalyzerError;
+                output.scorecard.analyzer_error = true;
+                output.scorecard.measures.overall = None;
+                output.scorecard.verdict = "fail".into();
+                if let Some(root) = file.parent().and_then(|dir| dir.parent()) {
+                    save_last_scorecard(root, &output.scorecard);
+                }
             }
         }
     }
@@ -808,8 +790,30 @@ fn early_card(repo: &str, rule: &str, engine: &str, message: &str) -> Scorecard 
     ];
     card.measures.scores = compute_scores(&card.sections.findings);
     card.verdict = "fail".into();
+    card.analyzer_error = true;
     apply_disposition(&mut card.sections.findings);
     card
+}
+
+fn save_last_scorecard(root: &Path, card: &Scorecard) {
+    let path = root.join(".sc").join("last-scorecard.json");
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(path, format!("{}\n", to_json(card)));
+}
+
+fn emit_analyzer_error(
+    stdout: &mut impl Write,
+    view: &View<'_>,
+    out: Option<&Path>,
+    root: Option<&Path>,
+    card: &Scorecard,
+) -> i32 {
+    if let Some(root) = root {
+        save_last_scorecard(root, card);
+    }
+    emit(stdout, view, out, card, RunStatus::AnalyzerError)
 }
 
 #[cfg(test)]

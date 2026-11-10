@@ -168,6 +168,14 @@ fn push_header(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usi
 }
 
 fn push_banner(out: &mut String, card: &Scorecard, opts: &PrettyOpts) {
+    if card.analyzer_error {
+        out.push_str(&paint(opts.color, red().bold(), "ERROR"));
+        out.push('\n');
+        // Do not truncate: the retry command has to stay readable.
+        out.push_str(crate::report::ANALYZER_ERROR_NOTE);
+        out.push_str("\n\n");
+        return;
+    }
     let outcome = Outcome::of(card);
     let (word, style) = match outcome {
         Outcome::Fail => ("FAIL", red()),
@@ -938,6 +946,32 @@ mod tests {
         assert!(!text.contains('\u{1b}'));
         assert!(text.contains("[ok]") || text.contains("(none)"));
         assert!(text.contains("exit 0: enforced gates passed"));
+        assert!(!text.contains(crate::report::ANALYZER_ERROR_NOTE));
+    }
+
+    #[test]
+    fn an_analyzer_error_shows_error_instead_of_a_passing_banner() {
+        let mut card = Scorecard::skeleton("demo", 30);
+        card.analyzer_error = true;
+        card.verdict = "fail".into();
+        card.measures.scores = sc_core::Scores::perfect();
+        card.engines.engines_run.push("secrets".into());
+        let text = to_pretty(
+            &card,
+            &PrettyOpts {
+                color: false,
+                width: 40,
+                version: "0.1.0".into(),
+                report: None,
+                exit_code: 2,
+            },
+        );
+        assert!(text.contains("ERROR\n"));
+        assert!(text.contains(crate::report::ANALYZER_ERROR_NOTE));
+        assert!(text.contains("sc analyze ."));
+        assert!(!text.contains("PASS"));
+        assert!(!text.contains("grade A"));
+        assert!(!text.contains("100/100"));
     }
 
     #[test]
