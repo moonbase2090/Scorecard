@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- An analyzer error sets `analysis` to `incomplete` on the report. Overall scoring and `sc badge` show `incomplete` instead of a letter grade, including when only one analyzer in a multi-pack run errored.
 - A long symbol on a terminal finding line no longer hides the file name. The location and the symbol are elided separately, and a shortened path keeps its whole file name and line number. On a narrow terminal, the CRAP table's symbol column shrinks before the location loses the file name.
 
 ## [0.1.15] - 2026-10-29

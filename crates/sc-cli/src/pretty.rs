@@ -7,7 +7,7 @@
 
 use crate::report::Outcome;
 use anstyle::{AnsiColor, Color, Style};
-use sc_core::{CrapFunction, Finding, Gate, Scorecard};
+use sc_core::{CrapFunction, Finding, Gate, Overall, Scorecard};
 use std::collections::BTreeMap;
 
 const FINDING_LIMIT: usize = 8;
@@ -218,11 +218,13 @@ fn gate_row(gate: &Gate, opts: &PrettyOpts, width: usize) -> String {
 
 fn push_scores(out: &mut String, card: &Scorecard, opts: &PrettyOpts, width: usize) {
     out.push_str("scores\n");
-    if let Some(overall) = card.measures.overall {
-        out.push_str(&format!(
+    match card.measures.overall {
+        Some(Overall::Score(overall)) => out.push_str(&format!(
             "  overall          {}/100  grade {}\n",
             overall.score, overall.grade
-        ));
+        )),
+        Some(Overall::Incomplete(_)) => out.push_str("  overall          incomplete\n"),
+        None => {}
     }
     score_line(
         out,

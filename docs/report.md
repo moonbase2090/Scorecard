@@ -75,7 +75,9 @@ The Markdown report adds an **Engine timing** table after the header: time per e
 
 ## Overall score and badge
 
-`sc analyze . --overall-score` adds `overall: {"score": 100, "grade": "A"}` to JSON and an overall row to terminal, Markdown, and HTML reports. SARIF stores the same object in `runs[0].properties.overall`. Set `overall_score = true` at the top level of `analyzer.toml` to enable it for every run. The feature is off by default. Analyzer errors leave `overall` absent.
+`sc analyze . --overall-score` adds `overall: {"score": 100, "grade": "A"}` to JSON and an overall row to terminal, Markdown, and HTML reports. SARIF stores the same object in `runs[0].properties.overall` and `analysis` in `runs[0].properties.analysis`. Set `overall_score = true` at the top level of `analyzer.toml` to enable it for every run. The feature is off by default.
+
+Every new report has `analysis`. It is `complete` when every analyzer finished and `incomplete` when any analyzer errored, including one pack in a multi-pack run. Older reports omit the field and are treated as `complete`. An incomplete run does not get a letter grade. With overall scoring on, `overall` is `{"status":"incomplete"}` instead of a score and grade. `sc badge` prints `incomplete` for that report.
 
 ![Overall score and grade in the HTML report](images/overall-score-report.png)
 
@@ -93,18 +95,25 @@ For example, dimension scores of 0.2, 0.4, 0.6, 0.8, and 1.0 give 60/100, grade 
 
 ```bash doctest
 sc analyze . --overall-score --format json > report.json
-jq -e '.overall == {"score": 100, "grade": "A"}' report.json
+jq -e '.analysis == "complete" and .overall == {"score": 100, "grade": "A"}' report.json
 sc badge > badge.json
 jq -e '.schemaVersion == 1 and .label == "scorecard" and .message == "A (100/100)" and .color == "brightgreen"' badge.json
 ```
 
-`sc badge` reads `.sc/last-scorecard.json` and writes the [Shields.io endpoint schema](https://shields.io/badges/endpoint-badge). It also works with saved reports that omitted `overall`; badge generation always recomputes from the dimensions. Use `sc badge --input report.json` for a different report. No analysis or network request runs. Redirect the output to a JSON file and host that file at a public URL to use it with a Shields endpoint badge.
+```bash doctest
+sc analyze missing-path --overall-score --format json > report.json || test $? -eq 2
+jq -e '.analysis == "incomplete" and .overall == {"status":"incomplete"} and (.overall | has("grade") | not)' report.json
+sc badge --input report.json > badge.json
+jq -e '.schemaVersion == 1 and .label == "scorecard" and .message == "incomplete" and .color == "lightgrey"' badge.json
+```
+
+`sc badge` reads `.sc/last-scorecard.json` and writes the [Shields.io endpoint schema](https://shields.io/badges/endpoint-badge). It also works with saved reports that omitted `overall`; badge generation recomputes from the dimensions when `analysis` is `complete`. An `incomplete` report produces no grade. Use `sc badge --input report.json` for a different report. No analysis or network request runs. Redirect the output to a JSON file and host that file at a public URL to use it with a Shields endpoint badge.
 
 ```json
 {"schemaVersion":1,"label":"scorecard","message":"A (100/100)","color":"brightgreen"}
 ```
 
-Badge colors are brightgreen for A, green for B, yellow for C, orange for D, and red for F. The command exits 2 when the report cannot be read, its dimensions are invalid, or no engines ran. Generate a report with `sc analyze .` before retrying.
+Badge colors are brightgreen for A, green for B, yellow for C, orange for D, and red for F. Incomplete is lightgrey and the message is `incomplete`. The command exits 0 after writing that badge. It exits 2 when the report cannot be read, a complete report has invalid dimensions, or a complete report has no engines that ran. Generate a report with `sc analyze .` before retrying.
 
 ## Dispositions
 
@@ -123,12 +132,13 @@ Top-level fields of `.sc/last-scorecard.json` and `--format json`:
 | Field | Contents |
 |---|---|
 | `verdict` | `pass` or `fail` |
+| `analysis` | `complete`, or `incomplete` when any analyzer errored. Absent on older reports, which count as `complete` |
 | `fail_on` | Gate ids whose failures set exit 1; an empty list means `none` was selected |
 | `pack`, `repo`, `scope` | What was analyzed |
 | `git` | `head`, `dirty`, and `dirty_paths` (all changed paths relative to the repository root; omitted when clean) |
 | `gates` | `id`, `pass`, `enforced`, and `reason` per gate |
 | `scores` | The score rows above |
-| `overall` | Optional `score` from 0 to 100 and `grade`; present when overall scoring is enabled |
+| `overall` | Optional. `score` from 0 to 100 and `grade` when overall scoring is enabled and analysis completed. `{"status":"incomplete"}` when scoring is enabled and an analyzer errored |
 | `metrics` | Changed lines and files, `coverage_changed`, `crap_max`, `crap_over_threshold`, `hallucinated_imports` |
 | `crap` | Threshold and worst functions with `cc`, `coverage`, and `crap` |
 | `mutation` | `status`, `score`, `killed`, `survived`, `timeout`, `unviable` when `--mutation` is not `off` |

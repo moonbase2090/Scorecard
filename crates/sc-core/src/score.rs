@@ -42,6 +42,37 @@ pub struct OverallScore {
     pub grade: Grade,
 }
 
+/// `incomplete` replaces a letter grade when an analyzer did not finish.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OverallStatus {
+    Incomplete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IncompleteOverall {
+    pub status: OverallStatus,
+}
+
+/// A grade, or an explicit incomplete result with no score.
+///
+/// The score form stays `{"score":100,"grade":"A"}`. Incomplete is
+/// `{"status":"incomplete"}` and carries no letter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Overall {
+    Score(OverallScore),
+    Incomplete(IncompleteOverall),
+}
+
+impl Overall {
+    pub fn incomplete() -> Self {
+        Self::Incomplete(IncompleteOverall {
+            status: OverallStatus::Incomplete,
+        })
+    }
+}
+
 /// Equal-weight mean of all five dimensions, rounded to an integer out of 100.
 /// Invalid or non-finite dimensions have no overall score.
 pub fn overall_score(scores: &Scores) -> Option<OverallScore> {
@@ -66,6 +97,20 @@ pub fn overall_score(scores: &Scores) -> Option<OverallScore> {
         _ => Grade::F,
     };
     Some(OverallScore { score, grade })
+}
+
+/// Overall row for a finished run.
+///
+/// Scoring stays off when `enabled` is false. An analyzer error never becomes
+/// a letter grade, including when every dimension is otherwise perfect.
+pub fn reported_overall(enabled: bool, analyzer_error: bool, scores: &Scores) -> Option<Overall> {
+    if !enabled {
+        return None;
+    }
+    if analyzer_error {
+        return Some(Overall::incomplete());
+    }
+    overall_score(scores).map(Overall::Score)
 }
 
 pub fn compute_scores(findings: &[Finding]) -> Scores {
@@ -256,15 +301,54 @@ mod tests {
         let mut card = Scorecard::skeleton("demo", 30);
         let old = serde_json::to_value(&card).unwrap();
         assert!(old.get("overall").is_none());
-        card.measures.overall = overall_score(&Scores::perfect());
+        card.measures.overall = overall_score(&Scores::perfect()).map(Overall::Score);
         let new = serde_json::to_value(&card).unwrap();
         assert_eq!(new["overall"], serde_json::json!({"score":100,"grade":"A"}));
         let reloaded: Scorecard = serde_json::from_value(new).unwrap();
         assert_eq!(
             reloaded.measures.overall,
-            Some(OverallScore {
+            Some(Overall::Score(OverallScore {
                 score: 100,
                 grade: Grade::A
+            }))
+        );
+    }
+
+    #[test]
+    fn analyzer_error_replaces_a_perfect_grade_with_incomplete() {
+        let perfect = Scores::perfect();
+        assert_eq!(
+            reported_overall(true, false, &perfect),
+            Some(Overall::Score(OverallScore {
+                score: 100,
+                grade: Grade::A
+            }))
+        );
+        assert_eq!(
+            reported_overall(true, true, &perfect),
+            Some(Overall::incomplete())
+        );
+        assert_eq!(reported_overall(false, true, &perfect), None);
+
+        let mut invalid = Scores::perfect();
+        invalid.security = f64::NAN;
+        assert_eq!(
+            reported_overall(true, true, &invalid),
+            Some(Overall::incomplete())
+        );
+        assert_eq!(reported_overall(true, false, &invalid), None);
+
+        assert_eq!(
+            serde_json::to_value(Overall::incomplete()).unwrap(),
+            serde_json::json!({"status":"incomplete"})
+        );
+        let parsed: Overall =
+            serde_json::from_value(serde_json::json!({"score":80,"grade":"B"})).unwrap();
+        assert_eq!(
+            parsed,
+            Overall::Score(OverallScore {
+                score: 80,
+                grade: Grade::B
             })
         );
     }

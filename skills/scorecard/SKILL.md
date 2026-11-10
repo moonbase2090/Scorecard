@@ -52,7 +52,7 @@ Command flags override matching config settings. Every run writes `.sc/last-scor
 
 ### `sc badge [--input PATH]`
 
-Read saved dimension scores from `PATH` (default `.sc/last-scorecard.json`) and print Shields.io endpoint JSON without scanning or network access. The overall score equally averages all five dimensions, rounds to 0 to 100, and grades A at 90, B at 80, C at 70, D at 60, and F below 60. This summarizes findings; skipped engines can leave dimensions unpenalized. Gates still decide the verdict. Exit 2 means the report is missing or invalid, no engines ran, or output failed.
+Read saved dimension scores from `PATH` (default `.sc/last-scorecard.json`) and print Shields.io endpoint JSON without scanning or network access. The overall score equally averages all five dimensions, rounds to 0 to 100, and grades A at 90, B at 80, C at 70, D at 60, and F below 60. This summarizes findings; skipped engines can leave dimensions unpenalized. Gates still decide the verdict. When the report's `analysis` is `incomplete`, the badge message is `incomplete` and no grade is printed. Exit 2 means the report is missing or invalid, a complete report has no engines that ran, or output failed.
 
 Verify changes to overall scoring with `cargo test -p sc-core --lib overall` and `cargo test -p sc-cli --test overall`. Then analyze a real project with `--overall-score --format all --out REPORT`, check the JSON `overall` against the displayed rows, and run `sc badge --input REPORT.json` to inspect the badge.
 

@@ -518,9 +518,10 @@ pub struct ScorecardEngines {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScorecardMeasures {
     pub scores: Scores,
-    /// Opt-in finding-based summary. Older reports omit it.
+    /// Opt-in finding-based summary, or `{"status":"incomplete"}` when an
+    /// analyzer errored and scoring was requested. Older reports omit it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub overall: Option<crate::OverallScore>,
+    pub overall: Option<crate::Overall>,
     pub gates: Vec<Gate>,
     pub metrics: Metrics,
 }
@@ -550,6 +551,10 @@ pub struct Scorecard {
     #[serde(flatten)]
     pub context: ScorecardContext,
     pub verdict: String,
+    /// `complete` when every analyzer finished. `incomplete` when any analyzer
+    /// errored. Reports written before this field existed load as `complete`.
+    #[serde(default = "default_analysis")]
+    pub analysis: String,
     #[serde(flatten)]
     pub engines: ScorecardEngines,
     #[serde(flatten)]
@@ -561,6 +566,22 @@ pub struct Scorecard {
     pub fail_on: Vec<String>,
     #[serde(default)]
     pub runs: Vec<RunRecord>,
+}
+
+pub const ANALYSIS_COMPLETE: &str = "complete";
+pub const ANALYSIS_INCOMPLETE: &str = "incomplete";
+
+fn default_analysis() -> String {
+    ANALYSIS_COMPLETE.to_string()
+}
+
+/// `incomplete` when any analyzer errored, otherwise `complete`.
+pub fn analysis_label(analyzer_error: bool) -> &'static str {
+    if analyzer_error {
+        ANALYSIS_INCOMPLETE
+    } else {
+        ANALYSIS_COMPLETE
+    }
 }
 
 impl Scorecard {
@@ -588,6 +609,7 @@ impl Scorecard {
                 },
             },
             verdict: "fail".to_string(),
+            analysis: ANALYSIS_COMPLETE.to_string(),
             engines: ScorecardEngines {
                 engines_run: Vec::new(),
                 engines_skipped: vec![
@@ -795,6 +817,7 @@ mod tests {
                 },
             },
             verdict: "fail".into(),
+            analysis: ANALYSIS_COMPLETE.into(),
             fail_on: vec!["types".into(), "tests".into()],
             engines: ScorecardEngines {
                 engines_run: vec!["compile".into(), "tests".into()],
@@ -912,6 +935,7 @@ mod tests {
             "git",
             "scope",
             "verdict",
+            "analysis",
             "engines_run",
             "engines_skipped",
             "scores",
@@ -929,6 +953,12 @@ mod tests {
         assert!(v["gates"][0].get("reason").is_none());
         assert_eq!(v["gates"][1]["reason"], "4 functions over threshold");
         assert!(v["mutation"]["score"].is_null());
+        assert_eq!(v["analysis"], ANALYSIS_COMPLETE);
+
+        let mut legacy = v.clone();
+        legacy.as_object_mut().unwrap().remove("analysis");
+        let loaded: Scorecard = serde_json::from_value(legacy).unwrap();
+        assert_eq!(loaded.analysis, ANALYSIS_COMPLETE);
 
         let finding = &v["findings"][0];
         for key in [

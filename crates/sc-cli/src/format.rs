@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 use crate::report::Outcome;
-use sc_core::{RunRecord, Scorecard};
+use sc_core::{Overall, RunRecord, Scorecard};
 
 /// Render a scorecard as pretty JSON.
 ///
@@ -220,11 +220,13 @@ fn push_markdown_gates(out: &mut String, card: &Scorecard) {
 
 fn push_markdown_scores(out: &mut String, card: &Scorecard) {
     out.push_str("## Scores\n\n");
-    if let Some(overall) = card.measures.overall {
-        out.push_str(&format!(
+    match card.measures.overall {
+        Some(Overall::Score(overall)) => out.push_str(&format!(
             "Overall: {}/100, grade {}.\n\n",
             overall.score, overall.grade
-        ));
+        )),
+        Some(Overall::Incomplete(_)) => out.push_str("Overall: incomplete.\n\n"),
+        None => {}
     }
     out.push_str(&format!(
         "- correctness: {:.2}\n- efficiency: {:.2}\n- maintainability: {:.2}\n- security: {:.2}\n- a11y: {:.2}\n\n",

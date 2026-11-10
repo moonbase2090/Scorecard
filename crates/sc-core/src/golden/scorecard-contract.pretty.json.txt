@@ -16,6 +16,7 @@
     ]
   },
   "verdict": "fail",
+  "analysis": "complete",
   "engines_run": [
     "compile",
     "tests"

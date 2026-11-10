@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
-use sc_core::{Grade, OverallScore, Scorecard, Scores};
+use sc_core::{Grade, Overall, OverallScore, Scorecard, Scores};
 use serde_json::{json, Value};
 
 struct Project(PathBuf);
@@ -118,21 +118,46 @@ fn config_enables_overall_from_aggregate_multi_pack_dimensions() {
 }
 
 #[test]
-fn analyzer_errors_have_no_overall_score() {
+fn analyzer_errors_are_incomplete_instead_of_graded() {
     let project = Project::new("error");
-    let output = project.run(&["analyze", "missing", "--overall-score"]);
+    let output = project.run(&["analyze", "missing", "--overall-score", "--format", "json"]);
     assert_eq!(output.status.code(), Some(2));
     let card: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(card["analysis"], "incomplete");
+    assert_eq!(card["overall"], json!({"status": "incomplete"}));
+    assert!(card["overall"].get("grade").is_none());
+    assert!(card["overall"].get("score").is_none());
+    std::fs::write(project.0.join("saved.json"), &output.stdout).unwrap();
+    let badge = project.run(&["badge", "--input", "saved.json"]);
+    assert_eq!(badge.status.code(), Some(0), "{badge:?}");
+    let badge: Value = serde_json::from_slice(&badge.stdout).unwrap();
+    assert_eq!(badge["message"], "incomplete");
+    assert_eq!(badge["color"], "lightgrey");
+
+    std::fs::write(project.0.join("analyzer.toml"), "pack = \"unknown\"\n").unwrap();
+    let output = project.run(&["analyze", ".", "--format", "json"]);
+    assert_eq!(output.status.code(), Some(2));
+    let card: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(card["analysis"], "incomplete");
     assert!(card.get("overall").is_none());
+    std::fs::write(project.0.join("saved.json"), &output.stdout).unwrap();
+    let badge = project.run(&["badge", "--input", "saved.json"]);
+    assert_eq!(badge.status.code(), Some(0), "{badge:?}");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&badge.stdout).unwrap()["message"],
+        "incomplete"
+    );
+
     std::fs::write(
         project.0.join("analyzer.toml"),
         "pack = \"unknown\"\noverall_score = true\n",
     )
     .unwrap();
-    let output = project.run(&["analyze", "."]);
+    let output = project.run(&["analyze", ".", "--format", "json"]);
     assert_eq!(output.status.code(), Some(2));
     let card: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert!(card.get("overall").is_none());
+    assert_eq!(card["analysis"], "incomplete");
+    assert_eq!(card["overall"], json!({"status": "incomplete"}));
 }
 
 #[test]
@@ -141,10 +166,10 @@ fn badge_recomputes_saved_dimensions_and_does_not_change_a_failing_verdict() {
     let mut card = Scorecard::skeleton("demo", 30);
     card.engines.engines_run.push("secrets".into());
     // Ignore a stale cached summary. The gate verdict is independent of the grade.
-    card.measures.overall = Some(OverallScore {
+    card.measures.overall = Some(Overall::Score(OverallScore {
         score: 0,
         grade: Grade::F,
-    });
+    }));
     for (dimension, message, color) in [
         (1.0, "A (100/100)", "brightgreen"),
         (0.85, "B (85/100)", "green"),
@@ -194,4 +219,172 @@ fn badge_errors_explain_how_to_create_a_valid_report() {
     let output = project.run(&["badge"]);
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("dimension scores"));
+}
+
+const READY_PAGE: &str = "<!doctype html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width\"><title>Example</title></head><body><main><h1>Example</h1></main></body></html>";
+
+fn write_web(dir: &std::path::Path) {
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::write(dir.join("index.html"), READY_PAGE).unwrap();
+}
+
+fn write_rust(dir: &std::path::Path) {
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(
+        dir.join("Cargo.toml"),
+        "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("src/lib.rs"), "pub fn ready() -> i32 { 1 }\n").unwrap();
+}
+
+fn assert_incomplete_badge(project: &Project) {
+    let badge = project.run(&["badge"]);
+    assert_eq!(badge.status.code(), Some(0), "{badge:?}");
+    let badge: Value = serde_json::from_slice(&badge.stdout).unwrap();
+    assert_eq!(
+        badge,
+        json!({"schemaVersion":1,"label":"scorecard","message":"incomplete","color":"lightgrey"})
+    );
+}
+
+#[test]
+fn clean_analyzers_keep_a_grade() {
+    let project = Project::new("clean-analyzers");
+    write_web(&project.0.join("a-web"));
+    write_web(&project.0.join("b-web"));
+    std::fs::remove_file(project.0.join("index.html")).unwrap();
+    std::fs::write(
+        project.0.join("analyzer.toml"),
+        "pack = \"multi\"\noverall_score = true\n",
+    )
+    .unwrap();
+    let output = project.run(&["analyze", ".", "--format", "json"]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let card: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(card["analysis"], "complete");
+    assert_eq!(card["overall"], json!({"score":100,"grade":"A"}));
+    assert!(card["engines_run"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|engine| engine == "html"));
+    let badge = project.run(&["badge"]);
+    assert_eq!(badge.status.code(), Some(0), "{badge:?}");
+    let badge: Value = serde_json::from_slice(&badge.stdout).unwrap();
+    assert_eq!(badge["message"], "A (100/100)");
+    assert_ne!(badge["color"], "lightgrey");
+}
+
+#[test]
+fn one_analyzer_error_refuses_a_grade() {
+    let project = Project::new("one-analyzer-error");
+    write_web(&project.0.join("a-web"));
+    write_rust(&project.0.join("b-rust"));
+    std::fs::remove_file(project.0.join("index.html")).unwrap();
+    std::fs::write(
+        project.0.join("analyzer.toml"),
+        "pack = \"multi\"\noverall_score = true\n",
+    )
+    .unwrap();
+    let output = project.run(&[
+        "analyze",
+        ".",
+        "--format",
+        "all",
+        "--out",
+        "report",
+        "--budget-seconds",
+        "0",
+        "--fail-on",
+        "none",
+    ]);
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("overall          incomplete"), "{text}");
+    assert!(!text.contains("grade "), "{text}");
+    let card = project.json("report.json");
+    assert_eq!(card["analysis"], "incomplete");
+    assert_eq!(card["overall"], json!({"status":"incomplete"}));
+    assert!(card["overall"].get("grade").is_none());
+    assert!(card["overall"].get("score").is_none());
+    let engines = card["engines_run"].as_array().unwrap();
+    assert!(
+        engines.iter().any(|engine| engine == "html"),
+        "the web analyzer finished, so a grade would hide the rust analyzer error: {engines:?}"
+    );
+    let findings = card["findings"].as_array().unwrap();
+    assert!(
+        findings.iter().any(|finding| {
+            finding["file"]
+                .as_str()
+                .unwrap_or("")
+                .starts_with("b-rust/")
+                && finding["message"].as_str().unwrap_or("").contains("budget")
+        }),
+        "{findings:?}"
+    );
+    let markdown = std::fs::read_to_string(project.0.join("report.md")).unwrap();
+    assert!(markdown.contains("Overall: incomplete."));
+    assert!(!markdown.contains("grade "));
+    let html = std::fs::read_to_string(project.0.join("report.html")).unwrap();
+    assert!(html.contains(">incomplete</td>"));
+    assert!(!html.contains("grade "));
+    let sarif = project.json("report.sarif");
+    assert_eq!(
+        sarif["runs"][0]["properties"]["overall"],
+        json!({"status":"incomplete"})
+    );
+    assert_eq!(sarif["runs"][0]["properties"]["analysis"], "incomplete");
+    assert_eq!(
+        project.json(".sc/last-scorecard.json")["analysis"],
+        "incomplete"
+    );
+    assert_incomplete_badge(&project);
+}
+
+#[test]
+fn every_analyzer_error_refuses_a_grade() {
+    let project = Project::new("all-analyzers-error");
+    write_rust(&project.0.join("a-rust"));
+    write_rust(&project.0.join("b-rust"));
+    std::fs::remove_file(project.0.join("index.html")).unwrap();
+    std::fs::write(
+        project.0.join("analyzer.toml"),
+        "pack = \"multi\"\noverall_score = true\n",
+    )
+    .unwrap();
+    let output = project.run(&[
+        "analyze",
+        ".",
+        "--format",
+        "json",
+        "--budget-seconds",
+        "0",
+        "--fail-on",
+        "none",
+    ]);
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    let card: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(card["analysis"], "incomplete");
+    assert_eq!(card["overall"], json!({"status":"incomplete"}));
+    assert!(card["overall"].get("grade").is_none());
+    assert!(card["overall"].get("score").is_none());
+    let engines = card["engines_run"].as_array().unwrap();
+    assert!(
+        !engines.is_empty(),
+        "started engines would still produce a letter grade"
+    );
+    assert!(engines.iter().all(|engine| engine != "html"));
+    let findings = card["findings"].as_array().unwrap();
+    for prefix in ["a-rust/", "b-rust/"] {
+        assert!(
+            findings.iter().any(|finding| {
+                finding["file"].as_str().unwrap_or("").starts_with(prefix)
+                    && finding["message"].as_str().unwrap_or("").contains("budget")
+            }),
+            "{prefix} {findings:?}"
+        );
+    }
+    assert_incomplete_badge(&project);
 }

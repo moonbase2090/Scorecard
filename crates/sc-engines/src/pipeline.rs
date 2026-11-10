@@ -10,8 +10,9 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use sc_core::{
-    apply_disposition, compute_scores, CrapSection, Finding, Gate, GitInfo, LlmSection, Metrics,
-    MutationSection, RunRecord, Scope, Scorecard, SpecSection, TestValueSection, SCORECARD_VERSION,
+    analysis_label, apply_disposition, compute_scores, reported_overall, CrapSection, Finding,
+    Gate, GitInfo, LlmSection, Metrics, MutationSection, RunRecord, Scope, Scorecard, SpecSection,
+    TestValueSection, SCORECARD_VERSION,
 };
 use sc_graph::FunctionInfo;
 
@@ -597,11 +598,8 @@ fn finalize_multi_card(
         .worst
         .sort_by(|a, b| b.crap.total_cmp(&a.crap));
     card.measures.scores = compute_scores(&card.sections.findings);
-    card.measures.overall = if overall && !analyzer_error {
-        sc_core::overall_score(&card.measures.scores)
-    } else {
-        None
-    };
+    card.analysis = analysis_label(analyzer_error).to_string();
+    card.measures.overall = reported_overall(overall, analyzer_error, &card.measures.scores);
     card.verdict = if card
         .measures
         .gates
@@ -2231,17 +2229,14 @@ fn finish(mut draft: Draft) -> AnalyzeOutput {
             "pass"
         }
         .to_string(),
+        analysis: analysis_label(draft.analyzer_error).to_string(),
         fail_on: draft.fail_on,
         engines: sc_core::ScorecardEngines {
             engines_run: draft.ran,
             engines_skipped: draft.skipped,
         },
         measures: sc_core::ScorecardMeasures {
-            overall: if draft.overall_score && !draft.analyzer_error {
-                sc_core::overall_score(&scores)
-            } else {
-                None
-            },
+            overall: reported_overall(draft.overall_score, draft.analyzer_error, &scores),
             scores,
             gates: draft.gates,
             metrics: draft.metrics,
@@ -4513,6 +4508,8 @@ mod tests {
         });
         assert_eq!(output.status, RunStatus::AnalyzerError);
         assert_eq!(output.scorecard.verdict, "fail");
+        assert_eq!(output.scorecard.analysis, sc_core::ANALYSIS_INCOMPLETE);
+        assert!(output.scorecard.measures.overall.is_none());
         assert!(output.scorecard.sections.findings.iter().any(|finding| {
             finding.rule == "engine.unavailable"
                 && finding.message.contains("--pack")

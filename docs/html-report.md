@@ -6,7 +6,7 @@
 sc analyze testdata/good_crate --format html --out scorecard.html
 ```
 
-Add `--overall-score` to show the overall score and letter grade in the scores table. See [Overall score and badge](report.md#overall-score-and-badge).
+Add `--overall-score` to show the overall score and letter grade in the scores table. An analyzer error shows `incomplete` there instead of a grade. See [Overall score and badge](report.md#overall-score-and-badge).
 
 That command writes `scorecard.html`. Stdout prints the short summary, not the HTML page.
 

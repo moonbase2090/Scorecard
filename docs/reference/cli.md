@@ -19,7 +19,7 @@ sc help [COMMAND]
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--overall-score` | off | Add the overall finding-based score and grade to every report format and the saved JSON. Enables `overall_score` for this run. See [mapping](../report.md#overall-score-and-badge). |
+| `--overall-score` | off | Add the overall finding-based score and grade to every report format and the saved JSON. Enables `overall_score` for this run. An analyzer error records `incomplete` instead of a grade. See [mapping](../report.md#overall-score-and-badge). |
 | `--format FORMAT` | `pretty` on a terminal, `json` otherwise | `json`, `pretty`, `md`, `sarif`, `html`, or `all`. See [Output](#output). |
 | `--out PATH` | none | Also write the report to `PATH`. Stdout prints the short summary, including when it is not a terminal. Without this flag, stdout is the chosen `--format`. |
 | `--fail-on LIST` | `types,tests,secrets,lint` | Comma-separated [gates](gates.md) whose failures set exit 1. Use `none` by itself to suppress gate failures from the exit code. Empty or blank lists are invalid. Overrides `gates.fail_on`; already enforced failures remain in the report verdict. |
@@ -47,13 +47,13 @@ Command-line flags override the matching config keys.
 
 ## sc badge
 
-Prints [Shields.io endpoint JSON](https://shields.io/badges/endpoint-badge) derived from a saved report's dimension scores. Does not run analysis, contact the network, or change the saved report. Works with reports saved without `--overall-score` and recomputes any cached overall value. The grade is a finding summary, independent of the report verdict.
+Prints [Shields.io endpoint JSON](https://shields.io/badges/endpoint-badge) derived from a saved report's dimension scores. Does not run analysis, contact the network, or change the saved report. Works with reports saved without `--overall-score` and recomputes any cached overall value when `analysis` is `complete`. The grade is a finding summary, independent of the report verdict. When `analysis` is `incomplete`, the message is `incomplete` and no grade is produced.
 
 | Flag | Default | Meaning |
 |---|---|---|
 | `--input PATH` | `.sc/last-scorecard.json` | Saved Scorecard JSON report to read. |
 
-Writes JSON to stdout. Exits 0 after writing the badge, including when the saved report's verdict is `fail`. Exits 2 when the report is missing or invalid, no engines ran, any dimension is outside 0 to 1, or output cannot be written. See [Overall score and badge](../report.md#overall-score-and-badge).
+Writes JSON to stdout. Exits 0 after writing the badge, including when the saved report's verdict is `fail` and when the message is `incomplete`. Exits 2 when the report is missing or invalid, a complete report has no engines that ran, any dimension of a complete report is outside 0 to 1, or output cannot be written. See [Overall score and badge](../report.md#overall-score-and-badge).
 
 ## sc tui
 
@@ -165,7 +165,7 @@ With `--out`, stdout is the short summary and the third column is what is writte
 
 Every run also writes `.sc/last-scorecard.json`.
 
-SARIF stores the report verdict in `runs[0].properties.scorecardVerdict` and each gate's `pass` and `enforced` flags in `runs[0].properties.scorecardGates`.
+SARIF stores the report verdict in `runs[0].properties.scorecardVerdict`, `analysis` in `runs[0].properties.analysis`, and each gate's `pass` and `enforced` flags in `runs[0].properties.scorecardGates`.
 
 JSON includes the selected gates in `fail_on`. SARIF stores the same list in `runs[0].properties.fail_on`. If an enforced gate fails but is not selected, `sc` writes one stderr warning with the failed gate names.
 

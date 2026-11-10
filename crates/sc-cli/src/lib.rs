@@ -25,7 +25,7 @@ use std::time::Duration;
 use clap::{Args, Parser, Subcommand};
 use sc_core::{
     apply_disposition, compute_scores, load_config_file, normalize_gates, resolve_config_path,
-    Finding, Gate, Scorecard, SCORECARD_VERSION,
+    Finding, Gate, Overall, Scorecard, ANALYSIS_INCOMPLETE, SCORECARD_VERSION,
 };
 use sc_core::{gates_failing_on_new_findings, Baseline, BASELINE_VERSION};
 use sc_engines::{
@@ -289,6 +289,7 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
             "engine.unavailable",
             "compile",
             &format!("path does not exist: {}", path.display()),
+            overall_score,
         );
         return emit(
             &mut stdout,
@@ -308,6 +309,7 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
                 "engine.unavailable",
                 "compile",
                 &format!("cannot read {}: {err}", path.display()),
+                overall_score,
             );
             return emit(
                 &mut stdout,
@@ -325,7 +327,7 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
             Ok(known) => Some(known),
             Err(err) => {
                 let _ = writeln!(io::stderr(), "sc: {err}");
-                let card = early_card(&repo, "baseline.invalid", "baseline", &err);
+                let card = early_card(&repo, "baseline.invalid", "baseline", &err, overall_score);
                 return emit(
                     &mut stdout,
                     &view,
@@ -344,7 +346,7 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
         Ok(config) => config,
         Err(err) => {
             let _ = writeln!(io::stderr(), "sc: {err}");
-            let card = early_card(&repo, "config.invalid", "config", &err);
+            let card = early_card(&repo, "config.invalid", "config", &err, overall_score);
             return emit(
                 &mut stdout,
                 &view,
@@ -355,12 +357,19 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
         }
     };
 
+    loaded.overall_score |= overall_score;
     if let Some(list) = fail_on {
         match normalize_gates(&[list]) {
             Ok(gates) => loaded.gates.fail_on = gates,
             Err(err) => {
                 let _ = writeln!(io::stderr(), "sc: {err}");
-                let card = early_card(&repo, "config.invalid", "config", &err);
+                let card = early_card(
+                    &repo,
+                    "config.invalid",
+                    "config",
+                    &err,
+                    loaded.overall_score,
+                );
                 return emit(
                     &mut stdout,
                     &view,
@@ -372,7 +381,6 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
         }
     }
 
-    loaded.overall_score |= overall_score;
     if let Some(pack) = pack {
         loaded.pack = pack;
     }
@@ -391,6 +399,7 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
                     "config.invalid",
                     "config",
                     &format!("cannot read paths file: {err}"),
+                    loaded.overall_score,
                 );
                 return emit(
                     &mut stdout,
@@ -758,9 +767,13 @@ fn display_repo(path: &Path) -> String {
         .to_string()
 }
 
-fn early_card(repo: &str, rule: &str, engine: &str, message: &str) -> Scorecard {
+fn early_card(repo: &str, rule: &str, engine: &str, message: &str, overall: bool) -> Scorecard {
     let mut card = Scorecard::skeleton(repo, 30);
     card.identity.version = SCORECARD_VERSION.to_string();
+    card.analysis = ANALYSIS_INCOMPLETE.to_string();
+    if overall {
+        card.measures.overall = Some(Overall::incomplete());
+    }
     let severity = if rule == "engine.unavailable" {
         "warning"
     } else {

@@ -15,7 +15,8 @@ pub use config::{
 pub use model::*;
 pub use score::{
     compute_scores, crap_score, exceeds_threshold, exit_code_fails, overall_score, report_verdict,
-    verdict_fails, Grade, OverallScore,
+    reported_overall, verdict_fails, Grade, IncompleteOverall, Overall, OverallScore,
+    OverallStatus,
 };
 pub use trend::{trend, Trend};
 

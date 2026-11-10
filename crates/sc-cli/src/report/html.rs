@@ -6,7 +6,7 @@
 //! It mirrors the linear-flow visual language: pipeline strip, in/out
 //! chips, terminal-styled runs, and pass/fail pills.
 
-use sc_core::Scorecard;
+use sc_core::{Overall, Scorecard};
 
 use super::{
     coverage_measured, diff_baseline, evidence_functions, plural, provided, raw_log, rest_of_tree,
@@ -417,11 +417,15 @@ fn write_a11y_item(out: &mut String, finding: &sc_core::Finding) {
 
 fn scores_metrics(out: &mut String, card: &Scorecard) {
     out.push_str("<h2>scores</h2>\n<div class=\"card\"><table>");
-    if let Some(overall) = card.measures.overall {
-        out.push_str(&format!(
+    match card.measures.overall {
+        Some(Overall::Score(overall)) => out.push_str(&format!(
             "<tr><th>overall</th><td colspan=\"2\">{}/100, grade {}</td></tr>",
             overall.score, overall.grade
-        ));
+        )),
+        Some(Overall::Incomplete(_)) => {
+            out.push_str("<tr><th>overall</th><td colspan=\"2\">incomplete</td></tr>");
+        }
+        None => {}
     }
     for (label, value) in [
         ("correctness", card.measures.scores.correctness),
