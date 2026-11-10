@@ -118,14 +118,14 @@ mod tests {
             "--locked".into(),
             "--features".into(),
             "extra".into(),
-            "extra_on".into(),
             "--".into(),
+            "extra_on".into(),
             "--test-threads=1".into(),
         ];
         let invocation = test_invocation(false, &extra, None, "/proj/Cargo.toml");
         assert_eq!(
             invocation.display,
-            "cargo test --locked --features extra extra_on -- --test-threads=1"
+            "cargo test --locked --features extra -- extra_on --test-threads=1"
         );
         assert_eq!(
             invocation.args,
@@ -134,15 +134,48 @@ mod tests {
                 "--locked",
                 "--features",
                 "extra",
-                "extra_on",
                 "--manifest-path",
                 "/proj/Cargo.toml",
                 "--color",
                 "never",
                 "--",
+                "extra_on",
                 "--test-threads=1",
             ]
         );
+    }
+
+    #[test]
+    fn a_configured_filter_and_a_diff_selected_name_are_both_filters() {
+        let extra = vec!["--".into(), "extra_on".into()];
+        let invocation = test_invocation(false, &extra, Some("mux::keeps_time"), "/p/Cargo.toml");
+        assert_eq!(invocation.display, "cargo test mux::keeps_time -- extra_on");
+        assert_eq!(
+            invocation.args,
+            vec![
+                "test",
+                "mux::keeps_time",
+                "--manifest-path",
+                "/p/Cargo.toml",
+                "--color",
+                "never",
+                "--",
+                "extra_on",
+            ]
+        );
+    }
+
+    #[test]
+    fn coverage_passes_a_configured_filter_after_the_separator() {
+        let extra = vec!["--".into(), "extra_on".into()];
+        let invocation = coverage_invocation(false, &extra, "/p/Cargo.toml", "/p/out.json");
+        assert_eq!(invocation.args[0], "llvm-cov");
+        assert_eq!(invocation.args[1], "--json");
+        assert_eq!(
+            &invocation.args[invocation.args.len() - 2..],
+            ["--", "extra_on"]
+        );
+        assert!(!invocation.args[1..invocation.args.len() - 2].contains(&"extra_on".to_string()));
     }
 
     #[test]

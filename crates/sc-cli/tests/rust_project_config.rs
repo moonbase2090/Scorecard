@@ -109,7 +109,7 @@ fn extra_on() { panic!("feature extra was not enabled"); }
     .unwrap();
     fs::write(
         root.join("analyzer.toml"),
-        "budget_seconds = 180\n[engines]\ncoverage = false\n[commands]\nlint = \"\"\ntest_args = [\"--features\", \"extra\", \"extra_on\", \"--\", \"--test-threads=1\"]\n",
+        "budget_seconds = 180\n[engines]\ncoverage = false\n[commands]\nlint = \"\"\ntest_args = [\"--features\", \"extra\", \"--\", \"extra_on\", \"--test-threads=1\"]\n",
     )
     .unwrap();
     let (code, stdout, stderr) = run(
@@ -127,7 +127,7 @@ fn extra_on() { panic!("feature extra was not enabled"); }
         .collect();
     assert_eq!(
         tests,
-        ["cargo test --workspace --features extra extra_on -- --test-threads=1"]
+        ["cargo test --workspace --features extra -- extra_on --test-threads=1"]
     );
     assert!(
         !stdout.contains("test.failed"),

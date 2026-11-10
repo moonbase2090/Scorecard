@@ -64,7 +64,7 @@ If exclusions leave no files for secrets scanning, `secrets.empty_scope` fails t
 | Key | Default | Meaning |
 |---|---|---|
 | `commands.lint` | `cargo clippy --workspace` | Lint command for the Rust and `command` packs. At a workspace root, Cargo Clippy checks every member; analyzing a member keeps lint scoped to that package. Empty skips lint. Other packs use their own linter; see [packs](../packs.md). Add `-- -D warnings` to fail on warnings at the workspace root: `cargo clippy --workspace -- -D warnings`. |
-| `commands.test_args` | `[]` | Extra arguments for the Rust pack's `cargo test` and `cargo llvm-cov`. Empty keeps `cargo test` (`--workspace` at a workspace root). Each entry is one argument. Cargo options come first (`--locked`, `--features`, a test-name filter). A single `--` then test-harness options such as `--test-threads=1`. Scorecard adds `--workspace` only at a workspace root and sets `--manifest-path` and `--color never` itself, so those flags are rejected. Other packs ignore this key. |
+| `commands.test_args` | `[]` | Extra arguments for the Rust pack's `cargo test` and `cargo llvm-cov`. Empty keeps `cargo test` (`--workspace` at a workspace root). Each entry is one argument. Cargo options come first (`--locked`, `--features`). A single `--` then test-harness arguments: test-name filters and options such as `--test-threads=1`. A test-name filter before the `--` is rejected. Scorecard adds `--workspace` only at a workspace root and sets `--manifest-path` and `--color never` itself, so those flags are rejected. Other packs ignore this key. |
 
 ### `[mutation]`
 

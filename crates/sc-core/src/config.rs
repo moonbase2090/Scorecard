@@ -382,6 +382,32 @@ const OWNED_TEST_FLAGS: &[&str] = &[
     "--all",
 ];
 
+/// Cargo options that take a value as the next argument, so that value is not
+/// mistaken for a test-name filter.
+const VALUE_FLAGS: &[&str] = &[
+    "--features",
+    "-F",
+    "--package",
+    "-p",
+    "--exclude",
+    "--test",
+    "--bench",
+    "--example",
+    "--bin",
+    "--target",
+    "--target-dir",
+    "--profile",
+    "--cargo-profile",
+    "--jobs",
+    "-j",
+    "--config",
+    "-Z",
+    "--lockfile-path",
+    "--ignore-filename-regex",
+    "--exclude-from-test",
+    "--build-dir",
+];
+
 const HARNESS_FLAGS: &[&str] = &[
     "--test-threads",
     "--nocapture",
@@ -402,6 +428,7 @@ const HARNESS_FLAGS: &[&str] = &[
 
 fn validate_test_args(args: &[String]) -> Result<(), String> {
     let mut saw_separator = false;
+    let mut value_pending = false;
     for arg in args {
         if arg.is_empty() || arg.chars().any(|c| c.is_whitespace() || c.is_control()) {
             return Err(
@@ -418,7 +445,16 @@ fn validate_test_args(args: &[String]) -> Result<(), String> {
             saw_separator = true;
             continue;
         }
+        if !saw_separator && std::mem::take(&mut value_pending) {
+            continue;
+        }
+        if !saw_separator && !arg.starts_with('-') {
+            return Err(format!(
+                "commands.test_args entry `{arg}` is a test-name filter. Put `--` before it: test_args = [\"--\", \"{arg}\"]."
+            ));
+        }
         let name = flag_name(arg);
+        value_pending = !arg.contains('=') && VALUE_FLAGS.contains(&name);
         if !saw_separator && OWNED_TEST_FLAGS.contains(&name) {
             return Err(owned_flag_message(name));
         }
@@ -627,6 +663,23 @@ mod tests {
                 "--test-threads=1",
             ]
         );
+    }
+
+    #[test]
+    fn test_args_reject_a_test_name_filter_before_the_separator_but_not_flag_values() {
+        let err = load_snippet(
+            "args-filter",
+            "[commands]\ntest_args = [\"--features\", \"extra\", \"extra_on\"]\n",
+        )
+        .unwrap_err();
+        assert!(err.contains("`extra_on` is a test-name filter"), "{err}");
+        assert!(err.contains("[\"--\", \"extra_on\"]"), "{err}");
+        let ok = load_snippet(
+            "args-values",
+            "[commands]\ntest_args = [\"-F\", \"extra\", \"--package=app\", \"-p\", \"core\", \"--\", \"extra_on\"]\n",
+        )
+        .unwrap();
+        assert_eq!(ok.commands.test_args.last().unwrap(), "extra_on");
     }
 
     #[test]

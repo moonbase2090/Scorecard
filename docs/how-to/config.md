@@ -40,7 +40,7 @@ lint = "cargo clippy --workspace --all-targets -- -D warnings"
 
 At a workspace root, this checks every member. If you analyze a member directory, Scorecard removes the workspace scope so sibling crates do not affect its lint result.
 
-`commands.test_args` is passed to `cargo test` and `cargo llvm-cov`. At a workspace root Scorecard still adds `--workspace`. Do not put `--workspace`, `--manifest-path`, or `--color` in the list. A test name in `test_args` filters the full suite; with `--diff`, Scorecard also appends each selected test name.
+`commands.test_args` is passed to `cargo test` and `cargo llvm-cov`. At a workspace root Scorecard still adds `--workspace`. Do not put `--workspace`, `--manifest-path`, or `--color` in the list. Put a test-name filter after `--`, with the harness options: `test_args = ["--", "extra_on"]`. It filters the full suite, and `cargo llvm-cov` receives it the same way. With `--diff`, Scorecard also adds each selected test name, so the run covers both.
 
 Check that a config is read:
 
