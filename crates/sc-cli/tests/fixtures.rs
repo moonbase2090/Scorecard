@@ -348,10 +348,22 @@ fn explicit_diff_head_still_scores_uncommitted_changes() {
 }
 
 #[test]
-fn crap_untested_exits_1() {
-    let (code, card, _, stderr) = analyze(&["testdata/crap_untested"]);
+fn crap_untested_exits_1_once_crap_is_enforced() {
+    let (code, card, _, stderr) = analyze(&[
+        "testdata/crap_untested",
+        "--fail-on",
+        "types,tests,crap,secrets,lint",
+    ]);
     assert_eq!(code, 1, "stderr={stderr}\ncard={card}");
     assert_eq!(card["verdict"], "fail");
+    let gate = card["gates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|gate| gate["id"] == "crap")
+        .unwrap();
+    assert_eq!(gate["enforced"], true, "{card}");
+    assert_eq!(gate["pass"], false, "{card}");
     let finding = card["findings"]
         .as_array()
         .unwrap()
@@ -366,6 +378,31 @@ fn crap_untested_exits_1() {
     assert!(!card["crap"]["worst"].as_array().unwrap().is_empty());
     assert!(card["metrics"]["crap_over_threshold"].as_u64().unwrap() >= 1);
     assert_eq!(card["crap"]["threshold"], 30);
+}
+
+#[test]
+fn crap_untested_is_advisory_by_default() {
+    let (code, card, _, stderr) = analyze(&["testdata/crap_untested"]);
+    assert_eq!(code, 0, "stderr={stderr}\ncard={card}");
+    assert_eq!(card["verdict"], "pass", "{card}");
+    let gate = card["gates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|gate| gate["id"] == "crap")
+        .unwrap();
+    assert_eq!(gate["enforced"], false, "{card}");
+    assert_eq!(gate["pass"], false, "{card}");
+    assert!(
+        gate["reason"]
+            .as_str()
+            .unwrap()
+            .ends_with("(advisory; does not fail the process)"),
+        "{card}"
+    );
+    assert!(rules(&card).contains(&"crap.over_threshold"), "{card}");
+    assert!(!card["crap"]["worst"].as_array().unwrap().is_empty());
+    assert!(card["metrics"]["crap_over_threshold"].as_u64().unwrap() >= 1);
 }
 
 #[test]
@@ -710,7 +747,7 @@ fn pack_contract_passes_clean_trees_and_fails_secrets() {
             assert_eq!(crap_gate["enforced"], false, "{path} {card}");
             assert_eq!(crap_gate["pass"], false, "{path} {card}");
         } else {
-            assert_eq!(crap_gate["enforced"], true, "{path} {card}");
+            assert_eq!(crap_gate["enforced"], false, "{path} {card}");
             assert_eq!(crap_gate["pass"], true, "{path} {card}");
         }
     }

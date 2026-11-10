@@ -14,7 +14,7 @@ pack = "rust"
 # For separate language-pack roots in a monorepo, use pack = "multi" instead.
 
 [gates]
-# Also fail on undeclared dependencies.
+# Also fail on CRAP offenders and undeclared dependencies.
 fail_on = ["types", "tests", "crap", "secrets", "lint", "sca"]
 # Allow more complex, less tested functions.
 crap_threshold = 40

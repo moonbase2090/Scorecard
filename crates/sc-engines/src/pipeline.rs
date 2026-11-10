@@ -187,7 +187,13 @@ fn analyze_multi(request: AnalyzeRequest, generated_paths: &[PathBuf]) -> Analyz
         return output;
     }
     let outputs = run_multi_roots(&request, &root, roots, started);
-    combine_multi_outputs(root, git, outputs, &request.fail_on)
+    combine_multi_outputs(
+        root,
+        git,
+        outputs,
+        &request.fail_on,
+        request.config.overall_score,
+    )
 }
 
 type MultiOutput = (String, AnalyzeOutput);
@@ -292,6 +298,7 @@ fn combine_multi_outputs(
     git: GitInfo,
     outputs: Vec<MultiOutput>,
     fail_on: &[String],
+    overall: bool,
 ) -> AnalyzeOutput {
     let mut card = outputs[0].1.scorecard.clone();
     card.identity.pack = "multi".into();
@@ -318,7 +325,14 @@ fn combine_multi_outputs(
         analyzer_error |= output.status == RunStatus::AnalyzerError;
         merge_multi_part(&mut card, &prefix, output.scorecard, &mut gate_reasons);
     }
-    finalize_multi_card(&root, &mut card, fail_on, analyzer_error, gate_reasons)
+    finalize_multi_card(
+        &root,
+        &mut card,
+        fail_on,
+        analyzer_error,
+        gate_reasons,
+        overall,
+    )
 }
 
 fn merge_multi_part(
@@ -537,6 +551,7 @@ fn finalize_multi_card(
     fail_on: &[String],
     analyzer_error: bool,
     mut gate_reasons: std::collections::BTreeMap<String, Vec<String>>,
+    overall: bool,
 ) -> AnalyzeOutput {
     for gate in &mut card.measures.gates {
         if !gate.pass {
@@ -583,6 +598,11 @@ fn finalize_multi_card(
         .worst
         .sort_by(|a, b| b.crap.total_cmp(&a.crap));
     card.measures.scores = compute_scores(&card.sections.findings);
+    card.measures.overall = if overall && !analyzer_error {
+        sc_core::overall_score(&card.measures.scores)
+    } else {
+        None
+    };
     card.verdict = if card
         .measures
         .gates
@@ -692,6 +712,7 @@ fn analyze_blocked(
     ];
     report(&request, "Writing report");
     finish(Draft {
+        overall_score: request.config.overall_score,
         root: request.root.clone(),
         repo: request.repo,
         pack: pack.to_string(),
@@ -861,6 +882,7 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
             crap.over,
             crap.untested,
             request.config.gates.new_fn_untested_cc,
+            crap_enforced(&request.fail_on),
         ),
         gate(
             "secrets",
@@ -874,6 +896,7 @@ fn analyze_web(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
     ];
     report(&request, "Writing report");
     finish(Draft {
+        overall_score: request.config.overall_score,
         root: request.root.clone(),
         repo: request.repo,
         pack: "web".into(),
@@ -1027,11 +1050,17 @@ fn html_gate_enforced(config: &sc_core::Config, fail_on: &[String]) -> bool {
         "off" | "false" | "advisory" => false,
         _ => {
             fail_on.iter().any(|gate| gate == "html") || {
-                let builtin = ["types", "tests", "crap", "secrets", "lint"];
-                fail_on.len() == builtin.len()
-                    && builtin
-                        .iter()
-                        .all(|gate| fail_on.iter().any(|item| item == gate))
+                [
+                    &["types", "tests", "secrets", "lint"][..],
+                    &["types", "tests", "crap", "secrets", "lint"][..],
+                ]
+                .iter()
+                .any(|builtin| {
+                    fail_on.len() == builtin.len()
+                        && builtin
+                            .iter()
+                            .all(|gate| fail_on.iter().any(|item| item == gate))
+                })
             }
         }
     }
@@ -1231,6 +1260,7 @@ fn analyze_unsupported(
         crap.over,
         crap.untested,
         request.config.gates.new_fn_untested_cc,
+        crap_enforced(&request.fail_on),
     ));
     gates.push(gate(
         "secrets",
@@ -1243,6 +1273,7 @@ fn analyze_unsupported(
     ));
     report(&request, "Writing report");
     finish(Draft {
+        overall_score: request.config.overall_score,
         root: request.root.clone(),
         repo: request.repo,
         pack: pack.as_str().to_string(),
@@ -1384,6 +1415,7 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
             outcome.crap.over,
             outcome.crap.untested,
             request.config.gates.new_fn_untested_cc,
+            crap_enforced(&request.fail_on),
         ),
         advisory_detail(
             "sca",
@@ -1413,6 +1445,7 @@ fn analyze_python(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
     let diff = scoped.py.is_some();
     let paths: Vec<String> = scoped.py.unwrap_or_default().into_iter().collect();
     finish(Draft {
+        overall_score: request.config.overall_score,
         root: request.root.clone(),
         repo: request.repo,
         pack: "python".into(),
@@ -1469,6 +1502,7 @@ fn python_scope_error(request: AnalyzeRequest, git: GitInfo, err: String) -> Ana
     ];
     report(&request, "Writing report");
     finish(Draft {
+        overall_score: request.config.overall_score,
         root: request.root.clone(),
         repo: request.repo,
         pack: "python".into(),
@@ -2028,6 +2062,7 @@ fn assemble_rust_report(
         crap.over,
         crap.untested,
         untested_cc,
+        crap_enforced(&request.fail_on),
     );
     state.findings.extend(crap.findings);
 
@@ -2106,6 +2141,7 @@ fn assemble_rust_report(
 
     report(request, "Writing report");
     finish(Draft {
+        overall_score: request.config.overall_score,
         root: root.to_path_buf(),
         repo: request.repo.clone(),
         pack: "rust".into(),
@@ -2143,6 +2179,7 @@ fn assemble_rust_report(
 }
 
 struct Draft {
+    overall_score: bool,
     root: PathBuf,
     repo: String,
     pack: String,
@@ -2208,6 +2245,11 @@ fn finish(mut draft: Draft) -> AnalyzeOutput {
             engines_skipped: draft.skipped,
         },
         measures: sc_core::ScorecardMeasures {
+            overall: if draft.overall_score && !draft.analyzer_error {
+                sc_core::overall_score(&scores)
+            } else {
+                None
+            },
             scores,
             gates: draft.gates,
             metrics: draft.metrics,
@@ -2808,7 +2850,20 @@ fn crap_gate_reason(over: u64, untested: u64, untested_cc: u32) -> String {
     }
 }
 
-fn crap_gate(coverage_complete: bool, over: u64, untested: u64, untested_cc: u32) -> Gate {
+/// CRAP is advisory unless `fail_on` names it.
+fn crap_enforced(fail_on: &[String]) -> bool {
+    fail_on.iter().any(|gate| gate == "crap")
+}
+
+const CRAP_ADVISORY_SUFFIX: &str = " (advisory; does not fail the process)";
+
+fn crap_gate(
+    coverage_complete: bool,
+    over: u64,
+    untested: u64,
+    untested_cc: u32,
+    enforce: bool,
+) -> Gate {
     // A function with no coverage record is not scored. It must not hide a
     // measured failure, so the gate is advisory only when none failed.
     if !coverage_complete && over == 0 && untested == 0 {
@@ -2828,7 +2883,20 @@ fn crap_gate(coverage_complete: bool, over: u64, untested: u64, untested_cc: u32
             reason = format!("{reason}; {note}");
         }
     }
-    gate("crap", over == 0 && untested == 0, &reason)
+    let pass = over == 0 && untested == 0;
+    if enforce {
+        return gate("crap", pass, &reason);
+    }
+    Gate {
+        id: "crap".into(),
+        pass,
+        enforced: false,
+        reason: if pass {
+            None
+        } else {
+            Some(format!("{reason}{CRAP_ADVISORY_SUFFIX}"))
+        },
+    }
 }
 
 struct DependencyScan {
@@ -5026,24 +5094,67 @@ mod tests {
 
     #[test]
     fn one_unscored_function_does_not_hide_a_measured_crap_failure() {
-        let gate = crap_gate(false, 1, 0, 15);
+        let gate = crap_gate(false, 1, 0, 15, true);
         assert!(!gate.pass);
         assert!(gate.enforced);
         let reason = gate.reason.unwrap();
         assert!(reason.contains("1 function over threshold"), "{reason}");
         assert!(reason.contains("no coverage record"), "{reason}");
 
-        let untested = crap_gate(false, 0, 1, 15);
+        let untested = crap_gate(false, 0, 1, 15, true);
         assert!(!untested.pass);
         assert!(untested.enforced);
 
-        let clear = crap_gate(false, 0, 0, 15);
+        let clear = crap_gate(false, 0, 0, 15, true);
         assert!(!clear.pass);
         assert!(!clear.enforced);
         assert_eq!(
             clear.reason.as_deref(),
             Some("some functions have no coverage record and were not scored")
         );
+    }
+
+    #[test]
+    fn crap_is_advisory_unless_fail_on_names_it() {
+        let default: Vec<String> = ["types", "tests", "secrets", "lint"]
+            .map(String::from)
+            .to_vec();
+        assert!(!crap_enforced(&default));
+        assert!(!crap_enforced(&[]));
+        assert!(crap_enforced(&["types".into(), "crap".into()]));
+
+        let over = crap_gate(true, 2, 0, 15, false);
+        assert!(!over.pass);
+        assert!(!over.enforced);
+        assert_eq!(
+            over.reason.as_deref(),
+            Some("2 functions over threshold (advisory; does not fail the process)")
+        );
+
+        let untested = crap_gate(true, 0, 1, 15, false);
+        assert!(!untested.pass);
+        assert!(!untested.enforced);
+        assert_eq!(
+            untested.reason.as_deref(),
+            Some(
+                "1 function at or above CC 15 with no coverage (advisory; does not fail the process)"
+            )
+        );
+
+        let clean = crap_gate(true, 0, 0, 15, false);
+        assert!(clean.pass);
+        assert!(!clean.enforced);
+        assert_eq!(clean.reason, None);
+
+        let enforced = crap_gate(true, 2, 0, 15, true);
+        assert!(!enforced.pass);
+        assert!(enforced.enforced);
+        assert_eq!(
+            enforced.reason.as_deref(),
+            Some("2 functions over threshold")
+        );
+        let enforced_clean = crap_gate(true, 0, 0, 15, true);
+        assert!(enforced_clean.pass && enforced_clean.enforced);
     }
 
     #[test]

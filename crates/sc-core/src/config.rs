@@ -19,6 +19,8 @@ pub const DEFAULT_BUDGET_SECONDS: u64 = 120;
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct Config {
+    /// Include the overall finding-based score and grade in reports. Off by default.
+    pub overall_score: bool,
     /// Install or update the Scorecard agent skill during automatic install hooks.
     pub install_agent_skills: bool,
     pub gates: GatesConfig,
@@ -42,6 +44,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            overall_score: false,
             install_agent_skills: true,
             gates: GatesConfig::default(),
             scope: ScopeConfig::default(),
@@ -133,7 +136,6 @@ impl Default for GatesConfig {
             fail_on: vec![
                 "types".into(),
                 "tests".into(),
-                "crap".into(),
                 "secrets".into(),
                 "lint".into(),
             ],
@@ -515,7 +517,7 @@ mod tests {
         assert!(config.install_agent_skills);
         assert_eq!(
             config.gates.fail_on,
-            vec!["types", "tests", "crap", "secrets", "lint"]
+            vec!["types", "tests", "secrets", "lint"]
         );
         assert_eq!(config.gates.crap_threshold, 30);
         assert!(config.engines.coverage);
@@ -544,7 +546,7 @@ mod tests {
         let config = load_config_file(Some(&path)).unwrap();
         assert_eq!(
             config.gates.fail_on,
-            vec!["types", "tests", "crap", "secrets", "lint"]
+            vec!["types", "tests", "secrets", "lint"]
         );
         assert_eq!(config.gates.crap_threshold, 30);
         assert!(config.scope.exclude.is_empty());

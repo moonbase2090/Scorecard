@@ -49,7 +49,7 @@ worst crap  threshold 30
   75.7    9    6%  Config.from_ssm   src/vectorvault/config.py:56
 ```
 
-The functions with the highest [CRAP](crap.md) score: cyclomatic complexity (CC) weighted by missing test coverage (COV). A score above the threshold fails the `crap` gate. When coverage was not measured at all, the table is empty (`(none)`) and a note says no CRAP scores are reported and nothing is treated as 0% coverage.
+The functions with the highest [CRAP](crap.md) score: cyclomatic complexity (CC) weighted by missing test coverage (COV). A score above the threshold is reported by the `crap` gate, which is advisory unless `fail_on` names `crap`. When coverage was not measured at all, the table is empty (`(none)`) and a note says no CRAP scores are reported and nothing is treated as 0% coverage.
 
 ```text
 findings
@@ -73,6 +73,39 @@ When a terminal runs `sc analyze` and `.sc/last-scorecard.json` holds a report f
 
 The Markdown report adds an **Engine timing** table after the header: time per engine, summed over its runs, and a total. Per-engine budgets are not available yet; `budget_seconds` and `--budget-seconds` still apply to the whole run.
 
+## Overall score and badge
+
+`sc analyze . --overall-score` adds `overall: {"score": 100, "grade": "A"}` to JSON and an overall row to terminal, Markdown, and HTML reports. SARIF stores the same object in `runs[0].properties.overall`. Set `overall_score = true` at the top level of `analyzer.toml` to enable it for every run. The feature is off by default. Analyzer errors leave `overall` absent.
+
+![Overall score and grade in the HTML report](images/overall-score-report.png)
+
+The overall score is the equal-weight mean of correctness, efficiency, maintainability, security, and a11y, multiplied by 100 and rounded to the nearest integer. Half points round up. The rounded integer determines the grade:
+
+| Overall score | Grade |
+|---|---|
+| 90 to 100 | A |
+| 80 to 89 | B |
+| 70 to 79 | C |
+| 60 to 69 | D |
+| 0 to 59 | F |
+
+For example, dimension scores of 0.2, 0.4, 0.6, 0.8, and 1.0 give 60/100, grade D. All five dimensions count, including ones with no findings because an engine was disabled or skipped. The score summarizes the existing finding penalties; it does not measure test coverage or prove every check ran. Gates still decide the verdict and exit status, so a report can have grade A and verdict `fail`. In multi-pack reports, the score uses the combined dimensions after all findings are merged.
+
+```bash doctest
+sc analyze . --overall-score --format json > report.json
+jq -e '.overall == {"score": 100, "grade": "A"}' report.json
+sc badge > badge.json
+jq -e '.schemaVersion == 1 and .label == "scorecard" and .message == "A (100/100)" and .color == "brightgreen"' badge.json
+```
+
+`sc badge` reads `.sc/last-scorecard.json` and writes the [Shields.io endpoint schema](https://shields.io/badges/endpoint-badge). It also works with saved reports that omitted `overall`; badge generation always recomputes from the dimensions. Use `sc badge --input report.json` for a different report. No analysis or network request runs. Redirect the output to a JSON file and host that file at a public URL to use it with a Shields endpoint badge.
+
+```json
+{"schemaVersion":1,"label":"scorecard","message":"A (100/100)","color":"brightgreen"}
+```
+
+Badge colors are brightgreen for A, green for B, yellow for C, orange for D, and red for F. The command exits 2 when the report cannot be read, its dimensions are invalid, or no engines ran. Generate a report with `sc analyze .` before retrying.
+
 ## Dispositions
 
 Each JSON finding has a `disposition` that tells an agent what to do:
@@ -95,6 +128,7 @@ Top-level fields of `.sc/last-scorecard.json` and `--format json`:
 | `git` | `head`, `dirty`, and `dirty_paths` (all changed paths relative to the repository root; omitted when clean) |
 | `gates` | `id`, `pass`, `enforced`, and `reason` per gate |
 | `scores` | The score rows above |
+| `overall` | Optional `score` from 0 to 100 and `grade`; present when overall scoring is enabled |
 | `metrics` | Changed lines and files, `coverage_changed`, `crap_max`, `crap_over_threshold`, `hallucinated_imports` |
 | `crap` | Threshold and worst functions with `cc`, `coverage`, and `crap` |
 | `mutation` | `status`, `score`, `killed`, `survived`, `timeout`, `unviable` when `--mutation` is not `off` |
