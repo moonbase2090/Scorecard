@@ -16,6 +16,8 @@ pub const KNOWN_GATES: &[&str] = &[
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct Config {
+    /// Include the overall finding-based score and grade in reports. Off by default.
+    pub overall_score: bool,
     /// Install or update the Scorecard agent skill during automatic install hooks.
     pub install_agent_skills: bool,
     pub gates: GatesConfig,
@@ -43,6 +45,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            overall_score: false,
             install_agent_skills: true,
             gates: GatesConfig::default(),
             scope: ScopeConfig::default(),
@@ -146,7 +149,6 @@ impl Default for GatesConfig {
             fail_on: vec![
                 "types".into(),
                 "tests".into(),
-                "crap".into(),
                 "secrets".into(),
                 "lint".into(),
             ],
@@ -503,7 +505,7 @@ mod tests {
         assert!(config.install_agent_skills);
         assert_eq!(
             config.gates.fail_on,
-            vec!["types", "tests", "crap", "secrets", "lint"]
+            vec!["types", "tests", "secrets", "lint"]
         );
         assert_eq!(config.gates.crap_threshold, 30);
         assert!(config.engines.coverage);
@@ -516,6 +518,7 @@ mod tests {
         assert_eq!(config.mutation.mode, "off");
         assert_eq!(config.commands.lint, "cargo clippy --workspace");
         assert!(!config.commands.lint.contains("-D warnings"));
+        assert!(!config.overall_score);
         assert_eq!(config.budget_seconds, 120);
         assert!(config.rust.test_args.is_empty());
     }
@@ -621,12 +624,13 @@ mod tests {
         let config = load_config_file(Some(&path)).unwrap();
         assert_eq!(
             config.gates.fail_on,
-            vec!["types", "tests", "crap", "secrets", "lint"]
+            vec!["types", "tests", "secrets", "lint"]
         );
         assert_eq!(config.gates.crap_threshold, 30);
         assert!(config.scope.exclude.is_empty());
         assert!(config.scope.include_generated.is_empty());
         assert_eq!(config.budget_seconds, 120);
+        assert!(!config.overall_score);
         assert!(config.rust.test_args.is_empty());
         let text = std::fs::read_to_string(&path).unwrap();
         let value: toml::Value = toml::from_str(&text).unwrap();
@@ -636,6 +640,11 @@ mod tests {
                 .and_then(toml::Value::as_integer),
             Some(120),
             "budget_seconds must be a top-level key, not a table field"
+        );
+        assert_eq!(
+            value.get("overall_score").and_then(toml::Value::as_bool),
+            Some(false),
+            "overall_score must be a top-level key, not a table field"
         );
         let test_args = value
             .get("rust")

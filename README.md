@@ -71,7 +71,7 @@ PASS
 gates
   [ok]  types            enforced
   [ok]  tests            enforced
-  [ok]  crap             enforced
+  [ok]  crap             advisory
   [ok]  sca              advisory
   [ok]  secrets          enforced
   [ok]  lint             enforced
@@ -96,6 +96,8 @@ exit 0: enforced gates passed
 ```
 
 Exit status: `1` a gate selected by `--fail-on` failed; `0` none did; `2` `sc` could not run. Use `--fail-on none` to return 0 for every gate while keeping failures in the report. If an enforced gate fails while the exit code is 0, `sc` writes one stderr warning with the failed gate names. An empty or blank `--fail-on` selection is invalid. Omit the option to use the default gates. [Reading the report](docs/report.md) explains every section.
+
+Use `sc analyze . --overall-score` to add an overall score and letter grade to reports. The score averages all five dimensions and rounds to 0 to 100; gates still decide pass or fail. `sc badge` prints [Shields.io endpoint JSON](https://shields.io/badges/endpoint-badge) from the last saved report without running analysis. See [Overall score and badge](docs/report.md#overall-score-and-badge) for the mapping and examples.
 
 For reports with more than eight findings, the terminal output puts the five most frequent fix types before the findings list. The full report stays in `.sc/last-scorecard.json`.
 
@@ -187,6 +189,8 @@ From source (Rust 1.88 or newer), in a clone of this repository:
 cargo install --locked --path crates/sc-cli
 cargo install --locked --path crates/sc-mcp
 ```
+
+The local binary manifests also support `cargo-binstall` from GitHub releases. Run `cargo binstall --manifest-path crates/sc-cli/Cargo.toml --dry-run --no-confirm sc-cli` to verify the CLI download without installing it. See [cargo-binstall checks](docs/how-to/cargo-binstall.md) for both binaries and all release targets. Registry publication remains disabled; `cargo install sc-cli` selects an unrelated package.
 
 Rust coverage needs `rustup component add llvm-tools` and `cargo install cargo-llvm-cov`. Without them `sc` still runs and reports coverage as not measured. Other packs need their own tools; see [packs](docs/packs.md).
 

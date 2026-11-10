@@ -518,6 +518,9 @@ pub struct ScorecardEngines {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScorecardMeasures {
     pub scores: Scores,
+    /// Opt-in finding-based summary. Older reports omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overall: Option<crate::OverallScore>,
     pub gates: Vec<Gate>,
     pub metrics: Metrics,
 }
@@ -599,6 +602,7 @@ impl Scorecard {
             },
             measures: ScorecardMeasures {
                 scores: Scores::perfect(),
+                overall: None,
                 gates: Vec::new(),
                 metrics: Metrics::zeros(),
             },
@@ -797,6 +801,7 @@ mod tests {
                 engines_skipped: vec!["llm".into(), "mutation".into()],
             },
             measures: ScorecardMeasures {
+                overall: None,
                 scores: Scores {
                     correctness: 0.62,
                     efficiency: 0.81,
