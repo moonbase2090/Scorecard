@@ -524,6 +524,7 @@ fn finish_baseline(output: &mut AnalyzeOutput, write: bool, known: Option<&Basel
                 let _ = writeln!(io::stderr(), "sc: {err}");
                 output.status = RunStatus::AnalyzerError;
                 output.scorecard.analyzer_error = true;
+                output.scorecard.measures.overall = None;
                 output.scorecard.verdict = "fail".into();
                 if let Some(root) = file.parent().and_then(|dir| dir.parent()) {
                     save_last_scorecard(root, &output.scorecard);
