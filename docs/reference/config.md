@@ -17,6 +17,7 @@ Only the first file found is read. Command-line flags override the matching keys
 | `install_agent_skills` | `true` | Allow installer hooks to install the Scorecard skill for detected agents. Hooks read this from the user config `~/.config/sc/analyzer.toml`. Set it to `false` to opt out. `SCORECARD_NO_AGENT_SKILLS=1` also skips automatic installation. |
 | `pack` | detected | Language pack when the tree has more than one marker. Same values as `--pack`. |
 | `toolchain` | empty | Rustup channel for check, test, coverage, and lint (`1.85.0`, `stable`, …). When set, Cargo uses that channel. When empty, a `rust-toolchain.toml` / `rust-toolchain` at or above the project clears an inherited `RUSTUP_TOOLCHAIN` so rustup reads the file; with no file, the inherited variable is left alone. |
+| `budget_seconds` | `120` | Wall-clock budget for pack commands, in seconds. One clock for the whole run. `--budget-seconds` overrides it. `0` is an error. A command still running at the deadline is killed, including its child processes. |
 
 ### `[gates]`
 
@@ -62,6 +63,7 @@ If exclusions leave no files for secrets scanning, `secrets.empty_scope` fails t
 | Key | Default | Meaning |
 |---|---|---|
 | `commands.lint` | `cargo clippy --workspace` | Lint command for the Rust and `command` packs. At a workspace root, Cargo Clippy checks every member; analyzing a member keeps lint scoped to that package. Empty skips lint. Other packs use their own linter; see [packs](../packs.md). Add `-- -D warnings` to fail on warnings at the workspace root: `cargo clippy --workspace -- -D warnings`. |
+| `commands.test_args` | `[]` | Extra arguments for the Rust pack's `cargo test` and `cargo llvm-cov`. Empty keeps `cargo test` (`--workspace` at a workspace root). Each entry is one argument. Cargo options come first (`--locked`, `--features`, a test-name filter). A single `--` then test-harness options such as `--test-threads=1`. Scorecard adds `--workspace` only at a workspace root and sets `--manifest-path` and `--color never` itself, so those flags are rejected. Other packs ignore this key. |
 
 ### `[mutation]`
 

@@ -13,6 +13,9 @@ pub const KNOWN_GATES: &[&str] = &[
     "types", "tests", "crap", "secrets", "sca", "spec", "mutation", "lint", "html", "links", "a11y",
 ];
 
+/// Wall-clock budget used when `budget_seconds` is unset and `--budget-seconds` is omitted.
+pub const DEFAULT_BUDGET_SECONDS: u64 = 120;
+
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct Config {
@@ -32,6 +35,8 @@ pub struct Config {
     /// Rustup channel for check, test, coverage, and lint. Empty uses
     /// `rust-toolchain.toml` / `rust-toolchain` in the project root.
     pub toolchain: String,
+    /// Wall-clock budget for pack commands, in seconds. `--budget-seconds` overrides this.
+    pub budget_seconds: u64,
 }
 
 impl Default for Config {
@@ -49,6 +54,7 @@ impl Default for Config {
             a11y: A11yConfig::default(),
             pack: String::new(),
             toolchain: String::new(),
+            budget_seconds: DEFAULT_BUDGET_SECONDS,
         }
     }
 }
@@ -115,6 +121,10 @@ pub struct EnginesConfig {
 pub struct CommandsConfig {
     /// Empty skips the lint engine.
     pub lint: String,
+    /// Extra arguments for Rust `cargo test` and `cargo llvm-cov`.
+    /// Empty keeps the built-in command. Cargo options come first; a single
+    /// `--` introduces test-harness arguments such as `--test-threads=1`.
+    pub test_args: Vec<String>,
 }
 
 impl Default for GatesConfig {
@@ -195,6 +205,7 @@ impl Default for CommandsConfig {
     fn default() -> Self {
         Self {
             lint: "cargo clippy --workspace".into(),
+            test_args: Vec::new(),
         }
     }
 }
@@ -347,7 +358,97 @@ pub fn load_config_file(path: Option<&Path>) -> Result<Config, String> {
         }
     };
     config.gates.fail_on = normalize_gates(&config.gates.fail_on)?;
+    validate_budget(config.budget_seconds)?;
+    validate_test_args(&config.commands.test_args)?;
     Ok(config)
+}
+
+fn validate_budget(seconds: u64) -> Result<(), String> {
+    if seconds == 0 {
+        return Err(format!(
+            "budget_seconds must be at least 1. Set budget_seconds = {DEFAULT_BUDGET_SECONDS} in analyzer.toml or pass --budget-seconds {DEFAULT_BUDGET_SECONDS}."
+        ));
+    }
+    Ok(())
+}
+
+const OWNED_TEST_FLAGS: &[&str] = &[
+    "--manifest-path",
+    "--color",
+    "--message-format",
+    "--workspace",
+    "--all",
+];
+
+const HARNESS_FLAGS: &[&str] = &[
+    "--test-threads",
+    "--nocapture",
+    "--show-output",
+    "--exact",
+    "--skip",
+    "--ignored",
+    "--include-ignored",
+    "--exclude-should-panic",
+    "--list",
+    "--ensure-time",
+    "--shuffle",
+    "--shuffle-seed",
+    "--report-time",
+    "--logfile",
+    "--format",
+];
+
+fn validate_test_args(args: &[String]) -> Result<(), String> {
+    let mut saw_separator = false;
+    for arg in args {
+        if arg.is_empty() || arg.chars().any(|c| c.is_whitespace() || c.is_control()) {
+            return Err(
+                "commands.test_args entries must be separate arguments with no whitespace. Example: test_args = [\"--features\", \"extra\", \"--\", \"--test-threads=1\"].".into(),
+            );
+        }
+        if arg == "--" {
+            if saw_separator {
+                return Err(
+                    "commands.test_args can contain `--` only once, before test-harness arguments."
+                        .into(),
+                );
+            }
+            saw_separator = true;
+            continue;
+        }
+        let name = flag_name(arg);
+        if !saw_separator && OWNED_TEST_FLAGS.contains(&name) {
+            return Err(owned_flag_message(name));
+        }
+        if !saw_separator && HARNESS_FLAGS.contains(&name) {
+            return Err(format!(
+                "commands.test_args entry `{arg}` is a test-harness option. Put `--` before it: test_args = [\"--\", \"{arg}\"]."
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn flag_name(arg: &str) -> &str {
+    arg.split_once('=').map(|(name, _)| name).unwrap_or(arg)
+}
+
+fn owned_flag_message(flag: &str) -> String {
+    match flag {
+        "--workspace" | "--all" => format!(
+            "commands.test_args cannot include `{flag}`. Scorecard adds --workspace when the analyzed directory is a Cargo workspace root. Remove `{flag}` from test_args."
+        ),
+        "--manifest-path" => {
+            "commands.test_args cannot include `--manifest-path`. Scorecard passes the analyzed Cargo.toml itself.".into()
+        }
+        "--color" => {
+            "commands.test_args cannot include `--color`. Scorecard forces --color never so it can read test output.".into()
+        }
+        "--message-format" => {
+            "commands.test_args cannot include `--message-format`. Scorecard reads Cargo's human test output.".into()
+        }
+        _ => format!("commands.test_args cannot include `{flag}`."),
+    }
 }
 
 #[cfg(test)]
@@ -427,6 +528,8 @@ mod tests {
         assert_eq!(config.mutation.mode, "off");
         assert_eq!(config.commands.lint, "cargo clippy --workspace");
         assert!(!config.commands.lint.contains("-D warnings"));
+        assert_eq!(config.budget_seconds, 120);
+        assert!(config.commands.test_args.is_empty());
     }
 
     #[test]
@@ -446,6 +549,8 @@ mod tests {
         assert_eq!(config.gates.crap_threshold, 30);
         assert!(config.scope.exclude.is_empty());
         assert!(config.scope.include_generated.is_empty());
+        assert_eq!(config.budget_seconds, 120);
+        assert!(config.commands.test_args.is_empty());
     }
 
     #[test]
@@ -456,6 +561,8 @@ mod tests {
         assert_eq!(config.gates.new_fn_untested_cc, 15);
         assert!(config.gates.fail_on.iter().any(|gate| gate == "crap"));
         assert_eq!(config.pack, "rust");
+        assert_eq!(config.budget_seconds, 120);
+        assert!(config.commands.test_args.is_empty());
     }
 
     #[test]
@@ -477,5 +584,98 @@ mod tests {
             assert!(err.contains("`none` must be the only"), "{err}");
         }
         assert!(normalize_gates(&[" none ".into()]).unwrap().is_empty());
+    }
+
+    fn load_snippet(name: &str, text: &str) -> Result<Config, String> {
+        let path = std::env::temp_dir().join(format!("sc-cfg-{name}-{}.toml", std::process::id()));
+        std::fs::write(&path, text).unwrap();
+        let loaded = load_config_file(Some(&path));
+        let _ = std::fs::remove_file(&path);
+        loaded
+    }
+
+    #[test]
+    fn budget_seconds_defaults_to_120_and_rejects_zero() {
+        let config = load_snippet("budget-default", "pack = \"rust\"\n").unwrap();
+        assert_eq!(config.budget_seconds, 120);
+        let raised = load_snippet("budget-900", "budget_seconds = 900\n").unwrap();
+        assert_eq!(raised.budget_seconds, 900);
+        let err = load_snippet("budget-zero", "budget_seconds = 0\n").unwrap_err();
+        assert!(err.contains("at least 1"), "{err}");
+        assert!(err.contains("budget_seconds = 120"), "{err}");
+        assert!(err.contains("--budget-seconds 120"), "{err}");
+    }
+
+    #[test]
+    fn test_args_accept_features_locked_and_harness_options() {
+        let config = load_snippet(
+            "args-ok",
+            "[commands]\ntest_args = [\"--locked\", \"--all-features\", \"--all-targets\", \"--features\", \"extra\", \"--\", \"--test-threads=1\"]\n",
+        )
+        .unwrap();
+        assert_eq!(
+            config.commands.test_args,
+            [
+                "--locked",
+                "--all-features",
+                "--all-targets",
+                "--features",
+                "extra",
+                "--",
+                "--test-threads=1",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_args_reject_owned_flags_whitespace_and_a_harness_option_before_the_separator() {
+        let workspace =
+            load_snippet("args-ws", "[commands]\ntest_args = [\"--workspace\"]\n").unwrap_err();
+        assert!(
+            workspace.contains("cannot include `--workspace`"),
+            "{workspace}"
+        );
+        assert!(
+            workspace.contains("--workspace when the analyzed directory"),
+            "{workspace}"
+        );
+        let color = load_snippet(
+            "args-color",
+            "[commands]\ntest_args = [\"--color=always\"]\n",
+        )
+        .unwrap_err();
+        assert!(color.contains("cannot include `--color`"), "{color}");
+        let manifest = load_snippet(
+            "args-manifest",
+            "[commands]\ntest_args = [\"--manifest-path\", \"other/Cargo.toml\"]\n",
+        )
+        .unwrap_err();
+        assert!(manifest.contains("analyzed Cargo.toml"), "{manifest}");
+        let threads = load_snippet(
+            "args-threads",
+            "[commands]\ntest_args = [\"--test-threads=1\"]\n",
+        )
+        .unwrap_err();
+        assert!(threads.contains("test-harness option"), "{threads}");
+        assert!(
+            threads.contains("[\"--\", \"--test-threads=1\"]"),
+            "{threads}"
+        );
+        let blank = load_snippet(
+            "args-blank",
+            "[commands]\ntest_args = [\"--features extra\"]\n",
+        )
+        .unwrap_err();
+        assert!(blank.contains("no whitespace"), "{blank}");
+        let empty = load_snippet("args-empty", "[commands]\ntest_args = [\"\"]\n").unwrap_err();
+        assert!(empty.contains("no whitespace"), "{empty}");
+        let twice = load_snippet(
+            "args-twice",
+            "[commands]\ntest_args = [\"--\", \"--exact\", \"--\"]\n",
+        )
+        .unwrap_err();
+        assert!(twice.contains("only once"), "{twice}");
+        let all = load_snippet("args-all", "[commands]\ntest_args = [\"--all\"]\n").unwrap_err();
+        assert!(all.contains("cannot include `--all`"), "{all}");
     }
 }

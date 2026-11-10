@@ -44,7 +44,7 @@ Analyze `PATH` (default `.`). The default output is pretty text on a terminal an
 | `--mutation MODE` | `off`; `diff` or `full` | Run mutation testing. |
 | `--llm MODE` | `off`; `on` | Run a read-only spec or intent review using configured provider. |
 | `--intent TEXT` | none | Describe the change; used by the optional LLM review and saved in the scorecard. |
-| `--budget-seconds N` | `120` | Set the wall-clock budget for pack commands. |
+| `--budget-seconds N` | `budget_seconds`, else `120` | Wall-clock budget for pack commands. Overrides `budget_seconds` in the project config. |
 | `--config PATH` | project `analyzer.toml`, then `~/.config/sc/analyzer.toml` | Read a specific config file. |
 
 Command flags override matching config settings. Every run writes `.sc/last-scorecard.json`.
@@ -104,13 +104,13 @@ Config resolution is `--config PATH`, then `analyzer.toml` in the analyzed direc
 | Section or key | Purpose |
 |---|---|
 | `install_agent_skills` | Allow automatic agent skill installation; default `true`. Installer hooks read it only from `~/.config/sc/analyzer.toml`. |
-| `pack`, `toolchain` | Select the language pack (`detected` by default) and Rustup toolchain (empty uses project toolchain files). |
+| `pack`, `toolchain`, `budget_seconds` | Select the language pack (`detected` by default), the Rustup toolchain (empty uses project toolchain files), and the wall-clock analysis budget in seconds (`120` by default). `--budget-seconds` overrides the budget. |
 | `[gates] fail_on`, `crap_threshold`, `new_fn_untested_cc` | Choose failing gates (default `types,tests,crap,secrets,lint`), maximum CRAP score (`30`), and the complexity floor for an untested function (`15`). |
 | `[scope] exclude`, `include_generated` | Exclude paths (default empty) or opt selected generated/vendor paths back into scanning (default empty). |
 | `[mutation] mode`, `max_mutants`, `budget_seconds` | Configure mutation checks (`off`, `50`, and `180` by default). |
 | `[llm] enabled`, `backend`, `endpoint`, `model`, `base_url`, `api_key_env`, `max_tool_rounds` | Configure optional spec/intent review. `backend` is `ollama`, `openai-compatible`, or `cursor`; review is disabled by default. Keep API keys in their named environment variable, not in the config file. |
 | `[engines] coverage`, `sca`, `parallel`, `perf` | Enable coverage (`true`), dependency analysis (`true`), parallel Rust dependency/secrets scans during Cargo phases (`false`), and Rust performance checks (`false`). |
-| `[commands] lint` | Set the lint command (default `cargo clippy --workspace`); an empty value skips the command lint engine. |
+| `[commands] lint`, `[commands] test_args` | Set the lint command (default `cargo clippy --workspace`; empty skips it) and extra Rust `cargo test` / `cargo llvm-cov` arguments (default empty). Put harness options after a single `--`. |
 | `[html] enforce`, `[links] enforce`, `[a11y] enforce`, `[a11y] disable` | Configure web and accessibility enforcement (`auto`, `false`, `false`, and no disabled rules by default). |
 
 Unknown config keys are ignored. Check spelling against the config reference before relying on a setting.

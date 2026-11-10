@@ -31,7 +31,7 @@ sc help [COMMAND]
 | `--mutation MODE` | `off` | `off`, `diff`, or `full`. Runs `cargo mutants` (`mutation` gate). |
 | `--llm MODE` | `off` | `off` or `on`. Runs an LLM review of `--spec`, or of `--intent` when there is no spec. See [LLM providers](../how-to/llm.md). |
 | `--intent TEXT` | none | What the change is meant to do. Stored on the scorecard. With `--llm on` and no `--spec`, this is enough to run the review. |
-| `--budget-seconds N` | `120` | Wall-clock budget for pack commands, in seconds. One clock for the whole run. A command still running at the deadline is killed, including its child processes, and the report records the timeout. |
+| `--budget-seconds N` | `budget_seconds`, else `120` | Wall-clock budget for pack commands, in seconds. One clock for the whole run. Overrides `budget_seconds` in the config. When the flag is omitted, the config value is used (120 if unset). `0` is an error. A command still running at the deadline is killed, including its child processes, and the report records the timeout. |
 | `--config PATH` | see [config](config.md#where-sc-looks) | Config file to use. |
 | `--quiet` | off | Suppress the progress spinner on stderr. |
 

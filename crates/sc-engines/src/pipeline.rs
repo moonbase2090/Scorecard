@@ -23,6 +23,7 @@ use crate::coverage::parse_coverage_json;
 use crate::crap::{evaluate, unmatched_functions};
 
 use crate::mutation::run_mutation;
+use crate::rust_test_args::{coverage_invocation, test_invocation};
 use crate::scope::{empty_selection, Selection};
 use crate::spec_check::{check_spec, gap_value};
 use crate::weakening::run_weakening;
@@ -1533,7 +1534,11 @@ fn analyze_rust(request: AnalyzeRequest, git: GitInfo) -> AnalyzeOutput {
         selection.workspace_root
     };
     let build = || {
-        let mut state = RustState::new(workspace_root, request.config.toolchain.clone());
+        let mut state = RustState::new(
+            workspace_root,
+            request.config.toolchain.clone(),
+            request.config.commands.test_args.clone(),
+        );
         if let Some(err) = &select_error {
             state.findings.push(unavailable("scope", err));
         }
@@ -1602,10 +1607,12 @@ struct RustState {
     workspace_root: bool,
     /// From `analyzer.toml` `toolchain` (empty means use the project file pin).
     toolchain_pin: String,
+    /// Extra `cargo test` / `cargo llvm-cov` arguments from `commands.test_args`.
+    test_args: Vec<String>,
 }
 
 impl RustState {
-    fn new(workspace_root: bool, toolchain_pin: String) -> Self {
+    fn new(workspace_root: bool, toolchain_pin: String, test_args: Vec<String>) -> Self {
         Self {
             findings: Vec::new(),
             runs: Vec::new(),
@@ -1620,6 +1627,7 @@ impl RustState {
             line_rate: 0.0,
             workspace_root,
             toolchain_pin,
+            test_args,
         }
     }
 }
@@ -1741,9 +1749,12 @@ fn test_phase(
         root,
         manifest,
         deadline,
-        state.workspace_root,
         &targeted,
-        &state.toolchain_pin,
+        &TestCommand {
+            workspace_root: state.workspace_root,
+            toolchain_pin: &state.toolchain_pin,
+            test_args: &state.test_args,
+        },
         &mut state.runs,
     ) {
         Ok(captured) => {
@@ -1756,24 +1767,20 @@ fn test_phase(
             }
             state.findings.extend(failures);
         }
-        Err(err @ (CommandError::Timeout { .. } | CommandError::BudgetExhausted)) => {
+        Err((err @ (CommandError::Timeout { .. } | CommandError::BudgetExhausted), command)) => {
             state.analyzer_error = true;
             state.tests_pass = false;
-            state.tests_reason = err.message(&cargo_gate_command("test", state.workspace_root, ""));
-            state.findings.push(timed_out(
-                "tests",
-                &err,
-                &cargo_gate_command("test", state.workspace_root, ""),
-            ));
+            state.tests_reason = err.message(&command);
+            state.findings.push(timed_out("tests", &err, &command));
             state.skipped.push("tests".into());
         }
-        Err(err) => {
+        Err((err, command)) => {
             state.analyzer_error = true;
             state.tests_pass = false;
             state.tests_reason = "toolchain unavailable".into();
             state
                 .findings
-                .push(unavailable("tests", &err.message("cargo test")));
+                .push(unavailable("tests", &err.message(&command)));
             state.skipped.push("tests".into());
         }
     }
@@ -1801,6 +1808,7 @@ fn coverage_phase(
         deadline,
         state.workspace_root,
         &state.toolchain_pin,
+        &state.test_args,
         &mut state.runs,
     ) {
         Ok(data) => record_coverage_success(selection, data, state),
@@ -2265,69 +2273,32 @@ fn note_run_with_budget(
     }
 }
 
+struct TestCommand<'a> {
+    workspace_root: bool,
+    toolchain_pin: &'a str,
+    test_args: &'a [String],
+}
+
 fn run_test_set(
     root: &Path,
     manifest: &Path,
     deadline: Instant,
-    workspace_root: bool,
     names: &[String],
-    toolchain_pin: &str,
+    command: &TestCommand<'_>,
     runs: &mut Vec<RunRecord>,
-) -> Result<TestCapture, CommandError> {
+) -> Result<TestCapture, (CommandError, String)> {
+    let manifest_arg = manifest.to_string_lossy().to_string();
     if names.is_empty() {
-        let started = Instant::now();
-        let result = run_tests(root, manifest, deadline, workspace_root, toolchain_pin);
-        match &result {
-            Ok(captured) => note_run(
-                runs,
-                "tests",
-                &cargo_gate_command("test", workspace_root, ""),
-                captured.status.code(),
-                captured.elapsed,
-            ),
-            Err(_) => note_run(
-                runs,
-                "tests",
-                &cargo_gate_command("test", workspace_root, ""),
-                None,
-                started.elapsed(),
-            ),
-        }
-        let captured = result?;
-        return Ok(TestCapture {
-            success: captured.status.success(),
-            stdout: captured.stdout,
-            stderr: captured.stderr,
-        });
+        return run_recorded_test(root, deadline, command, None, &manifest_arg, runs);
     }
     let mut stdout = String::new();
     let mut stderr = String::new();
     let mut success = true;
     for name in names {
-        let started = Instant::now();
-        let command = format!("{} {name}", cargo_gate_command("test", workspace_root, ""));
-        let result = run_one_test(
-            root,
-            manifest,
-            deadline,
-            workspace_root,
-            name,
-            toolchain_pin,
-        );
-        match &result {
-            Ok(captured) => note_run(
-                runs,
-                "tests",
-                &command,
-                captured.status.code(),
-                captured.elapsed,
-            ),
-            Err(_) => note_run(runs, "tests", &command, None, started.elapsed()),
-        }
-        let captured = result?;
+        let captured = run_recorded_test(root, deadline, command, Some(name), &manifest_arg, runs)?;
         stdout.push_str(&captured.stdout);
         stderr.push_str(&captured.stderr);
-        success &= captured.status.success();
+        success &= captured.success;
     }
     Ok(TestCapture {
         stdout,
@@ -2336,19 +2307,43 @@ fn run_test_set(
     })
 }
 
-fn run_one_test(
+fn run_recorded_test(
     root: &Path,
-    manifest: &Path,
     deadline: Instant,
-    workspace_root: bool,
-    name: &str,
+    command: &TestCommand<'_>,
+    name: Option<&str>,
+    manifest: &str,
+    runs: &mut Vec<RunRecord>,
+) -> Result<TestCapture, (CommandError, String)> {
+    let invocation = test_invocation(command.workspace_root, command.test_args, name, manifest);
+    let started = Instant::now();
+    let result = run_invoked(root, &invocation, deadline, command.toolchain_pin);
+    match &result {
+        Ok(captured) => note_run(
+            runs,
+            "tests",
+            &invocation.display,
+            captured.status.code(),
+            captured.elapsed,
+        ),
+        Err(_) => note_run(runs, "tests", &invocation.display, None, started.elapsed()),
+    }
+    let captured = result.map_err(|err| (err, invocation.display))?;
+    Ok(TestCapture {
+        success: captured.status.success(),
+        stdout: captured.stdout,
+        stderr: captured.stderr,
+    })
+}
+
+fn run_invoked(
+    root: &Path,
+    invocation: &crate::rust_test_args::CargoInvocation,
+    deadline: Instant,
     toolchain_pin: &str,
 ) -> Result<crate::command::Captured, CommandError> {
-    let manifest = manifest.to_string_lossy().to_string();
-    let mut args = vec!["test"];
-    add_workspace_arg(&mut args, workspace_root);
-    args.extend([name, "--manifest-path", &manifest, "--color", "never"]);
-    run_cargo(root, &args, deadline, toolchain_pin)
+    let refs: Vec<&str> = invocation.args.iter().map(String::as_str).collect();
+    run_cargo(root, &refs, deadline, toolchain_pin)
 }
 
 struct LintSink<'a> {
@@ -2513,20 +2508,6 @@ fn run_check(
     run_cargo(root, &args, deadline, toolchain_pin)
 }
 
-fn run_tests(
-    root: &Path,
-    manifest: &Path,
-    deadline: Instant,
-    workspace_root: bool,
-    toolchain_pin: &str,
-) -> Result<crate::command::Captured, CommandError> {
-    let manifest = manifest.to_string_lossy().to_string();
-    let mut args = vec!["test"];
-    add_workspace_arg(&mut args, workspace_root);
-    args.extend(["--manifest-path", &manifest, "--color", "never"]);
-    run_cargo(root, &args, deadline, toolchain_pin)
-}
-
 /// Remove coverage profiles without deleting the instrumented build.
 ///
 /// `cargo llvm-cov --no-clean` skips its usual `cargo clean`, which is what
@@ -2556,6 +2537,7 @@ fn run_coverage(
     deadline: Instant,
     workspace_root: bool,
     toolchain_pin: &str,
+    test_args: &[String],
     runs: &mut Vec<RunRecord>,
 ) -> Result<crate::coverage::CoverageData, String> {
     let out_path = root.join("target").join("sc-coverage.json");
@@ -2570,22 +2552,13 @@ fn run_coverage(
     clear_stale_llvm_cov_profiles(root);
     let started = Instant::now();
     let budget = deadline.saturating_duration_since(started);
-    let mut args = vec!["llvm-cov"];
-    add_workspace_arg(&mut args, workspace_root);
-    args.extend([
-        "--json",
-        "--output-path",
-        &out_s,
-        "--manifest-path",
-        &manifest_s,
-        "--no-clean",
-    ]);
-    let captured = run_cargo(root, &args, deadline, toolchain_pin);
+    let invocation = coverage_invocation(workspace_root, test_args, &manifest_s, &out_s);
+    let captured = run_invoked(root, &invocation, deadline, toolchain_pin);
     match &captured {
         Ok(captured) => note_run_with_budget(
             runs,
             "coverage",
-            &cargo_gate_command("llvm-cov", workspace_root, "--json"),
+            &invocation.display,
             captured.status.code(),
             captured.elapsed,
             budget,
@@ -2593,7 +2566,7 @@ fn run_coverage(
         Err(_) => note_run_with_budget(
             runs,
             "coverage",
-            &cargo_gate_command("llvm-cov", workspace_root, "--json"),
+            &invocation.display,
             None,
             started.elapsed(),
             budget,
@@ -3863,7 +3836,7 @@ mod tests {
         let manifest = root.join("Cargo.toml");
         let deadline = Instant::now() + Duration::from_secs(180);
         let mut runs = Vec::new();
-        let first = run_coverage(&root, &manifest, deadline, true, "", &mut runs)
+        let first = run_coverage(&root, &manifest, deadline, true, "", &[], &mut runs)
             .expect("first coverage run");
         assert_eq!(coverage_rate(&first, "covered"), 1.0, "{first:?}");
         assert_eq!(coverage_rate(&first, "missed"), 0.0, "{first:?}");
@@ -3871,7 +3844,7 @@ mod tests {
         let inode = std::fs::metadata(&rlib).unwrap().ino();
 
         std::fs::write(root.join("tests/call.rs"), call_missed).unwrap();
-        let second = run_coverage(&root, &manifest, deadline, true, "", &mut runs)
+        let second = run_coverage(&root, &manifest, deadline, true, "", &[], &mut runs)
             .expect("warm coverage run");
         let warm_rlib = library_rlib(&root);
         assert_eq!(
@@ -3922,7 +3895,7 @@ mod tests {
 
     #[test]
     fn record_coverage_tool_missing_skips_and_names_the_fix() {
-        let mut state = RustState::new(false, String::new());
+        let mut state = RustState::new(false, String::new(), Vec::new());
         record_coverage_tool_missing("cargo: no such command `llvm-cov`".into(), &mut state);
         assert!(state.skipped.iter().any(|engine| engine == "coverage"));
         let finding = state
