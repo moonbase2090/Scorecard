@@ -45,6 +45,7 @@ HISTORICAL_EXEMPT = {
     "ff58f4ae456f5c141015bde55851ba4b9f8d875c": "agents-bot squash merge: owner co-author trailer from merge tooling: Run independent Rust scans alongside Cargo phases (#339)",
     "4c8202e7ab8db860760bf8628c202fa1dec10eb2": "agents-bot squash merge: owner co-author trailer from merge tooling: Add opt-in multi-pack analysis (#343)",
     "0b82391146ca5e7a85fd7221679da405aa83f2d7": "agents-bot squash merge: owner co-author trailer from merge tooling: Add Homebrew distribution support (#356)",
+    "9ce55658c88506c109d87d1c5d7ec339934fc805": "agents-bot squash merge: owner co-author trailer from merge tooling: Add binary download metadata and dry-run checks (#367)",
 }
 SHA = re.compile(r"[0-9a-f]{40}")
 REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
