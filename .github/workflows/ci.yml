@@ -111,6 +111,8 @@ jobs:
           bash scripts/test-check-release-text.sh
       - name: release install staging
         run: bash scripts/test-release-install-staging.sh
+      - name: install script
+        run: bash scripts/test-install.sh
 
   tui-perf:
     runs-on: ubuntu-latest
@@ -324,3 +326,34 @@ jobs:
             sc-report.json
             sc-report.html
           if-no-files-found: warn
+
+  # Build the image that packages sc. No registry login and no push.
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build image
+        run: docker build --tag sc:ci .
+      - name: Run packaged binaries
+        run: |
+          set -eu
+          version="$(awk '
+            /^\[workspace\.package\]/ { section = 1; next }
+            /^\[/ { section = 0 }
+            section && /^version = / {
+              gsub(/"/, "", $3)
+              print $3
+              exit
+            }
+          ' Cargo.toml)"
+          got="$(docker run --rm sc:ci --version | tr -d '\r')"
+          if [ "$got" != "sc $version" ]; then
+            echo "sc --version in the image is '$got', Cargo.toml is $version" >&2
+            exit 1
+          fi
+          mcp="$(docker run --rm --entrypoint sc-mcp sc:ci --version | tr -d '\r')"
+          if [ "$mcp" != "$version" ]; then
+            echo "sc-mcp --version in the image is '$mcp', Cargo.toml is $version" >&2
+            exit 1
+          fi

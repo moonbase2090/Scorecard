@@ -4,6 +4,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `install.sh` downloads the GitHub release archive for this OS and CPU, checks `SHA256SUMS`, and installs `sc` and `sc-mcp` into `~/.local/bin` (or `SC_INSTALL_DIR`).
+- A `Dockerfile` packages `sc` and `sc-mcp`. CI builds the image and does not push it.
+
 ## [0.1.15] - 2026-10-29
 
 ### Changed

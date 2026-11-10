@@ -17,3 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: moonbase2090/.github/actions/package-links@0f192a5bb8fa198ab154fb4f721bdd8ca0813946
+        with:
+          # The one-line installer is fetched from the default branch. That URL
+          # 404s until the commit that adds install.sh is on the branch lychee requests.
+          link-excludes: "--exclude '^https://raw\\.githubusercontent\\.com/moonbase2090/Scorecard/.*/install\\.sh$'"

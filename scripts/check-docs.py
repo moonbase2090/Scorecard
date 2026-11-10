@@ -280,6 +280,7 @@ def check_versions() -> list[str]:
         r"\bsc-v(\d+\.\d+\.\d+)-",
         r"\bVERSION=v(\d+\.\d+\.\d+)",
         r"\bVER=(\d+\.\d+\.\d+)",
+        r"\bSC_VERSION=v?(\d+\.\d+\.\d+)",
         r"Scorecard/action@v(\d+\.\d+\.\d+)",
     ]
     for path in doc_files():

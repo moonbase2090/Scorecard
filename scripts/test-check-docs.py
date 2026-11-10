@@ -29,6 +29,7 @@ class PublishedReleaseTests(unittest.TestCase):
             "https://github.com/moonbase2090/Scorecard/releases/download/v0.1.6/SHA256SUMS\n"
             "sc-v0.1.6-aarch64-apple-darwin.tar.gz\n"
             "moonbase2090/Scorecard/action@v0.1.6\n"
+            "SC_VERSION=0.1.6\nSC_VERSION=v0.1.6\n"
         )
         self.assertEqual(check_docs.check_versions(), [])
 
@@ -39,6 +40,8 @@ class PublishedReleaseTests(unittest.TestCase):
             "sc-v0.1.7-aarch64-apple-darwin.tar.gz",
             "VERSION=v0.1.7",
             "VER=0.1.7",
+            "SC_VERSION=0.1.7",
+            "SC_VERSION=v0.1.7",
             "Scorecard/action@v0.1.7",
         ]:
             with self.subTest(pin=pin):

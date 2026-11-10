@@ -152,6 +152,14 @@ The secrets scan also finds PEM private keys split across source string literals
 
 ## Install
 
+On macOS or Linux (arm64 or x86_64):
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/moonbase2090/Scorecard/main/install.sh | sh
+```
+
+`install.sh` reads the latest GitHub release, downloads the archive for this OS and CPU, checks it against `SHA256SUMS`, and installs `sc` and `sc-mcp` to `~/.local/bin`. Pin a release with `SC_VERSION=0.1.14`. Choose another directory with `SC_INSTALL_DIR`. If that directory is not on `PATH`, the script prints the `export` line to add.
+
 Published release [v0.1.14](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.14). Each `.tar.gz` holds a top-level directory `sc-v<version>-<target>/` with `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md`.
 
 | Platform | Asset |
@@ -179,6 +187,18 @@ To check a download, fetch `SHA256SUMS` into the same directory and verify only 
 curl -fsSLO https://github.com/moonbase2090/Scorecard/releases/download/v0.1.14/SHA256SUMS
 shasum -a 256 -c --ignore-missing SHA256SUMS   # Linux: sha256sum -c --ignore-missing SHA256SUMS
 ```
+
+### Docker
+
+From a clone of this repository:
+
+```bash
+docker build -t sc .
+docker run --rm sc --version
+docker run --rm -v "$PWD:/work" sc analyze .
+```
+
+The image packages the `sc` and `sc-mcp` binaries built from that clone. The entrypoint is `sc`. `sc-mcp` is at `/usr/local/bin/sc-mcp`. Git is installed so a mounted repository can be analyzed. The container runs as root, so `.sc/` written into the mount is owned by root.
 
 From source (Rust 1.88 or newer), in a clone of this repository:
 
