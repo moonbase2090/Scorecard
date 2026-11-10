@@ -46,6 +46,9 @@ HISTORICAL_EXEMPT = {
     "4c8202e7ab8db860760bf8628c202fa1dec10eb2": "agents-bot squash merge: owner co-author trailer from merge tooling: Add opt-in multi-pack analysis (#343)",
     "0b82391146ca5e7a85fd7221679da405aa83f2d7": "agents-bot squash merge: owner co-author trailer from merge tooling: Add Homebrew distribution support (#356)",
     "9ce55658c88506c109d87d1c5d7ec339934fc805": "agents-bot squash merge: owner co-author trailer from merge tooling: Add binary download metadata and dry-run checks (#367)",
+    "a90f65238f7db7b4e570e8ef8dd10f962308d765": "agents-bot squash merge: owner co-author trailer from merge tooling: Add opt-in overall scores and badge output (#366)",
+    "0051a5a3b23711b717cf9dd5628070a229dace5d": "agents-bot squash merge: owner co-author trailer from merge tooling: Keep file names visible in narrow terminal output (#364)",
+    "fc357ae6269dfd178a7b39e57810e14f9293c929": "agents-bot squash merge: owner co-author trailer from merge tooling: Repin the optional TUI to current lunatui (#371)",
 }
 SHA = re.compile(r"[0-9a-f]{40}")
 REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
