@@ -32,6 +32,12 @@ pub struct Config {
     /// Rustup channel for check, test, coverage, and lint. Empty uses
     /// `rust-toolchain.toml` / `rust-toolchain` in the project root.
     pub toolchain: String,
+    /// Wall-clock seconds for pack commands. `sc analyze --budget-seconds`
+    /// overrides this. Not `mutation.budget_seconds`, which caps mutation only.
+    #[serde(default = "default_budget_seconds")]
+    pub budget_seconds: u64,
+    #[serde(default)]
+    pub rust: RustConfig,
 }
 
 impl Default for Config {
@@ -49,8 +55,25 @@ impl Default for Config {
             a11y: A11yConfig::default(),
             pack: String::new(),
             toolchain: String::new(),
+            budget_seconds: DEFAULT_BUDGET_SECONDS,
+            rust: RustConfig::default(),
         }
     }
+}
+
+/// Default analysis clock, in seconds. Matches `sc analyze --budget-seconds`.
+pub const DEFAULT_BUDGET_SECONDS: u64 = 120;
+
+fn default_budget_seconds() -> u64 {
+    DEFAULT_BUDGET_SECONDS
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RustConfig {
+    /// Extra arguments for `cargo test` and `cargo llvm-cov`.
+    /// Cargo options come before `--`; later tokens go to the test harness.
+    pub test_args: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -347,7 +370,73 @@ pub fn load_config_file(path: Option<&Path>) -> Result<Config, String> {
         }
     };
     config.gates.fail_on = normalize_gates(&config.gates.fail_on)?;
+    validate_budget_seconds(config.budget_seconds)?;
+    validate_rust_test_args(&config.rust.test_args)?;
     Ok(config)
+}
+
+pub fn resolve_budget_seconds(flag: Option<u64>, configured: u64) -> Result<u64, String> {
+    match flag {
+        Some(0) => Err(
+            "`--budget-seconds` is 0. The analysis clock must be at least 1 second. Pass --budget-seconds N with N at least 1."
+                .into(),
+        ),
+        Some(seconds) => Ok(seconds),
+        None => {
+            validate_budget_seconds(configured)?;
+            Ok(configured)
+        }
+    }
+}
+
+fn validate_budget_seconds(seconds: u64) -> Result<(), String> {
+    if seconds == 0 {
+        return Err(
+            "`budget_seconds` is 0. The analysis clock must be at least 1 second. Set `budget_seconds = 120` in analyzer.toml, or omit the key."
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+fn validate_rust_test_args(args: &[String]) -> Result<(), String> {
+    for (index, arg) in args.iter().enumerate() {
+        if arg.is_empty() {
+            return Err(
+                "rust.test_args contains an empty string. Each entry is one cargo or harness argument. In analyzer.toml use test_args = [\"--locked\", \"--features\", \"extra\", \"--\", \"--test-threads=1\"]."
+                    .into(),
+            );
+        }
+        if arg.chars().any(|ch| ch.is_control() || ch.is_whitespace()) {
+            return Err(format!(
+                "rust.test_args entry `{arg}` contains whitespace or a control character. Put each cargo argument in its own string. In analyzer.toml use test_args = [\"--locked\", \"--\", \"--test-threads=1\"]."
+            ));
+        }
+        if arg == "--manifest-path" || arg.starts_with("--manifest-path=") {
+            return Err(
+                "rust.test_args cannot set --manifest-path. sc always passes the Cargo.toml of the directory being analyzed. Remove --manifest-path from test_args in analyzer.toml."
+                    .into(),
+            );
+        }
+        if arg == "--features=" || arg == "-F=" {
+            return Err(
+                "rust.test_args has an empty feature list. Write [\"--features\", \"name\"] or [\"--features=name\"] in analyzer.toml."
+                    .into(),
+            );
+        }
+        if arg == "--features" || arg == "-F" {
+            let value = args.get(index + 1).map(String::as_str);
+            let valid = value
+                .is_some_and(|value| !value.is_empty() && value != "--" && !value.starts_with('-'));
+            if !valid {
+                return Err(
+                    "rust.test_args has `--features` or `-F` without a feature list. Write [\"--features\", \"name\"] or [\"--features=name\"] in analyzer.toml."
+                        .into(),
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -427,6 +516,97 @@ mod tests {
         assert_eq!(config.mutation.mode, "off");
         assert_eq!(config.commands.lint, "cargo clippy --workspace");
         assert!(!config.commands.lint.contains("-D warnings"));
+        assert_eq!(config.budget_seconds, 120);
+        assert!(config.rust.test_args.is_empty());
+    }
+
+    #[test]
+    fn omitted_budget_and_test_args_keep_the_historical_defaults() {
+        let config: Config = toml::from_str("pack = \"rust\"\n").unwrap();
+        assert_eq!(config.budget_seconds, 120);
+        assert!(config.rust.test_args.is_empty());
+        assert_eq!(
+            resolve_budget_seconds(None, config.budget_seconds).unwrap(),
+            120
+        );
+        let configured: Config =
+            toml::from_str("budget_seconds = 900\n[rust]\ntest_args = [\"--locked\"]\n").unwrap();
+        assert_eq!(configured.budget_seconds, 900);
+        assert_eq!(configured.rust.test_args, vec!["--locked"]);
+        assert_eq!(
+            resolve_budget_seconds(None, configured.budget_seconds).unwrap(),
+            900
+        );
+        assert_eq!(
+            resolve_budget_seconds(Some(30), configured.budget_seconds).unwrap(),
+            30
+        );
+        let loaded = load_config_file(None).unwrap();
+        assert_eq!(loaded.budget_seconds, 120);
+        assert!(loaded.rust.test_args.is_empty());
+    }
+
+    #[test]
+    fn zero_budget_and_bad_test_args_name_the_config_line_to_fix() {
+        let budget = validate_budget_seconds(0).unwrap_err();
+        assert!(budget.contains("budget_seconds = 120"), "{budget}");
+        assert!(budget.contains("at least 1"), "{budget}");
+        assert!(validate_budget_seconds(1).is_ok());
+        let flag = resolve_budget_seconds(Some(0), 120).unwrap_err();
+        assert!(flag.contains("--budget-seconds"), "{flag}");
+        assert!(flag.contains("at least 1"), "{flag}");
+
+        let empty = validate_rust_test_args(&[String::new()]).unwrap_err();
+        assert!(empty.contains("test_args = ["), "{empty}");
+        let spaced = validate_rust_test_args(&["--locked --features extra".into()]).unwrap_err();
+        assert!(spaced.contains("own string"), "{spaced}");
+        let manifest =
+            validate_rust_test_args(&["--manifest-path".into(), "other/Cargo.toml".into()])
+                .unwrap_err();
+        assert!(manifest.contains("Remove --manifest-path"), "{manifest}");
+        let manifest_eq =
+            validate_rust_test_args(&["--manifest-path=other/Cargo.toml".into()]).unwrap_err();
+        assert!(
+            manifest_eq.contains("Remove --manifest-path"),
+            "{manifest_eq}"
+        );
+        let bare = validate_rust_test_args(&["--features".into()]).unwrap_err();
+        assert!(bare.contains("[\"--features\", \"name\"]"), "{bare}");
+        let flag_value =
+            validate_rust_test_args(&["--features".into(), "--locked".into()]).unwrap_err();
+        assert!(
+            flag_value.contains("[\"--features\", \"name\"]"),
+            "{flag_value}"
+        );
+        let empty_list = validate_rust_test_args(&["--features=".into()]).unwrap_err();
+        assert!(empty_list.contains("empty feature list"), "{empty_list}");
+        assert!(validate_rust_test_args(&["-F".into()]).is_err());
+        assert!(validate_rust_test_args(&[
+            "--locked".into(),
+            "--features".into(),
+            "extra".into(),
+            "--".into(),
+            "--test-threads=1".into(),
+        ])
+        .is_ok());
+        assert!(validate_rust_test_args(&["--features=extra".into()]).is_ok());
+        assert!(validate_rust_test_args(&["-F".into(), "extra".into()]).is_ok());
+
+        let dir = std::env::temp_dir().join(format!("sc-cfg-budget-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("analyzer.toml");
+        std::fs::write(&path, "budget_seconds = 0\n").unwrap();
+        let loaded = load_config_file(Some(&path)).unwrap_err();
+        assert!(loaded.contains("budget_seconds = 120"), "{loaded}");
+        std::fs::write(
+            &path,
+            "[rust]\ntest_args = [\"--manifest-path\", \"other/Cargo.toml\"]\n",
+        )
+        .unwrap();
+        let loaded = load_config_file(Some(&path)).unwrap_err();
+        assert!(loaded.contains("Remove --manifest-path"), "{loaded}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -446,6 +626,23 @@ mod tests {
         assert_eq!(config.gates.crap_threshold, 30);
         assert!(config.scope.exclude.is_empty());
         assert!(config.scope.include_generated.is_empty());
+        assert_eq!(config.budget_seconds, 120);
+        assert!(config.rust.test_args.is_empty());
+        let text = std::fs::read_to_string(&path).unwrap();
+        let value: toml::Value = toml::from_str(&text).unwrap();
+        assert_eq!(
+            value
+                .get("budget_seconds")
+                .and_then(toml::Value::as_integer),
+            Some(120),
+            "budget_seconds must be a top-level key, not a table field"
+        );
+        let test_args = value
+            .get("rust")
+            .and_then(|rust| rust.get("test_args"))
+            .and_then(toml::Value::as_array)
+            .expect("rust.test_args array");
+        assert!(test_args.is_empty());
     }
 
     #[test]

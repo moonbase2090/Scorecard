@@ -164,11 +164,12 @@ fn analyze_crate(
 ) -> Result<Scorecard, String> {
     let root = find_crate(cwd)?;
     let config = sc_core::load_config_file(sc_core::resolve_config_path(None, &root).as_deref())?;
+    let budget = sc_core::resolve_budget_seconds(None, config.budget_seconds)?;
     let output = analyze(AnalyzeRequest {
         root,
         repo: ".".into(),
         fail_on: config.gates.fail_on.clone(),
-        budget: Duration::from_secs(120),
+        budget: Duration::from_secs(budget),
         diff_base,
         diff_head,
         path_list,

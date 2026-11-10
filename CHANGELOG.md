@@ -4,6 +4,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `budget_seconds` in `analyzer.toml` sets the wall-clock budget for pack commands. `sc analyze --budget-seconds` overrides it. The default remains 120 seconds. The GitHub Action passes `--budget-seconds` only when its `budget-seconds` input is set, so an empty input uses the project file.
+- `[rust] test_args` adds cargo and harness arguments to `cargo test` and `cargo llvm-cov`, such as `--features` or `-- --test-threads=1`.
+
 ## [0.1.15] - 2026-10-29
 
 ### Changed

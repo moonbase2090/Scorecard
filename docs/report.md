@@ -71,7 +71,7 @@ Which checks ran, which did not, and the exit status. An engine is skipped when 
 
 When a terminal runs `sc analyze` and `.sc/last-scorecard.json` holds a report for the same repository, one stderr line says what changed since that run: each score that moved, and how many findings are new or resolved. Captured output and CI logs do not get the line.
 
-The Markdown report adds an **Engine timing** table after the header: time per engine, summed over its runs, and a total. Per-engine budgets are not available yet; `--budget-seconds` still applies to the whole run.
+The Markdown report adds an **Engine timing** table after the header: time per engine, summed over its runs, and a total. Per-engine budgets are not available yet; `--budget-seconds` or `budget_seconds` in `analyzer.toml` still applies to the whole run.
 
 ## Dispositions
 

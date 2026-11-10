@@ -31,7 +31,7 @@ sc help [COMMAND]
 | `--mutation MODE` | `off` | `off`, `diff`, or `full`. Runs `cargo mutants` (`mutation` gate). |
 | `--llm MODE` | `off` | `off` or `on`. Runs an LLM review of `--spec`, or of `--intent` when there is no spec. See [LLM providers](../how-to/llm.md). |
 | `--intent TEXT` | none | What the change is meant to do. Stored on the scorecard. With `--llm on` and no `--spec`, this is enough to run the review. |
-| `--budget-seconds N` | `120` | Wall-clock budget for pack commands, in seconds. One clock for the whole run. A command still running at the deadline is killed, including its child processes, and the report records the timeout. |
+| `--budget-seconds N` | `120`, or `budget_seconds` in analyzer.toml | Wall-clock budget for pack commands, in seconds. One clock for the whole run. A command still running at the deadline is killed, including its child processes, and the report records the timeout. When the flag is omitted, `budget_seconds` in analyzer.toml is used. `N` must be at least 1. |
 | `--config PATH` | see [config](config.md#where-sc-looks) | Config file to use. |
 | `--quiet` | off | Suppress the progress spinner on stderr. |
 
@@ -165,7 +165,7 @@ Scorecard excludes its saved report, cache and coverage files under `.sc/`, and 
 |---|---|
 | 0 | No selected gate failed. `--fail-on none` deliberately selects no gates. If an enforced gate failed, `sc` names it in one stderr warning and the report verdict remains `fail`. With `--baseline`, a failing gate that fails only on known findings exits 0 and the report verdict remains `fail`. |
 | 1 | A selected gate failed |
-| 2 | `sc` could not run: missing path, invalid config (including an empty `--fail-on` or `gates.fail_on`), a required toolchain missing, or compile or tests timed out |
+| 2 | `sc` could not run: missing path, invalid config (including an empty `--fail-on` or `gates.fail_on`, `budget_seconds` of 0, or invalid `rust.test_args`), a required toolchain missing, or compile or tests timed out |
 
 A skipped coverage, mutation, or LLM engine never causes exit 2.
 

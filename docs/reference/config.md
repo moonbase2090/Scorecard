@@ -17,6 +17,7 @@ Only the first file found is read. Command-line flags override the matching keys
 | `install_agent_skills` | `true` | Allow installer hooks to install the Scorecard skill for detected agents. Hooks read this from the user config `~/.config/sc/analyzer.toml`. Set it to `false` to opt out. `SCORECARD_NO_AGENT_SKILLS=1` also skips automatic installation. |
 | `pack` | detected | Language pack when the tree has more than one marker. Same values as `--pack`. |
 | `toolchain` | empty | Rustup channel for check, test, coverage, and lint (`1.85.0`, `stable`, …). When set, Cargo uses that channel. When empty, a `rust-toolchain.toml` / `rust-toolchain` at or above the project clears an inherited `RUSTUP_TOOLCHAIN` so rustup reads the file; with no file, the inherited variable is left alone. |
+| `budget_seconds` | `120` | Wall-clock seconds for pack commands. The same clock as `--budget-seconds`, which overrides this value. `0` is an error. This is not `[mutation] budget_seconds`, which caps mutation only. |
 
 ### `[gates]`
 
@@ -62,6 +63,21 @@ If exclusions leave no files for secrets scanning, `secrets.empty_scope` fails t
 | Key | Default | Meaning |
 |---|---|---|
 | `commands.lint` | `cargo clippy --workspace` | Lint command for the Rust and `command` packs. At a workspace root, Cargo Clippy checks every member; analyzing a member keeps lint scoped to that package. Empty skips lint. Other packs use their own linter; see [packs](../packs.md). Add `-- -D warnings` to fail on warnings at the workspace root: `cargo clippy --workspace -- -D warnings`. |
+
+### `[rust]`
+
+Rust test and coverage commands only. Other packs ignore this table.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `rust.test_args` | `[]` | Extra arguments for `cargo test` and `cargo llvm-cov`. Each string is one argument. Cargo options such as `--locked` or `--features` come before a `--` entry; later entries go to the test harness (`--test-threads=1`). At a workspace root, `sc` still adds `--workspace`. It also passes the project `Cargo.toml` and `--color never`, so `test_args` must not set `--manifest-path`. An empty string, whitespace inside an entry, or `--features` / `-F` without a feature list is an error. These arguments are not added to `cargo check` or the lint command. |
+
+```toml
+[rust]
+test_args = ["--locked", "--features", "extra", "--", "--test-threads=1"]
+```
+
+That runs `cargo test --workspace --locked --features extra -- --test-threads=1` at a workspace root, and the same extra arguments on `cargo llvm-cov`. Omit the table to keep `cargo test` and `cargo test --workspace`.
 
 ### `[mutation]`
 

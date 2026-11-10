@@ -7,6 +7,11 @@
 # Install the Scorecard agent skill from automatic installer hooks.
 install_agent_skills = true
 
+# Wall-clock budget for pack commands, in seconds. Same clock as
+# `sc analyze --budget-seconds`, which overrides this value.
+# `mutation.budget_seconds` caps mutation only.
+budget_seconds = 120
+
 # Override detection, or set "multi" for separate language-pack roots in a monorepo.
 # pack = "rust"   # rust, node, python, bash, go, java, csharp, php, cpp, web, command, or multi
 
@@ -74,6 +79,14 @@ disable = []
 # above the project wins over an inherited RUSTUP_TOOLCHAIN; with no
 # file, the inherited variable is left alone.
 # toolchain = "1.85.0"
+
+[rust]
+# Extra arguments for `cargo test` and `cargo llvm-cov`. Empty keeps
+# `cargo test` (and `--workspace` at a workspace root). Cargo options go
+# before `--`; later tokens are test-harness arguments. Not added to
+# `cargo check` or the lint command.
+# test_args = ["--locked", "--features", "extra", "--", "--test-threads=1"]
+test_args = []
 
 [commands]
 # Empty skips lint. Non-zero exit is `lint.failed`.

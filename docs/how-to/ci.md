@@ -32,7 +32,7 @@ Every run generates JSON, Markdown, SARIF, and HTML reports, emits finding annot
 | `spec` | `""` | Path for `--spec` |
 | `mutation` | `off` | `off`, `diff`, or `full` |
 | `version` | the action's tag | `sc` release to install, such as `0.1.10` |
-| `budget-seconds` | `120` | Wall-clock budget for pack commands (`--budget-seconds` on `sc analyze`) |
+| `budget-seconds` | empty | Wall-clock budget for pack commands. Empty uses `budget_seconds` in `analyzer.toml`, or 120 when that key is unset. A value is `--budget-seconds` and overrides the file. |
 
 The runner needs the tools your pack uses (a Rust toolchain, Python with pytest, and so on); see [packs](../packs.md). A missing coverage tool does not fail the job, and the report says coverage was not measured.
 
@@ -70,4 +70,4 @@ export PATH="$HOME/.local/bin:$PATH"
 sc analyze . --format all --out sc-report --budget-seconds 600 >/dev/null
 ```
 
-The exit status is the gate result (0 pass, 1 fail, 2 could not run). Keep `sc-report.html` as a build artifact and upload `sc-report.sarif` to any SARIF viewer. `--budget-seconds` raises the 120-second wall-clock budget for pack commands when the suite is slow.
+The exit status is the gate result (0 pass, 1 fail, 2 could not run). Keep `sc-report.html` as a build artifact and upload `sc-report.sarif` to any SARIF viewer. `--budget-seconds` or `budget_seconds` in `analyzer.toml` raises the 120-second wall-clock budget for pack commands when the suite is slow.

@@ -19,6 +19,7 @@ mod pipeline;
 mod poly_cc;
 mod python;
 mod python_imports;
+mod rust_test_args;
 mod rust_toolchain;
 mod scope;
 mod secrets;

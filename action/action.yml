@@ -33,9 +33,12 @@ inputs:
     required: false
     default: ""
   budget-seconds:
-    description: Wall-clock budget for pack commands passed to sc analyze
+    description: >-
+      Wall-clock budget for pack commands. Empty uses budget_seconds in
+      analyzer.toml, or 120 when that key is unset. A value is passed as
+      --budget-seconds and overrides the file.
     required: false
-    default: "120"
+    default: ""
   build-from-source:
     description: Build sc from this checkout instead of installing a release
     required: false
@@ -140,7 +143,10 @@ runs:
         SC_DIFF: ${{ inputs.diff }}
         SC_BUDGET: ${{ inputs.budget-seconds }}
       run: |
-        args=(analyze . --format all --out sc-results --fail-on "$SC_FAIL_ON" --mutation "$SC_MUTATION" --budget-seconds "$SC_BUDGET")
+        args=(analyze . --format all --out sc-results --fail-on "$SC_FAIL_ON" --mutation "$SC_MUTATION")
+        if [ -n "$SC_BUDGET" ]; then
+          args+=(--budget-seconds "$SC_BUDGET")
+        fi
         if [ -n "$SC_SPEC" ]; then
           args+=(--spec "$SC_SPEC")
         fi

@@ -44,7 +44,7 @@ Analyze `PATH` (default `.`). The default output is pretty text on a terminal an
 | `--mutation MODE` | `off`; `diff` or `full` | Run mutation testing. |
 | `--llm MODE` | `off`; `on` | Run a read-only spec or intent review using configured provider. |
 | `--intent TEXT` | none | Describe the change; used by the optional LLM review and saved in the scorecard. |
-| `--budget-seconds N` | `120` | Set the wall-clock budget for pack commands. |
+| `--budget-seconds N` | `120`, or `budget_seconds` in analyzer.toml | Set the wall-clock budget for pack commands. Overrides the config key. |
 | `--config PATH` | project `analyzer.toml`, then `~/.config/sc/analyzer.toml` | Read a specific config file. |
 
 Command flags override matching config settings. Every run writes `.sc/last-scorecard.json`.
@@ -105,6 +105,8 @@ Config resolution is `--config PATH`, then `analyzer.toml` in the analyzed direc
 |---|---|
 | `install_agent_skills` | Allow automatic agent skill installation; default `true`. Installer hooks read it only from `~/.config/sc/analyzer.toml`. |
 | `pack`, `toolchain` | Select the language pack (`detected` by default) and Rustup toolchain (empty uses project toolchain files). |
+| `budget_seconds` | Wall-clock seconds for pack commands (default `120`). `--budget-seconds` overrides it. Separate from `[mutation] budget_seconds`. |
+| `[rust] test_args` | Extra `cargo test` and `cargo llvm-cov` arguments (default empty), such as `--features` or `-- --test-threads=1`. |
 | `[gates] fail_on`, `crap_threshold`, `new_fn_untested_cc` | Choose failing gates (default `types,tests,crap,secrets,lint`), maximum CRAP score (`30`), and the complexity floor for an untested function (`15`). |
 | `[scope] exclude`, `include_generated` | Exclude paths (default empty) or opt selected generated/vendor paths back into scanning (default empty). |
 | `[mutation] mode`, `max_mutants`, `budget_seconds` | Configure mutation checks (`off`, `50`, and `180` by default). |
@@ -155,7 +157,7 @@ For CI, install `sc`, add `.sc/` to `.gitignore`, then run:
 sc analyze . --format sarif --out scorecard.sarif
 ```
 
-Publish `scorecard.sarif` to the CI code-scanning service when configured. Use a longer `--budget-seconds` if the project test suite needs more than the default budget.
+Publish `scorecard.sarif` to the CI code-scanning service when configured. Use a longer `--budget-seconds`, or `budget_seconds` in `analyzer.toml`, if the project test suite needs more than the default budget.
 
 ## Troubleshooting
 

@@ -132,6 +132,7 @@ Next:
 - Install just the agent instructions with `sc skills install --agent detected`; see [skill installation](docs/how-to/agents.md#install-the-skill).
 - Write a user config with `sc config init`, or put `analyzer.toml` at the project root ([configure](docs/how-to/config.md)).
 - Rust projects can opt into overlapping dependency and secrets scans with `[engines] parallel = true`; Cargo commands remain sequential and the setting is off by default.
+- Rust projects can set `budget_seconds` and `[rust] test_args` in `analyzer.toml` for the analysis clock and extra `cargo test` arguments such as `--features` or `--test-threads`. `--budget-seconds` overrides the clock.
 
 The secrets scan also finds PEM private keys split across source string literals, including Go or Java concatenations and YAML lists. See [PEM examples](examples/README.md#pem-keys-in-source-files).
 

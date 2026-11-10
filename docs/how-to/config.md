@@ -10,6 +10,9 @@ pack = "rust"
 
 # For separate language-pack roots in a monorepo, use pack = "multi" instead.
 
+# One clock for compile, test, coverage, and lint. --budget-seconds overrides this.
+budget_seconds = 900
+
 [gates]
 # Also fail on undeclared dependencies.
 fail_on = ["types", "tests", "crap", "secrets", "lint", "sca"]
@@ -31,6 +34,10 @@ parallel = false
 [commands]
 # Lint command for the Rust and command packs. Empty skips lint.
 lint = "cargo clippy --workspace --all-targets -- -D warnings"
+
+[rust]
+# Cargo options, then harness arguments after `--`.
+test_args = ["--locked", "--features", "extra", "--", "--test-threads=1"]
 ```
 
 At a workspace root, this checks every member. If you analyze a member directory, Scorecard removes the workspace scope so sibling crates do not affect its lint result.
@@ -49,7 +56,7 @@ prints `40`. Unknown keys are ignored without a warning, so a misspelled key has
 
 ## One-off overrides
 
-Flags win over the file for a single run:
+Flags win over the file for a single run. `--budget-seconds` overrides `budget_seconds`. `--fail-on` overrides `gates.fail_on`.
 
 ```bash doctest
 sc analyze . --fail-on types,tests >/dev/null

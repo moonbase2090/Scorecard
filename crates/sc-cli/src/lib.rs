@@ -97,8 +97,11 @@ struct AnalyzeArgs {
     #[arg(long)]
     intent: Option<String>,
     /// Wall-clock budget for pack commands, in seconds.
-    #[arg(long, default_value_t = 120)]
-    budget_seconds: u64,
+    ///
+    /// Overrides `budget_seconds` in analyzer.toml. When omitted, that setting
+    /// is used, or 120 when the setting is absent.
+    #[arg(long, value_name = "N")]
+    budget_seconds: Option<u64>,
     /// Path to analyzer.toml. Default: ./analyzer.toml, then ~/.config/sc/analyzer.toml.
     #[arg(long)]
     config: Option<PathBuf>,
@@ -363,6 +366,22 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
     if let Some(pack) = pack {
         loaded.pack = pack;
     }
+    let budget_seconds =
+        match sc_core::resolve_budget_seconds(budget_seconds, loaded.budget_seconds) {
+            Ok(seconds) => seconds,
+            Err(err) => {
+                let _ = writeln!(io::stderr(), "sc: {err}");
+                let card = early_card(&repo, "config.invalid", "config", &err);
+                return emit(
+                    &mut stdout,
+                    &view,
+                    out.as_deref(),
+                    &card,
+                    RunStatus::AnalyzerError,
+                );
+            }
+        };
+    loaded.budget_seconds = budget_seconds;
     let fail_on = loaded.gates.fail_on.clone();
     let path_list = match paths {
         Some(path) => match fs::read_to_string(&path) {
