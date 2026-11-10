@@ -64,7 +64,7 @@ Export a saved report to Waypoint with `sc export --waypoint --project PROJECT`.
 In a terminal the report looks like this (from `testdata/good_crate`):
 
 ```text
-sc 0.2.0  testdata/good_crate  rust  5ac851c clean  scope tree
+sc 0.2.1  testdata/good_crate  rust  5ac851c clean  scope tree
 
 PASS
 
