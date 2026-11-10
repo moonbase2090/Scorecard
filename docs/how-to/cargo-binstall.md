@@ -33,7 +33,7 @@ Pass `--binstall /path/to/cargo-binstall` if the tool is outside `PATH`.
 
 Before enabling registry publication:
 
-1. Choose and recheck the crate name. [`sc-cli`](https://crates.io/crates/sc-cli) belongs to another project. The registry API returned 404 for `scorecard-cli` on 2026-11-02; availability must be rechecked and the name is not reserved.
+1. Choose and recheck the crate name. `sc-cli` belongs to another project, so this repository does not publish under that name. Install from the [repository README](../../README.md). The registry API returned 404 for `scorecard-cli` on 2026-11-02; availability must be rechecked and the name is not reserved.
 2. Give internal path dependencies registry versions and publish their dependency graph in order. The workspace currently marks every package `publish = false`.
 3. Make the Git-only TUI dependencies resolvable from the registry, including optional dependencies. The pinned TUI package names returned 404 in registry checks on 2026-11-02; adding version strings alone cannot resolve unpublished packages.
 4. Bundle the embedded skill inside the CLI crate. `src/skills.rs` currently includes `../../../skills/scorecard/SKILL.md`, which is outside the `.crate` package. `cargo package --list -p sc-cli` shows the missing file.

@@ -16,7 +16,7 @@ Complexity weighted by missing test coverage. A complex function with good tests
 `--diff BASE` scores what changed against a git ref. `--diff HEAD` covers uncommitted work; see [pre-commit](how-to/pre-commit.md).
 
 **How long does a run take?**
-About as long as your test suite, since `sc` runs it. Pack commands share one `--budget-seconds` clock (default 120).
+About as long as your test suite, since `sc` runs it. Pack commands share one wall-clock budget (default 120 seconds). Set `budget_seconds` in `analyzer.toml`, or pass `--budget-seconds` for one run.
 
 **Which languages?**
 Rust, Node, Python, Bash, Go, Java, C#, PHP, C++, and static web pages. See [packs](packs.md).
