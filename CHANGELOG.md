@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The optional `tui` build of `sc tui` follows lunatui `c47b6e98`. Empty cells inside a block keep that line's color. The feature stays off unless the build enables `tui`.
 - The `crap` gate is advisory by default (minor release). `gates.fail_on` and `--fail-on` default to `types,tests,secrets,lint`; a CRAP failure is reported with its findings and worst-CRAP table, and changes neither the verdict nor the exit code. Name `crap` in `fail_on` to enforce it again. The GitHub Action's `fail-on` default, the example config, the docs and the agent skill follow the advisory default. This repository's own `analyzer.toml` is an explicit exception: it keeps `crap` in `fail_on`, so its self-analysis still enforces CRAP. The CRAP engine, thresholds, findings and scores are unchanged.
 
 ### Added
