@@ -2,6 +2,7 @@
 
 ```text
 sc analyze [PATH] [OPTIONS]
+sc badge [--input PATH]
 sc doctor [PATH] [--pack PACK]
 sc tui [PATH] [--inline]    # requires the tui Cargo feature
 sc config path
@@ -42,6 +43,20 @@ While analysis runs, a spinner with the current step and elapsed time animates o
 When a report has more than eight findings, pretty output groups findings that need a fix by rule and suggested action. It shows the five most frequent fix types first, then the findings list. The complete report remains in `.sc/last-scorecard.json` or the path passed to `--out`.
 
 Command-line flags override the matching config keys.
+
+## sc badge
+
+Prints [Shields.io endpoint JSON](https://shields.io/badges/endpoint-badge) for a saved report. It does not run analysis or contact the network.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--input PATH` | `.sc/last-scorecard.json` | Saved scorecard JSON to read. |
+
+A finished report gets a letter grade from the five dimension scores: the equal-weight mean times 100, rounded to an integer. A is 90 to 100, B is 80 to 89, C is 70 to 79, D is 60 to 69, and F is 0 to 59. The message looks like `B (85/100)`. Colors are brightgreen, green, yellow, orange, and red. The grade does not change the verdict.
+
+When the report has `analyzer_error` set to `true`, the badge message is `error` and the color is `lightgrey`. There is no letter grade, including when the dimension scores are all `1.0`. See [Analyzer errors and the badge](../report.md#analyzer-errors-and-the-badge).
+
+Writes JSON to stdout. Exits 0 after writing the badge, including a failing verdict and an analyzer error. Exits 2 when the report is missing or invalid, no engines ran, any dimension is outside 0 to 1, or output cannot be written.
 
 ## sc tui
 

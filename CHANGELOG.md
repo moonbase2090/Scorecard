@@ -4,6 +4,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Reports set `analyzer_error` when an analyzer cannot finish. Terminal, Markdown, and HTML show `ERROR`. `sc badge` prints Shields.io endpoint JSON: a letter grade for a finished run, and `error` with no letter when `analyzer_error` is set.
+
 ## [0.1.15] - 2026-10-29
 
 ### Changed

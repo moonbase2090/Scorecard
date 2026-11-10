@@ -37,6 +37,15 @@ pub fn to_sarif(card: &Scorecard) -> String {
             })
         })
         .collect();
+    let mut properties = json!({
+        "scorecardVerdict": sc_core::report_verdict(card),
+        "scorecardGates": gates,
+        "fail_on": card.fail_on,
+        "generated_files_warning": card.sections.generated_files_warning,
+    });
+    if card.analyzer_error {
+        properties["analyzerError"] = json!(true);
+    }
     let doc = json!({
         "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
         "version": "2.1.0",
@@ -50,12 +59,7 @@ pub fn to_sarif(card: &Scorecard) -> String {
                 }
             },
             "results": results,
-            "properties": {
-                "scorecardVerdict": sc_core::report_verdict(card),
-                "scorecardGates": gates,
-                "fail_on": card.fail_on,
-                "generated_files_warning": card.sections.generated_files_warning,
-            },
+            "properties": properties,
         }]
     });
     serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".into())
@@ -276,6 +280,15 @@ mod tests {
             value["runs"][0]["properties"]["scorecardGates"][0]["enforced"],
             true
         );
+        assert!(value["runs"][0]["properties"]
+            .get("analyzerError")
+            .is_none());
+
+        card.analyzer_error = true;
+        card.measures.scores = sc_core::Scores::perfect();
+        let errored: Value = serde_json::from_str(&to_sarif(&card)).unwrap();
+        assert_eq!(errored["runs"][0]["properties"]["analyzerError"], true);
+        assert_eq!(errored["runs"][0]["properties"]["scorecardVerdict"], "fail");
     }
 
     #[test]

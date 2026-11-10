@@ -11,7 +11,63 @@
 //! - security: `secrets` and `sca` findings (`sca` warnings subtract 0.01)
 //! - a11y: `a11y` findings
 
+use serde::{Deserialize, Serialize};
+
 use crate::{Finding, Gate, Scorecard, Scores};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Grade {
+    A,
+    B,
+    C,
+    D,
+    F,
+}
+
+impl std::fmt::Display for Grade {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::A => "A",
+            Self::B => "B",
+            Self::C => "C",
+            Self::D => "D",
+            Self::F => "F",
+        })
+    }
+}
+
+/// Finding-based summary. Gates decide the verdict. An analyzer error has no grade.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OverallScore {
+    pub score: u8,
+    pub grade: Grade,
+}
+
+/// Equal-weight mean of all five dimensions, rounded to an integer out of 100.
+/// Invalid or non-finite dimensions have no overall score.
+pub fn overall_score(scores: &Scores) -> Option<OverallScore> {
+    let dimensions = [
+        scores.correctness,
+        scores.efficiency,
+        scores.maintainability,
+        scores.security,
+        scores.a11y,
+    ];
+    if dimensions.iter().any(|value| !(0.0..=1.0).contains(value)) {
+        return None;
+    }
+    // Five floating-point additions can leave a half point just below its
+    // boundary. Allow for their rounding error at the 100-point scale.
+    let score = (dimensions.iter().sum::<f64>() * 20.0 + 100.0 * f64::EPSILON).round() as u8;
+    let grade = match score {
+        90..=100 => Grade::A,
+        80..=89 => Grade::B,
+        70..=79 => Grade::C,
+        60..=69 => Grade::D,
+        _ => Grade::F,
+    };
+    Some(OverallScore { score, grade })
+}
 
 pub fn compute_scores(findings: &[Finding]) -> Scores {
     let mut correctness: f64 = 1.0;
@@ -100,6 +156,66 @@ pub fn exit_code_fails(gates: &[Gate], fail_on: &[String]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn overall_grade_boundaries_use_the_rounded_score() {
+        for (value, score, grade) in [
+            (1.0, 100, Grade::A),
+            (0.9, 90, Grade::A),
+            (0.895, 90, Grade::A),
+            (0.894, 89, Grade::B),
+            (0.8, 80, Grade::B),
+            (0.795, 80, Grade::B),
+            (0.794, 79, Grade::C),
+            (0.7, 70, Grade::C),
+            (0.695, 70, Grade::C),
+            (0.694, 69, Grade::D),
+            (0.6, 60, Grade::D),
+            (0.595, 60, Grade::D),
+            (0.594, 59, Grade::F),
+            (0.0, 0, Grade::F),
+        ] {
+            let scores = Scores {
+                correctness: value,
+                efficiency: value,
+                maintainability: value,
+                security: value,
+                a11y: value,
+            };
+            assert_eq!(
+                overall_score(&scores),
+                Some(OverallScore { score, grade }),
+                "value {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn overall_averages_every_dimension() {
+        let scores = Scores {
+            correctness: 0.2,
+            efficiency: 0.4,
+            maintainability: 0.6,
+            security: 0.8,
+            a11y: 1.0,
+        };
+        assert_eq!(
+            overall_score(&scores),
+            Some(OverallScore {
+                score: 60,
+                grade: Grade::D
+            })
+        );
+    }
+
+    #[test]
+    fn invalid_dimensions_have_no_overall_score() {
+        for invalid in [-0.01, 1.01, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut scores = Scores::perfect();
+            scores.security = invalid;
+            assert_eq!(overall_score(&scores), None, "{invalid}");
+        }
+    }
 
     #[test]
     fn crap_matches_the_published_examples() {

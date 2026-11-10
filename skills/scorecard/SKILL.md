@@ -25,7 +25,7 @@ Install the skill for an agent with `sc skills install --agent codex`; see [Skil
 
 ## Commands
 
-The top-level commands are `sc analyze`, `sc config`, `sc doctor`, `sc export`, `sc setup`, `sc skills`, and `sc help [COMMAND]`. Builds with the optional `tui` Cargo feature also provide `sc tui [PATH]` for interactive browsing of `PATH/.sc/last-scorecard.json`. On Findings, use Up/Down, PageUp/PageDown, and Home/End to browse rows. Existing files inside the project have OSC 8 file-and-line links. `sc tui [PATH] --inline` prints up to eight gates and five findings without entering the alternate screen. Redirected inline output is plain text. Use `sc analyze --format json` for automation.
+The top-level commands are `sc analyze`, `sc badge`, `sc config`, `sc doctor`, `sc export`, `sc setup`, `sc skills`, and `sc help [COMMAND]`. Builds with the optional `tui` Cargo feature also provide `sc tui [PATH]` for interactive browsing of `PATH/.sc/last-scorecard.json`. On Findings, use Up/Down, PageUp/PageDown, and Home/End to browse rows. Existing files inside the project have OSC 8 file-and-line links. `sc tui [PATH] --inline` prints up to eight gates and five findings without entering the alternate screen. Redirected inline output is plain text. Use `sc analyze --format json` for automation.
 
 ### `sc analyze [PATH] [OPTIONS]`
 
@@ -48,6 +48,10 @@ Analyze `PATH` (default `.`). The default output is pretty text on a terminal an
 | `--config PATH` | project `analyzer.toml`, then `~/.config/sc/analyzer.toml` | Read a specific config file. |
 
 Command flags override matching config settings. Every run writes `.sc/last-scorecard.json`.
+
+### `sc badge [--input PATH]`
+
+Read a saved scorecard (`PATH`, default `.sc/last-scorecard.json`) and print Shields.io endpoint JSON. No scan and no network. A finished run averages the five dimension scores, rounds to 0–100, and grades A at 90, B at 80, C at 70, D at 60, and F below 60. When the report has `analyzer_error` set, the badge message is `error` and there is no letter grade, even if the dimension scores are perfect. Exit 2 means the report is missing or invalid, no engines ran, or a dimension is outside 0 to 1. An analyzer error still exits 0: the badge shows `error`.
 
 ### `sc config`
 
@@ -129,7 +133,7 @@ Unknown config keys are ignored. Check spelling against the config reference bef
 
 ## Read the result
 
-Exit `0` means no selected gate failed. `--fail-on none` deliberately selects no gates. Exit `1` means a selected gate failed. Exit `2` means Scorecard could not run, commonly because a path, config, required toolchain, or gate selection is invalid. Empty or blank `--fail-on` and `gates.fail_on` values are invalid; omit the setting to use the default gates. If an enforced gate fails but is not selected, Scorecard writes one stderr warning with the failed gate names. The report verdict remains `fail`; inspect every gate's `enforced` and `pass` values.
+Exit `0` means no selected gate failed. `--fail-on none` deliberately selects no gates. Exit `1` means a selected gate failed. Exit `2` means Scorecard could not run, commonly because a path, config, required toolchain, or gate selection is invalid. Empty or blank `--fail-on` and `gates.fail_on` values are invalid; omit the setting to use the default gates. If an enforced gate fails but is not selected, Scorecard writes one stderr warning with the failed gate names. The report verdict remains `fail`; inspect every gate's `enforced` and `pass` values. Exit 2 also sets `analyzer_error` to `true`. Do not treat the dimension scores as a grade for that report. `sc badge` prints `error` instead of a letter.
 
 Use `--format json` for automation, `--format pretty` for a terminal, `--format md` for a concise shareable report, `--format sarif` for GitHub code scanning, and `--format html --out report.html` for a self-contained browser report. Findings marked with disposition `fix` need attention; advisory findings may not affect the process exit.
 

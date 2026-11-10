@@ -50,15 +50,45 @@ impl Outcome {
             Outcome::Fail | Outcome::Pass => None,
         }
     }
+}
 
-    /// Verdict word for the page title and the flow strip.
-    fn word(self, card: &Scorecard) -> &str {
-        match self {
-            Outcome::ReportOnly(_) => "report only",
-            _ => sc_core::report_verdict(card),
-        }
+/// Human-readable verdict. An analyzer error is `ERROR`, never a letter grade.
+pub(crate) struct VerdictLabel {
+    pub class: &'static str,
+    pub badge: &'static str,
+    pub word: &'static str,
+}
+
+pub(crate) fn verdict_label(card: &Scorecard) -> VerdictLabel {
+    if card.analyzer_error {
+        return VerdictLabel {
+            class: "error",
+            badge: "ERROR",
+            word: "error",
+        };
+    }
+    match Outcome::of(card) {
+        Outcome::Fail => VerdictLabel {
+            class: "fail",
+            badge: "FAIL",
+            word: "fail",
+        },
+        Outcome::ReportOnly(_) => VerdictLabel {
+            class: "report",
+            badge: "REPORT ONLY",
+            word: "report only",
+        },
+        Outcome::Pass | Outcome::Advisory(_) => VerdictLabel {
+            class: "pass",
+            badge: "PASS",
+            word: "pass",
+        },
     }
 }
+
+/// Shown wherever a person reads the report. The JSON marker is `analyzer_error`.
+pub(crate) const ANALYZER_ERROR_NOTE: &str =
+    "analyzer error: no letter grade; a check did not finish. Run `sc analyze .` again.";
 
 /// Reason marker for gates the active pack does not evaluate. Such gates
 /// carry no signal: they render as skipped and stay out of the pass ratio.

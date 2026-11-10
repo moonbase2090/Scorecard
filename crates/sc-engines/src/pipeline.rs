@@ -593,6 +593,10 @@ fn finalize_multi_card(
         "pass"
     }
     .into();
+    card.analyzer_error = analyzer_error;
+    if analyzer_error {
+        card.verdict = "fail".into();
+    }
     card.identity.test_selection = "multi-pack".into();
     card.sections.crap.worst.truncate(10);
     let status = if analyzer_error {
@@ -2194,6 +2198,7 @@ fn finish(mut draft: Draft) -> AnalyzeOutput {
             "pass"
         }
         .to_string(),
+        analyzer_error: draft.analyzer_error,
         fail_on: draft.fail_on,
         engines: sc_core::ScorecardEngines {
             engines_run: draft.ran,
@@ -4445,12 +4450,48 @@ mod tests {
         });
         assert_eq!(output.status, RunStatus::AnalyzerError);
         assert_eq!(output.scorecard.verdict, "fail");
+        assert!(output.scorecard.analyzer_error);
+        let saved: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.join(".sc/last-scorecard.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(saved["analyzer_error"], true);
+        assert_eq!(saved["verdict"], "fail");
         assert!(output.scorecard.sections.findings.iter().any(|finding| {
             finding.rule == "engine.unavailable"
                 && finding.message.contains("--pack")
                 && finding.message.contains("analyzer.toml")
         }));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_multi_pack_error_in_any_root_is_marked_on_the_combined_report() {
+        let root = std::env::temp_dir().join(format!("sc-multi-error-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut card = Scorecard::skeleton("multi", 30);
+        card.measures.scores = sc_core::Scores::perfect();
+        card.engines.engines_run.push("secrets".into());
+        card.verdict = "pass".into();
+        let output = finalize_multi_card(
+            &root,
+            &mut card,
+            &["secrets".into()],
+            true,
+            std::collections::BTreeMap::new(),
+        );
+        assert_eq!(output.status, RunStatus::AnalyzerError);
+        assert!(output.scorecard.analyzer_error);
+        assert_eq!(output.scorecard.verdict, "fail");
+        assert_eq!(output.scorecard.measures.scores.security, 1.0);
+        let saved: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(root.join(".sc/last-scorecard.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(saved["analyzer_error"], true);
+        assert_eq!(saved["scores"]["security"], 1.0);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -142,15 +142,21 @@ fn push_markdown_header(out: &mut String, card: &Scorecard) {
     let head = card.context.git.head.as_deref().unwrap_or("none");
     let dirty = escape_markdown(&card.context.git.status_label());
     out.push_str("# scorecard\n\n");
-    let outcome = Outcome::of(card);
-    let verdict = sc_core::report_verdict(card);
-    match (outcome, outcome.note()) {
-        (Outcome::ReportOnly(_), Some(note)) => out.push_str(&format!(
-            "**Verdict:** {} (report only: {note})\n\n",
-            verdict
-        )),
-        (_, Some(note)) => out.push_str(&format!("**Verdict:** {} ({note})\n\n", verdict)),
-        (_, None) => out.push_str(&format!("**Verdict:** {}\n\n", verdict)),
+    if card.analyzer_error {
+        out.push_str("**Verdict:** error\n\n");
+        out.push_str(crate::report::ANALYZER_ERROR_NOTE);
+        out.push_str("\n\n");
+    } else {
+        let outcome = Outcome::of(card);
+        let verdict = sc_core::report_verdict(card);
+        match (outcome, outcome.note()) {
+            (Outcome::ReportOnly(_), Some(note)) => out.push_str(&format!(
+                "**Verdict:** {} (report only: {note})\n\n",
+                verdict
+            )),
+            (_, Some(note)) => out.push_str(&format!("**Verdict:** {} ({note})\n\n", verdict)),
+            (_, None) => out.push_str(&format!("**Verdict:** {}\n\n", verdict)),
+        }
     }
     out.push_str(&format!("**Repo:** {}\n\n", card.identity.repo));
     out.push_str(&format!("**Git:** {head} ({dirty})\n\n"));
@@ -371,6 +377,19 @@ mod tests {
     fn markdown_omits_timing_without_runs() {
         let card = Scorecard::skeleton("repo", 30);
         assert!(!to_markdown(&card).contains("## Engine timing"));
+    }
+
+    #[test]
+    fn markdown_names_an_analyzer_error_and_does_not_grade_it() {
+        let mut card = Scorecard::skeleton("demo", 30);
+        card.analyzer_error = true;
+        card.measures.scores = sc_core::Scores::perfect();
+        let md = to_markdown(&card);
+        assert!(md.contains("**Verdict:** error\n"));
+        assert!(md.contains(crate::report::ANALYZER_ERROR_NOTE));
+        assert!(!md.contains("**Verdict:** fail"));
+        assert!(!md.contains("grade A"));
+        assert!(!md.contains("100/100"));
     }
 
     #[test]
