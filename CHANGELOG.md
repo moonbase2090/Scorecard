@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Opt-in overall scores and letter grades in reports with `--overall-score` or `overall_score = true`. `sc badge` emits Shields.io endpoint JSON from a saved report.
 - Reports set `analyzer_error` when an analyzer cannot finish. Terminal, Markdown, and HTML show `ERROR`. `sc badge` prints `error` with no letter when `analyzer_error` is set, and a letter grade for a finished run.
 - Local cargo-binstall metadata for both release binaries and a checker that verifies every target with dry runs. Registry publication remains disabled.
+- Rust projects can set `commands.test_args` to pass extra arguments through to `cargo test` and `cargo llvm-cov`, and `budget_seconds` to set the analysis wall-clock budget. `--budget-seconds` still overrides the config. Unset keys keep the previous test command and the 120-second budget. The GitHub Action omits `--budget-seconds` when its `budget-seconds` input is empty, so the project config applies.
 
 ### Fixed
 

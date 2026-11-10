@@ -101,8 +101,10 @@ struct AnalyzeArgs {
     #[arg(long)]
     intent: Option<String>,
     /// Wall-clock budget for pack commands, in seconds.
-    #[arg(long, default_value_t = 120)]
-    budget_seconds: u64,
+    /// Overrides `budget_seconds` in analyzer.toml. When omitted, that key is
+    /// used, or 120 when the key is unset.
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u64).range(1..))]
+    budget_seconds: Option<u64>,
     /// Path to analyzer.toml. Default: ./analyzer.toml, then ~/.config/sc/analyzer.toml.
     #[arg(long)]
     config: Option<PathBuf>,
@@ -402,7 +404,7 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
             root,
             repo,
             fail_on,
-            budget: Duration::from_secs(budget_seconds),
+            budget: Duration::from_secs(budget_seconds.unwrap_or(loaded.budget_seconds)),
             config: loaded,
             diff_base: diff,
             diff_head,
