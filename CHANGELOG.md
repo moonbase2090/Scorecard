@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Opt-in overall scores and letter grades in reports with `--overall-score` or `overall_score = true`. `sc badge` emits Shields.io endpoint JSON from a saved report.
+- Reports set `analyzer_error` when an analyzer cannot finish. Terminal, Markdown, and HTML show `ERROR`. `sc badge` prints `error` with no letter when `analyzer_error` is set, and a letter grade for a finished run.
 - Local cargo-binstall metadata for both release binaries and a checker that verifies every target with dry runs. Registry publication remains disabled.
 
 ### Fixed

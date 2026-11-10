@@ -15,7 +15,7 @@ The header: `sc` version, analyzed path, [pack](packs.md), git commit, and Git s
 PASS  2 advisory gates failing
 ```
 
-The verdict. `PASS` means every enforced gate passed. Advisory gates can still fail under a `PASS`; the note counts them. `FAIL` means at least one enforced gate failed. `--fail-on` controls the process exit code, so it can be 0 while the report says `FAIL` if an enforced failure is not selected. In that case, `sc` writes one stderr warning with the failed gate names. Naming an advisory gate can enforce it; omitting an already enforced gate from the exit list does not change the report verdict. `--fail-on none` selects no exit gates and leaves enforced failures visible: terminal, Markdown, and HTML still show `FAIL`, and stderr names the failed gates, even though the process exits 0. `REPORT ONLY` is reserved for reports where no provided gate is enforced and at least one advisory gate fails. An empty or blank selection is invalid. Omit `--fail-on` and `gates.fail_on` to use the defaults.
+The verdict. `PASS` means every enforced gate passed. Advisory gates can still fail under a `PASS`; the note counts them. `FAIL` means at least one enforced gate failed. `--fail-on` controls the process exit code, so it can be 0 while the report says `FAIL` if an enforced failure is not selected. In that case, `sc` writes one stderr warning with the failed gate names. Naming an advisory gate can enforce it; omitting an already enforced gate from the exit list does not change the report verdict. `--fail-on none` selects no exit gates and leaves enforced failures visible: terminal, Markdown, and HTML still show `FAIL`, and stderr names the failed gates, even though the process exits 0. `REPORT ONLY` is reserved for reports where no provided gate is enforced and at least one advisory gate fails. An empty or blank selection is invalid. Omit `--fail-on` and `gates.fail_on` to use the defaults. `ERROR` means an analyzer could not finish. JSON keeps `verdict` as `fail` and sets `analyzer_error` to `true`. Terminal, Markdown, and HTML show `ERROR` and the line "analyzer error: no letter grade; a check did not finish. Run `sc analyze .` again." Dimension scores stay in the report, and they are not a grade.
 
 ```text
 gates
@@ -67,7 +67,7 @@ engines skipped: complexity, mutation, llm
 exit 0: enforced gates passed
 ```
 
-Which checks ran, which did not, and the exit status. An engine is skipped when its tool is missing or when it is off by default (`mutation`, `llm`, `spec`). A skip caused by a missing tool also appears as an `engine.unavailable` finding with the reason.
+Which checks ran, which did not, and the exit status. An engine is skipped when its tool is missing or when it is off by default (`mutation`, `llm`, `spec`). A skip caused by a missing tool also appears as an `engine.unavailable` finding with the reason. `ERROR` is the label when a check could not finish (exit 2).
 
 When a terminal runs `sc analyze` and `.sc/last-scorecard.json` holds a report for the same repository, one stderr line says what changed since that run: each score that moved, and how many findings are new or resolved. Captured output and CI logs do not get the line.
 
@@ -106,6 +106,25 @@ jq -e '.schemaVersion == 1 and .label == "scorecard" and .message == "A (100/100
 
 Badge colors are brightgreen for A, green for B, yellow for C, orange for D, and red for F. The command exits 2 when the report cannot be read, its dimensions are invalid, or no engines ran. Generate a report with `sc analyze .` before retrying.
 
+## Analyzer errors and the badge
+
+When any analyzer errors, the JSON report sets `analyzer_error` to `true`. The field is omitted when the run finishes. A finished run can still fail gates. That report has no `analyzer_error` field, and its badge may show a letter grade. An unfinished run must not. `--overall-score` does not add an `overall` object on an analyzer error.
+
+An `analyzer_error` report gets this badge instead, with no letter:
+
+```json
+{"schemaVersion":1,"label":"scorecard","message":"error","color":"lightgrey"}
+```
+
+```bash doctest
+sc analyze does-not-exist --format json > report.json || test $? -eq 2
+jq -e '.analyzer_error == true and .verdict == "fail"' report.json
+sc badge --input report.json > badge.json
+jq -e '.schemaVersion == 1 and .label == "scorecard" and .message == "error" and .color == "lightgrey"' badge.json
+```
+
+`sc badge` exits 0 for that badge. The error state is the badge, and the command itself succeeded.
+
 ## Dispositions
 
 Each JSON finding has a `disposition` that tells an agent what to do:
@@ -122,7 +141,8 @@ Top-level fields of `.sc/last-scorecard.json` and `--format json`:
 
 | Field | Contents |
 |---|---|
-| `verdict` | `pass` or `fail` |
+| `verdict` | `pass` or `fail`. An analyzer error keeps `fail` and sets `analyzer_error` |
+| `analyzer_error` | `true` when an analyzer could not finish. Omitted otherwise. The badge then says `error` and shows no letter grade |
 | `fail_on` | Gate ids whose failures set exit 1; an empty list means `none` was selected |
 | `pack`, `repo`, `scope` | What was analyzed |
 | `git` | `head`, `dirty`, and `dirty_paths` (all changed paths relative to the repository root; omitted when clean) |

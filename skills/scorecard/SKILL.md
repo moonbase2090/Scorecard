@@ -52,7 +52,7 @@ Command flags override matching config settings. Every run writes `.sc/last-scor
 
 ### `sc badge [--input PATH]`
 
-Read saved dimension scores from `PATH` (default `.sc/last-scorecard.json`) and print Shields.io endpoint JSON without scanning or network access. The overall score equally averages all five dimensions, rounds to 0 to 100, and grades A at 90, B at 80, C at 70, D at 60, and F below 60. This summarizes findings; skipped engines can leave dimensions unpenalized. Gates still decide the verdict. Exit 2 means the report is missing or invalid, no engines ran, or output failed.
+Read saved dimension scores from `PATH` (default `.sc/last-scorecard.json`) and print Shields.io endpoint JSON without scanning or network access. The overall score equally averages all five dimensions, rounds to 0 to 100, and grades A at 90, B at 80, C at 70, D at 60, and F below 60. This summarizes findings; skipped engines can leave dimensions unpenalized. Gates still decide the verdict. When the report has `analyzer_error` set, the badge message is `error` and there is no letter grade, even if the dimension scores are perfect. Exit 2 means the report is missing or invalid, no engines ran, or a dimension is outside 0 to 1. An analyzer error still exits 0: the badge shows `error`.
 
 Verify changes to overall scoring with `cargo test -p sc-core --lib overall` and `cargo test -p sc-cli --test overall`. Then analyze a real project with `--overall-score --format all --out REPORT`, check the JSON `overall` against the displayed rows, and run `sc badge --input REPORT.json` to inspect the badge.
 
@@ -137,7 +137,7 @@ Unknown config keys are ignored. Check spelling against the config reference bef
 
 ## Read the result
 
-Exit `0` means no selected gate failed. `--fail-on none` deliberately selects no gates. Exit `1` means a selected gate failed. Exit `2` means Scorecard could not run, commonly because a path, config, required toolchain, or gate selection is invalid. Empty or blank `--fail-on` and `gates.fail_on` values are invalid; omit the setting to use the default gates. If an enforced gate fails but is not selected, Scorecard writes one stderr warning with the failed gate names. The report verdict remains `fail`; inspect every gate's `enforced` and `pass` values.
+Exit `0` means no selected gate failed. `--fail-on none` deliberately selects no gates. Exit `1` means a selected gate failed. Exit `2` means Scorecard could not run, commonly because a path, config, required toolchain, or gate selection is invalid. Empty or blank `--fail-on` and `gates.fail_on` values are invalid; omit the setting to use the default gates. If an enforced gate fails but is not selected, Scorecard writes one stderr warning with the failed gate names. The report verdict remains `fail`; inspect every gate's `enforced` and `pass` values. Exit 2 also sets `analyzer_error` to `true`. Do not treat the dimension scores as a grade for that report. `sc badge` prints `error` instead of a letter.
 
 Use `--format json` for automation, `--format pretty` for a terminal, `--format md` for a concise shareable report, `--format sarif` for GitHub code scanning, and `--format html --out report.html` for a self-contained browser report. Findings marked with disposition `fix` need attention; advisory findings may not affect the process exit.
 

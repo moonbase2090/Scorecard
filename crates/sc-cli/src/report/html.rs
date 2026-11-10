@@ -22,7 +22,7 @@ pub fn to_html(card: &Scorecard) -> String {
     out.push_str(&esc(&format!(
         "scorecard: {} — {}",
         card.identity.repo,
-        Outcome::of(card).word(card)
+        super::verdict_label(card).word
     )));
     out.push_str("</title>\n<style>\n");
     out.push_str(CSS);
@@ -94,6 +94,8 @@ letter-spacing:.06em}
 border:1px solid var(--ok)}
 .verdict.fail{background:rgba(255,122,144,.12);color:var(--bad);
 border:1px solid var(--bad)}
+.verdict.error{background:rgba(255,207,110,.16);color:var(--warn);
+border:1px solid var(--warn)}
 .verdict.report{background:rgba(110,168,255,.12);color:#c9d9ff;
 border:1px solid var(--accent)}
 details{margin-top:4px}
@@ -167,15 +169,12 @@ footer{margin-top:32px;color:var(--dim);font-size:11.5px;text-align:center}
 
 fn hero(out: &mut String, card: &Scorecard) {
     let outcome = Outcome::of(card);
-    let (cls, label) = match outcome {
-        Outcome::Fail => ("fail", "FAIL"),
-        Outcome::ReportOnly(_) => ("report", "REPORT ONLY"),
-        Outcome::Pass | Outcome::Advisory(_) => ("pass", "PASS"),
-    };
+    let label = super::verdict_label(card);
+    let (cls, text) = (label.class, label.badge);
     out.push_str("<h1>scorecard</h1>\n<div class=\"card\"><div class=\"hero\">");
     out.push_str(&format!(
         "<span class=\"verdict {cls}\">{}</span>",
-        esc(label)
+        esc(text)
     ));
     out.push_str("<div><div style=\"font-size:16px;font-weight:700\">");
     out.push_str(&esc(&card.identity.repo));
@@ -222,7 +221,13 @@ fn hero(out: &mut String, card: &Scorecard) {
     if let Some(line) = rest_of_tree(card) {
         meta(out, "rest of tree", &esc(&line));
     }
-    out.push_str("</div></div>\n");
+    out.push_str("</div>");
+    if card.analyzer_error {
+        out.push_str("<p class=\"suggest\">");
+        out.push_str(&esc(super::ANALYZER_ERROR_NOTE));
+        out.push_str("</p>");
+    }
+    out.push_str("</div>\n");
 }
 
 /// Tree scope lists every file in the tree, which buries the report.
@@ -332,12 +337,12 @@ fn pipeline(out: &mut String, card: &Scorecard) {
     step(out, "gates", &ratio, 0, true);
     out.push_str("<div class=\"sep\">→</div>");
     out.push_str("<div class=\"step");
-    let outcome = Outcome::of(card);
-    if matches!(outcome, Outcome::Pass | Outcome::Advisory(_)) {
+    let label = super::verdict_label(card);
+    if label.word == "pass" {
         out.push_str(" hi");
     }
     out.push_str("\"><b>verdict</b><span>");
-    out.push_str(&esc(outcome.word(card)));
+    out.push_str(&esc(label.word));
     out.push_str("</span></div></div>\n");
 }
 
@@ -1371,6 +1376,23 @@ mod tests {
         let html = to_html(&c);
         assert!(html.contains("<span class=\"verdict fail\">FAIL</span>"));
         assert!(!html.contains("REPORT ONLY"));
+    }
+
+    #[test]
+    fn html_shows_error_and_no_letter_grade_when_an_analyzer_failed() {
+        let mut c = card();
+        c.analyzer_error = true;
+        c.verdict = "fail".into();
+        c.measures.scores = sc_core::Scores::perfect();
+        c.engines.engines_run.push("secrets".into());
+        let html = to_html(&c);
+        assert!(html.contains("<span class=\"verdict error\">ERROR</span>"));
+        assert!(html.contains("<div class=\"step\"><b>verdict</b><span>error</span>"));
+        assert!(html.contains("— error</title>"));
+        assert!(html.contains(crate::report::ANALYZER_ERROR_NOTE));
+        assert!(!html.contains("verdict fail"));
+        assert!(!html.contains("grade A"));
+        assert!(!html.contains("100/100"));
     }
 
     #[test]
