@@ -1,11 +1,11 @@
-sc 0.1.15  testdata/good_crate  rust  GITSHA STATE  scope tree
+sc 0.2.0  testdata/good_crate  rust  GITSHA STATE  scope tree
 
 PASS
 
 gates
   [ok]  types            enforced
   [ok]  tests            enforced
-  [ok]  crap             enforced
+  [ok]  crap             advisory
   [ok]  sca              advisory
   [ok]  secrets          enforced
   [ok]  lint             enforced

@@ -12,6 +12,8 @@ Before publish, CI runs `scripts/check-release-text.sh` on those sources plus bu
 
 ## Maintainer checklist
 
+Registry publication is disabled. After the release assets are published, verify the binary download metadata with `python3 scripts/check-binstall.py`; it runs `cargo-binstall --dry-run` against both binary manifests and every release target without installing binaries. See [cargo-binstall checks and registry prerequisites](docs/how-to/cargo-binstall.md). Do not treat a passing binary check as a successful `cargo publish --dry-run`.
+
 1. Move `[Unreleased]` entries in `CHANGELOG.md` into the version section for the tag.
 2. Confirm tag message and GitHub release title/body contain no private details.
 3. Push the tag; wait for the release workflow (signing must succeed before publish).

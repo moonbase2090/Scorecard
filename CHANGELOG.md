@@ -4,10 +4,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-10
+
+### Changed
+
+- The optional `tui` build of `sc tui` follows lunatui `c47b6e98`. Empty cells inside a block keep that line's color. The feature stays off unless the build enables `tui`.
+- The `crap` gate is advisory by default (minor release). `gates.fail_on` and `--fail-on` default to `types,tests,secrets,lint`; a CRAP failure is reported with its findings and worst-CRAP table, and changes neither the verdict nor the exit code. Name `crap` in `fail_on` to enforce it again. The GitHub Action's `fail-on` default, the example config, the docs and the agent skill follow the advisory default. This repository's own `analyzer.toml` is an explicit exception: it keeps `crap` in `fail_on`, so its self-analysis still enforces CRAP. The CRAP engine, thresholds, findings and scores are unchanged.
+
 ### Added
 
+- Opt-in overall scores and letter grades in reports with `--overall-score` or `overall_score = true`. `sc badge` emits Shields.io endpoint JSON from a saved report.
+- Reports set `analyzer_error` when an analyzer cannot finish. Terminal, Markdown, and HTML show `ERROR`. `sc badge` prints `error` with no letter when `analyzer_error` is set, and a letter grade for a finished run.
+- Local cargo-binstall metadata for both release binaries and a checker that verifies every target with dry runs. Registry publication remains disabled.
 - `install.sh` downloads the release archive for the host OS and architecture, verifies `SHA256SUMS`, and installs `sc` and `sc-mcp` into `~/.local/bin`.
 - A multi-stage Dockerfile builds a small runtime image. CI builds it on pull requests and pushes `ghcr.io/moonbase2090/scorecard` on release tags.
+- Rust projects can set `commands.test_args` to pass extra arguments through to `cargo test` and `cargo llvm-cov`, and `budget_seconds` to set the analysis wall-clock budget. `--budget-seconds` still overrides the config. Unset keys keep the previous test command and the 120-second budget. The GitHub Action omits `--budget-seconds` when its `budget-seconds` input is empty, so the project config applies.
+
+### Fixed
+
+- A long symbol on a terminal finding line no longer hides the file name. The location and the symbol are elided separately, and a shortened path keeps its whole file name and line number. On a narrow terminal, the CRAP table's symbol column shrinks before the location loses the file name.
 
 ## [0.1.15] - 2026-10-29
 

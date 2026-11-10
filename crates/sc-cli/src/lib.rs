@@ -3,6 +3,7 @@
 //!
 //! User-facing analyze output is the scorecard, rendered as JSON and/or Markdown.
 
+mod badge;
 mod console;
 mod doctor;
 mod format;
@@ -47,6 +48,9 @@ struct Cli {
 
 #[derive(Args)]
 struct AnalyzeArgs {
+    /// Include the overall finding-based score and A-F grade in reports.
+    #[arg(long)]
+    overall_score: bool,
     /// Project directory. Defaults to `.`.
     path: Option<PathBuf>,
     /// `json`, `pretty`, `md`, `sarif`, `html`, or `all`.
@@ -59,7 +63,7 @@ struct AnalyzeArgs {
     out: Option<PathBuf>,
     /// Gates that set exit 1 when they fail. Use `none` by itself to suppress every gate failure.
     /// An empty list is invalid. The report verdict still reflects every enforced gate.
-    /// Default: types,tests,crap,secrets,lint.
+    /// Default: types,tests,secrets,lint. `crap` is advisory unless named here.
     #[arg(long, value_name = "LIST")]
     fail_on: Option<String>,
     /// Write every finding's fingerprint to `.sc/baseline.json` in the project.
@@ -97,8 +101,10 @@ struct AnalyzeArgs {
     #[arg(long)]
     intent: Option<String>,
     /// Wall-clock budget for pack commands, in seconds.
-    #[arg(long, default_value_t = 120)]
-    budget_seconds: u64,
+    /// Overrides `budget_seconds` in analyzer.toml. When omitted, that key is
+    /// used, or 120 when the key is unset.
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u64).range(1..))]
+    budget_seconds: Option<u64>,
     /// Path to analyzer.toml. Default: ./analyzer.toml, then ~/.config/sc/analyzer.toml.
     #[arg(long)]
     config: Option<PathBuf>,
@@ -147,6 +153,12 @@ enum ConfigCmd {
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum Commands {
+    /// Print Shields.io endpoint JSON for a saved report. An analyzer error has no letter grade.
+    Badge {
+        /// Saved scorecard JSON. Defaults to `.sc/last-scorecard.json` in the current directory.
+        #[arg(long, default_value = ".sc/last-scorecard.json")]
+        input: PathBuf,
+    },
     /// Export findings from a saved report to an external tracker.
     Export(ExportArgs),
     /// Browse a saved scorecard in an interactive terminal.
@@ -211,6 +223,7 @@ pub fn run() -> i32 {
     let _vt = console::enable_console_vt();
     let cli = Cli::parse();
     match cli.command {
+        Commands::Badge { input } => badge::run(&input),
         Commands::Export(args) => waypoint_export::run(args),
         Commands::Doctor { path, pack } => doctor::run(path, pack),
         #[cfg(feature = "tui")]
@@ -229,6 +242,7 @@ pub fn run() -> i32 {
 
 fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
     let AnalyzeArgs {
+        overall_score,
         path,
         format,
         out,
@@ -314,13 +328,7 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
             Err(err) => {
                 let _ = writeln!(io::stderr(), "sc: {err}");
                 let card = early_card(&repo, "baseline.invalid", "baseline", &err);
-                return emit(
-                    &mut stdout,
-                    &view,
-                    out.as_deref(),
-                    &card,
-                    RunStatus::AnalyzerError,
-                );
+                return emit_analyzer_error(&mut stdout, &view, out.as_deref(), Some(&root), &card);
             }
         }
     } else {
@@ -333,13 +341,7 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
         Err(err) => {
             let _ = writeln!(io::stderr(), "sc: {err}");
             let card = early_card(&repo, "config.invalid", "config", &err);
-            return emit(
-                &mut stdout,
-                &view,
-                out.as_deref(),
-                &card,
-                RunStatus::AnalyzerError,
-            );
+            return emit_analyzer_error(&mut stdout, &view, out.as_deref(), Some(&root), &card);
         }
     };
 
@@ -349,17 +351,12 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
             Err(err) => {
                 let _ = writeln!(io::stderr(), "sc: {err}");
                 let card = early_card(&repo, "config.invalid", "config", &err);
-                return emit(
-                    &mut stdout,
-                    &view,
-                    out.as_deref(),
-                    &card,
-                    RunStatus::AnalyzerError,
-                );
+                return emit_analyzer_error(&mut stdout, &view, out.as_deref(), Some(&root), &card);
             }
         }
     }
 
+    loaded.overall_score |= overall_score;
     if let Some(pack) = pack {
         loaded.pack = pack;
     }
@@ -379,13 +376,7 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
                     "config",
                     &format!("cannot read paths file: {err}"),
                 );
-                return emit(
-                    &mut stdout,
-                    &view,
-                    out.as_deref(),
-                    &card,
-                    RunStatus::AnalyzerError,
-                );
+                return emit_analyzer_error(&mut stdout, &view, out.as_deref(), Some(&root), &card);
             }
         },
         None => Vec::new(),
@@ -413,7 +404,7 @@ fn analyze_cmd(args: AnalyzeArgs, vt_ready: bool) -> i32 {
             root,
             repo,
             fail_on,
-            budget: Duration::from_secs(budget_seconds),
+            budget: Duration::from_secs(budget_seconds.unwrap_or(loaded.budget_seconds)),
             config: loaded,
             diff_base: diff,
             diff_head,
@@ -534,6 +525,12 @@ fn finish_baseline(output: &mut AnalyzeOutput, write: bool, known: Option<&Basel
             Err(err) => {
                 let _ = writeln!(io::stderr(), "sc: {err}");
                 output.status = RunStatus::AnalyzerError;
+                output.scorecard.analyzer_error = true;
+                output.scorecard.measures.overall = None;
+                output.scorecard.verdict = "fail".into();
+                if let Some(root) = file.parent().and_then(|dir| dir.parent()) {
+                    save_last_scorecard(root, &output.scorecard);
+                }
             }
         }
     }
@@ -793,8 +790,30 @@ fn early_card(repo: &str, rule: &str, engine: &str, message: &str) -> Scorecard 
     ];
     card.measures.scores = compute_scores(&card.sections.findings);
     card.verdict = "fail".into();
+    card.analyzer_error = true;
     apply_disposition(&mut card.sections.findings);
     card
+}
+
+fn save_last_scorecard(root: &Path, card: &Scorecard) {
+    let path = root.join(".sc").join("last-scorecard.json");
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(path, format!("{}\n", to_json(card)));
+}
+
+fn emit_analyzer_error(
+    stdout: &mut impl Write,
+    view: &View<'_>,
+    out: Option<&Path>,
+    root: Option<&Path>,
+    card: &Scorecard,
+) -> i32 {
+    if let Some(root) = root {
+        save_last_scorecard(root, card);
+    }
+    emit(stdout, view, out, card, RunStatus::AnalyzerError)
 }
 
 #[cfg(test)]

@@ -204,6 +204,10 @@ fn enforced_gate() -> bool {
     true
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Metrics {
     pub loc_changed: u64,
@@ -518,6 +522,9 @@ pub struct ScorecardEngines {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScorecardMeasures {
     pub scores: Scores,
+    /// Opt-in finding-based summary. Older reports omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overall: Option<crate::OverallScore>,
     pub gates: Vec<Gate>,
     pub metrics: Metrics,
 }
@@ -547,6 +554,10 @@ pub struct Scorecard {
     #[serde(flatten)]
     pub context: ScorecardContext,
     pub verdict: String,
+    /// Set when an analyzer could not finish. Omitted when false so older
+    /// reports stay valid. Letter grades are not meaningful for this run.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub analyzer_error: bool,
     #[serde(flatten)]
     pub engines: ScorecardEngines,
     #[serde(flatten)]
@@ -585,6 +596,7 @@ impl Scorecard {
                 },
             },
             verdict: "fail".to_string(),
+            analyzer_error: false,
             engines: ScorecardEngines {
                 engines_run: Vec::new(),
                 engines_skipped: vec![
@@ -599,6 +611,7 @@ impl Scorecard {
             },
             measures: ScorecardMeasures {
                 scores: Scores::perfect(),
+                overall: None,
                 gates: Vec::new(),
                 metrics: Metrics::zeros(),
             },
@@ -791,12 +804,14 @@ mod tests {
                 },
             },
             verdict: "fail".into(),
+            analyzer_error: false,
             fail_on: vec!["types".into(), "tests".into()],
             engines: ScorecardEngines {
                 engines_run: vec!["compile".into(), "tests".into()],
                 engines_skipped: vec!["llm".into(), "mutation".into()],
             },
             measures: ScorecardMeasures {
+                overall: None,
                 scores: Scores {
                     correctness: 0.62,
                     efficiency: 0.81,
@@ -950,5 +965,21 @@ mod tests {
         assert_eq!(finding["span"]["start_line"], 42);
         assert_eq!(finding["evidence"]["cc"], 12);
         assert_eq!(finding["evidence"]["crap"], 156.0);
+    }
+
+    #[test]
+    fn analyzer_error_is_recorded_only_when_a_check_did_not_finish() {
+        let mut card = Scorecard::skeleton("demo", 30);
+        card.measures.scores = Scores::perfect();
+        let quiet = serde_json::to_value(&card).unwrap();
+        assert!(quiet.get("analyzer_error").is_none());
+        let reloaded: Scorecard = serde_json::from_value(quiet).unwrap();
+        assert!(!reloaded.analyzer_error);
+
+        card.analyzer_error = true;
+        let marked = serde_json::to_value(&card).unwrap();
+        assert_eq!(marked["analyzer_error"], true);
+        assert_eq!(marked["scores"]["correctness"], 1.0);
+        assert_eq!(marked["verdict"], "fail");
     }
 }

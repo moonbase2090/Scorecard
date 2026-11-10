@@ -24,7 +24,7 @@ When several markers match, the run stays ambiguous unless only one of those lan
 
 The web pack needs no external tools. It parses HTML with `html5ever`, checks internal `href` and `src` paths against the tree, and scores CRAP on `.js` files and inline scripts. Secrets use the same patterns as the other packs. The `html` gate is enforced when `fail_on` is the built-in list or names `html`. Set `[html] enforce = "off"` to report markup without failing the process, or `"on"` to enforce it on a custom `fail_on` list. The `links` gate is advisory unless `fail_on` names `links` or `[links] enforce = true`. Accessibility checks are the `a11y` engine. See `docs/a11y.md`. The gate is advisory unless `fail_on` names `a11y` or `[a11y] enforce = true`.
 
-A gate with `enforced: false` is reported and does not fail the process. Rust enforces types, tests, CRAP, secrets, and lint. An undeclared dependency is advisory (`sca`) and does not change the exit code. Python enforces `python3 -m compileall`, pytest when a suite is present (`test/`, `tests/`, a root `test_*.py` or `*_test.py`, or a pytest config), Ruff, secrets, and CRAP. A local Python module is not a finding. Imports are read from code, not from docstrings or comments. `_typeshed`, `import setuptools` in `setup.py`, and an import inside `try` / `except ImportError` are not findings. A dependency named in `pyproject.toml`, `requirements.txt`, `setup.cfg`, or `setup.py` `install_requires` is declared. An installed or published import missing from those files is the same advisory (`sca.undeclared_dependency`). `sca.hallucinated_import` is only a name that resolves nowhere. Python first tries `pytest --cov`, then falls back to `coverage.py` when needed. The other packs use the same CRAP formula.
+A gate with `enforced: false` is reported and does not fail the process. Rust enforces types, tests, secrets, and lint; CRAP is reported and advisory unless `fail_on` names `crap`. An undeclared dependency is advisory (`sca`) and does not change the exit code. Python enforces `python3 -m compileall`, pytest when a suite is present (`test/`, `tests/`, a root `test_*.py` or `*_test.py`, or a pytest config), Ruff, and secrets. CRAP is advisory unless `fail_on` names `crap`. A local Python module is not a finding. Imports are read from code, not from docstrings or comments. `_typeshed`, `import setuptools` in `setup.py`, and an import inside `try` / `except ImportError` are not findings. A dependency named in `pyproject.toml`, `requirements.txt`, `setup.cfg`, or `setup.py` `install_requires` is declared. An installed or published import missing from those files is the same advisory (`sca.undeclared_dependency`). `sca.hallucinated_import` is only a name that resolves nowhere. Python first tries `pytest --cov`, then falls back to `coverage.py` when needed. The other packs use the same CRAP formula.
 
 | Pack | Coverage report |
 |---|---|
@@ -38,7 +38,7 @@ A gate with `enforced: false` is reported and does not fail the process. Rust en
 
 ### Gate matrix
 
-Each row lists the gates a pack runs. **Enforced** gates set exit 1 when they fail (the default `fail_on` list is `types,tests,crap,secrets,lint`). **Advisory** gates are reported and do not change the exit code. A gate marked *when the tool is present* is advisory on a machine without that tool, with the reason the report gives. Coverage source is the report the `crap` gate reads.
+Each row lists the gates a pack runs. **Enforced** gates set exit 1 when they fail (the default `fail_on` list is `types,tests,secrets,lint`; `crap` is advisory unless `fail_on` names it). **Advisory** gates are reported and do not change the exit code. A gate marked *when the tool is present* is advisory on a machine without that tool, with the reason the report gives. Coverage source is the report the `crap` gate reads.
 
 | Pack | Enforced | Advisory | Coverage source |
 |---|---|---|---|
@@ -64,7 +64,7 @@ Node checks JavaScript with `node --check`. When a `.ts` or `.tsx` file is prese
 
 `--diff` selects Rust `#[test]` names (`test_selection` is `rust-tests`). At a workspace root, `--diff` runs matching tests with `cargo test --workspace`, at most eight names; an empty set or a larger set runs the full workspace suite. When analyzing one workspace member, Cargo tests stay scoped to that package. The Python pack compiles, lints, and checks imports only in changed `.py` files, and runs pytest only on changed `test_*.py` and `*_test.py` files (`test_selection` is `diff-tests`). A diff with no Python tests does not run the rest of the suite. Secret findings are kept when their path changed. The other packs still use the full suite.
 
-At a Cargo workspace root, `sc` runs `cargo check --workspace`, `cargo test --workspace`, `cargo llvm-cov --workspace`, and `cargo clippy --workspace`. When analyzing one member, those commands run only for that package, so failures in siblings do not fail the run. A standalone package is its own workspace root. `--diff` and `--paths` narrow the CRAP gate. Mutation, the spec check, and the LLM review are off unless you ask for them. A Cargo workspace is scored from each member's `src` directory, found with `cargo metadata`. A top-level `src` is included when it exists.
+At a Cargo workspace root, `sc` runs `cargo check --workspace`, `cargo test --workspace`, `cargo llvm-cov --workspace`, and `cargo clippy --workspace`. `commands.test_args` is appended to `cargo test` and `cargo llvm-cov` (cargo options, then `--`, then harness options). When analyzing one member, those commands run only for that package, so failures in siblings do not fail the run. A standalone package is its own workspace root. `--diff` and `--paths` narrow the CRAP gate. Mutation, the spec check, and the LLM review are off unless you ask for them. A Cargo workspace is scored from each member's `src` directory, found with `cargo metadata`. A top-level `src` is included when it exists.
 
 Flags, output formats, and exit status are in the [CLI reference](reference/cli.md).
 
@@ -75,7 +75,7 @@ Flags, output formats, and exit status are in the [CLI reference](reference/cli.
 | `testdata/failing_test` | Failing unit test. Exit 1, verdict `fail`, finding `test.failed` on that test. |
 | `testdata/good_crate` | Small crate that typechecks and passes tests. Exit 0. |
 | `testdata/workspace_src` | Virtual Cargo workspace with no top-level `src`. Exit 0. Scope includes both members, and CRAP is not zero. |
-| `testdata/crap_untested` | CC-heavy `classify`, no tests. Exit 1, finding `crap.over_threshold`. |
+| `testdata/crap_untested` | CC-heavy `classify`, no tests. Exit 0 with the `crap` gate advisory, finding `crap.over_threshold`; exit 1 when `--fail-on` names `crap`. |
 | `testdata/crap_tested` | The same `classify` with tests that cover its branches. Exit 0 when llvm-cov is installed. |
 | `testdata/fake_dep` | Uses `missing_crate` under `cfg(any())`. Exit 0. Warning `sca.undeclared_dependency`, disposition `ask`. |
 | `testdata/local_mod` | `pub use` of a local `mod`. Exit 0. No dependency finding. |

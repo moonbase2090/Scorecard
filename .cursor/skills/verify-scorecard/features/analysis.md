@@ -44,7 +44,9 @@ assert json.loads((p / 'report-only.saved.json').read_text()) == json.loads((p /
 assert json.loads((p / 'report-only.stdout').read_text())['fail_on'] == []
 missing = json.loads((p / 'missing.stdout').read_text())
 assert missing['verdict'] == 'fail'
+assert missing['analyzer_error'] is True
 assert any(f['rule'] == 'engine.unavailable' and 'path does not exist' in f['message'] for f in missing['findings'])
+assert 'analyzer_error' not in clean
 assert not (pathlib.Path(os.environ['sc_scratch']) / 'does-not-exist').exists()
 assert 'html' in (p / 'report-only.stderr').read_text()
 CHECK

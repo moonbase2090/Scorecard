@@ -26,13 +26,13 @@ Every run generates JSON, Markdown, SARIF, and HTML reports, emits finding annot
 
 | Input | Default | Meaning |
 |---|---|---|
-| `fail-on` | `types,tests,crap,secrets,lint` | Comma-separated gates whose failures fail the job. Use `none` by itself to suppress gate failures from the exit code. Empty is invalid. |
+| `fail-on` | `types,tests,secrets,lint` | Comma-separated gates whose failures fail the job. Use `none` by itself to suppress gate failures from the exit code. Empty is invalid. |
 | `diff` | `""` | Base ref for `--diff`. Empty scores the whole tree. On a pull request, pass the base ref so the report covers changed code and a one-line count of the rest of the tree. |
 | `format` | `sarif` | Upload selection: `sarif` uploads code scanning results on public repositories; `html` uploads all reports as an artifact; `all` does both; `json` and `md` skip uploads. Every selection generates all reports, annotations, and the job summary. |
 | `spec` | `""` | Path for `--spec` |
 | `mutation` | `off` | `off`, `diff`, or `full` |
 | `version` | the action's tag | `sc` release to install, such as `0.1.10` |
-| `budget-seconds` | `120` | Wall-clock budget for pack commands (`--budget-seconds` on `sc analyze`) |
+| `budget-seconds` | empty | Passed as `--budget-seconds` when set. Empty uses `budget_seconds` in the project's `analyzer.toml`, or 120 when that key is unset. |
 
 The runner needs the tools your pack uses (a Rust toolchain, Python with pytest, and so on); see [packs](../packs.md). A missing coverage tool does not fail the job, and the report says coverage was not measured.
 
@@ -70,4 +70,4 @@ export PATH="$HOME/.local/bin:$PATH"
 sc analyze . --format all --out sc-report --budget-seconds 600 >/dev/null
 ```
 
-The exit status is the gate result (0 pass, 1 fail, 2 could not run). Keep `sc-report.html` as a build artifact and upload `sc-report.sarif` to any SARIF viewer. `--budget-seconds` raises the 120-second wall-clock budget for pack commands when the suite is slow.
+The exit status is the gate result (0 pass, 1 fail, 2 could not run). Keep `sc-report.html` as a build artifact and upload `sc-report.sarif` to any SARIF viewer. `--budget-seconds` raises the wall-clock budget for pack commands when the suite is slow. Omit it to use `budget_seconds` from `analyzer.toml` (120 when unset).

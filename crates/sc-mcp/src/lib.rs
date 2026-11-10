@@ -168,7 +168,7 @@ fn analyze_crate(
         root,
         repo: ".".into(),
         fail_on: config.gates.fail_on.clone(),
-        budget: Duration::from_secs(120),
+        budget: Duration::from_secs(config.budget_seconds),
         diff_base,
         diff_head,
         path_list,

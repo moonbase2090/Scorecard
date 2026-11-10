@@ -7,15 +7,23 @@
 # Install the Scorecard agent skill from automatic installer hooks.
 install_agent_skills = true
 
+# Wall-clock budget for pack commands, in seconds. Minimum 1.
+# --budget-seconds overrides this for one run.
+budget_seconds = 120
+
+# Include the finding-based overall score and grade in reports.
+overall_score = false
+
 # Override detection, or set "multi" for separate language-pack roots in a monorepo.
 # pack = "rust"   # rust, node, python, bash, go, java, csharp, php, cpp, web, command, or multi
 
 [gates]
 # `spec` and `mutation` run only when `--spec` or `--mutation` asks for them.
-fail_on = ["types", "tests", "crap", "secrets", "lint"]
+# `crap` is advisory by default. Add "crap" to enforce it.
+fail_on = ["types", "tests", "secrets", "lint"]
 crap_threshold = 30
-# Every function in scope at or above this CC with 0% coverage fails the crap
-# gate (`complexity.untested`). With --diff, only new functions count.
+# Every function in scope at or above this CC with 0% coverage is reported by the
+# crap gate (`complexity.untested`). With --diff, only new functions count.
 new_fn_untested_cc = 15
 
 [scope]
@@ -82,3 +90,9 @@ disable = []
 # A crate that already denies warnings still fails. To deny them here:
 # lint = "cargo clippy --workspace -- -D warnings"
 lint = "cargo clippy --workspace"
+# Extra arguments for Rust `cargo test` and `cargo llvm-cov`.
+# Empty keeps `cargo test` (`--workspace` at a workspace root).
+# Cargo options come first. One `--` then test-harness options.
+# Scorecard sets --workspace, --manifest-path, and --color itself.
+# test_args = ["--locked", "--features", "extra", "--", "--test-threads=1"]
+test_args = []

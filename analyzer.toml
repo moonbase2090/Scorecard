@@ -12,7 +12,8 @@ pack = "rust"
 [scope]
 exclude = ["target/**", "generated/**", "testdata/**"]
 
-# CRAP uses the defaults: threshold 30, untested CC 15.
+# CRAP uses the defaults: threshold 30, untested CC 15. The product default
+# leaves it advisory; this repository enforces it on itself.
 
 [gates]
 fail_on = ["types", "tests", "crap", "secrets", "lint"]

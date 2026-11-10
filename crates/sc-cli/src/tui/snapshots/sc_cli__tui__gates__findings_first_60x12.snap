@@ -89,12 +89,12 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 1:10:1 Rgb(205, 214, 244)
 1:11:1 Rgb(205, 214, 244)
 1:12:1 Rgb(205, 214, 244)
-1:13:1 Default
-1:14:1 Default
-1:15:1 Default
-1:16:1 Default
-1:17:1 Default
-1:18:1 Default
+1:13:1 Rgb(205, 214, 244)
+1:14:1 Rgb(205, 214, 244)
+1:15:1 Rgb(205, 214, 244)
+1:16:1 Rgb(205, 214, 244)
+1:17:1 Rgb(205, 214, 244)
+1:18:1 Rgb(205, 214, 244)
 1:19:1 Default
 1:20:1 Default
 1:21:1 Rgb(205, 214, 244)
@@ -149,12 +149,12 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 2:10:1 Rgb(205, 214, 244)
 2:11:1 Rgb(205, 214, 244)
 2:12:1 Rgb(205, 214, 244)
-2:13:1 Default
-2:14:1 Default
-2:15:1 Default
-2:16:1 Default
-2:17:1 Default
-2:18:1 Default
+2:13:1 Rgb(205, 214, 244)
+2:14:1 Rgb(205, 214, 244)
+2:15:1 Rgb(205, 214, 244)
+2:16:1 Rgb(205, 214, 244)
+2:17:1 Rgb(205, 214, 244)
+2:18:1 Rgb(205, 214, 244)
 2:19:1 Default
 2:20:1 Default
 2:21:1 Default
@@ -209,12 +209,12 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 3:10:1 Rgb(158, 206, 106)
 3:11:1 Rgb(158, 206, 106)
 3:12:1 Rgb(158, 206, 106)
-3:13:1 Default
-3:14:1 Default
-3:15:1 Default
-3:16:1 Default
-3:17:1 Default
-3:18:1 Default
+3:13:1 Rgb(158, 206, 106)
+3:14:1 Rgb(158, 206, 106)
+3:15:1 Rgb(158, 206, 106)
+3:16:1 Rgb(158, 206, 106)
+3:17:1 Rgb(158, 206, 106)
+3:18:1 Rgb(158, 206, 106)
 3:19:1 Default
 3:20:1 Default
 3:21:1 Rgb(158, 206, 106)
@@ -250,11 +250,11 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 3:51:1 Rgb(158, 206, 106)
 3:52:1 Rgb(158, 206, 106)
 3:53:1 Rgb(158, 206, 106)
-3:54:1 Default
-3:55:1 Default
-3:56:1 Default
-3:57:1 Default
-3:58:1 Default
+3:54:1 Rgb(158, 206, 106)
+3:55:1 Rgb(158, 206, 106)
+3:56:1 Rgb(158, 206, 106)
+3:57:1 Rgb(158, 206, 106)
+3:58:1 Rgb(158, 206, 106)
 3:59:1 Default
 4:0:1 Default
 4:1:1 Default
@@ -286,7 +286,7 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 4:27:1 Rgb(158, 206, 106)
 4:28:1 Rgb(158, 206, 106)
 4:29:1 Rgb(158, 206, 106)
-4:30:1 Default
+4:30:1 Rgb(158, 206, 106)
 4:31:1 Rgb(158, 206, 106)
 4:32:1 Rgb(158, 206, 106)
 4:33:1 Rgb(158, 206, 106)
@@ -297,15 +297,15 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 4:38:1 Rgb(158, 206, 106)
 4:39:1 Rgb(158, 206, 106)
 4:40:1 Rgb(158, 206, 106)
-4:41:1 Default
-4:42:1 Default
-4:43:1 Default
-4:44:1 Default
-4:45:1 Default
-4:46:1 Default
-4:47:1 Default
-4:48:1 Default
-4:49:1 Default
+4:41:1 Rgb(158, 206, 106)
+4:42:1 Rgb(158, 206, 106)
+4:43:1 Rgb(158, 206, 106)
+4:44:1 Rgb(158, 206, 106)
+4:45:1 Rgb(158, 206, 106)
+4:46:1 Rgb(158, 206, 106)
+4:47:1 Rgb(158, 206, 106)
+4:48:1 Rgb(158, 206, 106)
+4:49:1 Rgb(158, 206, 106)
 4:50:1 Rgb(158, 206, 106)
 4:51:1 Rgb(158, 206, 106)
 4:52:1 Rgb(158, 206, 106)
@@ -346,7 +346,7 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 5:27:1 Rgb(205, 214, 244)
 5:28:1 Rgb(205, 214, 244)
 5:29:1 Rgb(205, 214, 244)
-5:30:1 Default
+5:30:1 Rgb(205, 214, 244)
 5:31:1 Rgb(205, 214, 244)
 5:32:1 Rgb(205, 214, 244)
 5:33:1 Rgb(205, 214, 244)
@@ -357,15 +357,15 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 5:38:1 Rgb(205, 214, 244)
 5:39:1 Rgb(205, 214, 244)
 5:40:1 Rgb(205, 214, 244)
-5:41:1 Default
-5:42:1 Default
-5:43:1 Default
-5:44:1 Default
-5:45:1 Default
-5:46:1 Default
-5:47:1 Default
-5:48:1 Default
-5:49:1 Default
+5:41:1 Rgb(205, 214, 244)
+5:42:1 Rgb(205, 214, 244)
+5:43:1 Rgb(205, 214, 244)
+5:44:1 Rgb(205, 214, 244)
+5:45:1 Rgb(205, 214, 244)
+5:46:1 Rgb(205, 214, 244)
+5:47:1 Rgb(205, 214, 244)
+5:48:1 Rgb(205, 214, 244)
+5:49:1 Rgb(205, 214, 244)
 5:50:1 Rgb(205, 214, 244)
 5:51:1 Rgb(205, 214, 244)
 5:52:1 Rgb(205, 214, 244)
@@ -406,7 +406,7 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 6:27:1 Rgb(205, 214, 244)
 6:28:1 Rgb(205, 214, 244)
 6:29:1 Rgb(205, 214, 244)
-6:30:1 Default
+6:30:1 Rgb(205, 214, 244)
 6:31:1 Rgb(205, 214, 244)
 6:32:1 Rgb(205, 214, 244)
 6:33:1 Rgb(205, 214, 244)
@@ -417,15 +417,15 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 6:38:1 Rgb(205, 214, 244)
 6:39:1 Rgb(205, 214, 244)
 6:40:1 Rgb(205, 214, 244)
-6:41:1 Default
-6:42:1 Default
-6:43:1 Default
-6:44:1 Default
-6:45:1 Default
-6:46:1 Default
-6:47:1 Default
-6:48:1 Default
-6:49:1 Default
+6:41:1 Rgb(205, 214, 244)
+6:42:1 Rgb(205, 214, 244)
+6:43:1 Rgb(205, 214, 244)
+6:44:1 Rgb(205, 214, 244)
+6:45:1 Rgb(205, 214, 244)
+6:46:1 Rgb(205, 214, 244)
+6:47:1 Rgb(205, 214, 244)
+6:48:1 Rgb(205, 214, 244)
+6:49:1 Rgb(205, 214, 244)
 6:50:1 Rgb(205, 214, 244)
 6:51:1 Rgb(205, 214, 244)
 6:52:1 Rgb(205, 214, 244)
@@ -466,7 +466,7 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 7:27:1 Rgb(205, 214, 244)
 7:28:1 Rgb(205, 214, 244)
 7:29:1 Rgb(205, 214, 244)
-7:30:1 Default
+7:30:1 Rgb(205, 214, 244)
 7:31:1 Rgb(205, 214, 244)
 7:32:1 Rgb(205, 214, 244)
 7:33:1 Rgb(205, 214, 244)
@@ -477,15 +477,15 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 7:38:1 Rgb(205, 214, 244)
 7:39:1 Rgb(205, 214, 244)
 7:40:1 Rgb(205, 214, 244)
-7:41:1 Default
-7:42:1 Default
-7:43:1 Default
-7:44:1 Default
-7:45:1 Default
-7:46:1 Default
-7:47:1 Default
-7:48:1 Default
-7:49:1 Default
+7:41:1 Rgb(205, 214, 244)
+7:42:1 Rgb(205, 214, 244)
+7:43:1 Rgb(205, 214, 244)
+7:44:1 Rgb(205, 214, 244)
+7:45:1 Rgb(205, 214, 244)
+7:46:1 Rgb(205, 214, 244)
+7:47:1 Rgb(205, 214, 244)
+7:48:1 Rgb(205, 214, 244)
+7:49:1 Rgb(205, 214, 244)
 7:50:1 Rgb(205, 214, 244)
 7:51:1 Rgb(205, 214, 244)
 7:52:1 Rgb(205, 214, 244)
@@ -542,19 +542,19 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 8:43:1 Rgb(158, 206, 106)
 8:44:1 Rgb(158, 206, 106)
 8:45:1 Rgb(158, 206, 106)
-8:46:1 Default
-8:47:1 Default
-8:48:1 Default
-8:49:1 Default
-8:50:1 Default
-8:51:1 Default
-8:52:1 Default
-8:53:1 Default
-8:54:1 Default
-8:55:1 Default
-8:56:1 Default
-8:57:1 Default
-8:58:1 Default
+8:46:1 Rgb(158, 206, 106)
+8:47:1 Rgb(158, 206, 106)
+8:48:1 Rgb(158, 206, 106)
+8:49:1 Rgb(158, 206, 106)
+8:50:1 Rgb(158, 206, 106)
+8:51:1 Rgb(158, 206, 106)
+8:52:1 Rgb(158, 206, 106)
+8:53:1 Rgb(158, 206, 106)
+8:54:1 Rgb(158, 206, 106)
+8:55:1 Rgb(158, 206, 106)
+8:56:1 Rgb(158, 206, 106)
+8:57:1 Rgb(158, 206, 106)
+8:58:1 Rgb(158, 206, 106)
 8:59:1 Default
 9:0:1 Default
 9:1:1 Default
@@ -609,12 +609,12 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 9:50:1 Rgb(205, 214, 244)
 9:51:1 Rgb(205, 214, 244)
 9:52:1 Rgb(205, 214, 244)
-9:53:1 Default
-9:54:1 Default
-9:55:1 Default
-9:56:1 Default
-9:57:1 Default
-9:58:1 Default
+9:53:1 Rgb(205, 214, 244)
+9:54:1 Rgb(205, 214, 244)
+9:55:1 Rgb(205, 214, 244)
+9:56:1 Rgb(205, 214, 244)
+9:57:1 Rgb(205, 214, 244)
+9:58:1 Rgb(205, 214, 244)
 9:59:1 Default
 10:0:1 Default
 10:1:1 Default
@@ -810,12 +810,12 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 1:10:1 Rgb(30, 30, 46)
 1:11:1 Rgb(30, 30, 46)
 1:12:1 Rgb(30, 30, 46)
-1:13:1 Default
-1:14:1 Default
-1:15:1 Default
-1:16:1 Default
-1:17:1 Default
-1:18:1 Default
+1:13:1 Rgb(30, 30, 46)
+1:14:1 Rgb(30, 30, 46)
+1:15:1 Rgb(30, 30, 46)
+1:16:1 Rgb(30, 30, 46)
+1:17:1 Rgb(30, 30, 46)
+1:18:1 Rgb(30, 30, 46)
 1:19:1 Default
 1:20:1 Default
 1:21:1 Rgb(30, 30, 46)
@@ -870,12 +870,12 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 2:10:1 Rgb(30, 30, 46)
 2:11:1 Rgb(30, 30, 46)
 2:12:1 Rgb(30, 30, 46)
-2:13:1 Default
-2:14:1 Default
-2:15:1 Default
-2:16:1 Default
-2:17:1 Default
-2:18:1 Default
+2:13:1 Rgb(30, 30, 46)
+2:14:1 Rgb(30, 30, 46)
+2:15:1 Rgb(30, 30, 46)
+2:16:1 Rgb(30, 30, 46)
+2:17:1 Rgb(30, 30, 46)
+2:18:1 Rgb(30, 30, 46)
 2:19:1 Default
 2:20:1 Default
 2:21:1 Default
@@ -930,12 +930,12 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 3:10:1 Rgb(49, 50, 68)
 3:11:1 Rgb(49, 50, 68)
 3:12:1 Rgb(49, 50, 68)
-3:13:1 Default
-3:14:1 Default
-3:15:1 Default
-3:16:1 Default
-3:17:1 Default
-3:18:1 Default
+3:13:1 Rgb(49, 50, 68)
+3:14:1 Rgb(49, 50, 68)
+3:15:1 Rgb(49, 50, 68)
+3:16:1 Rgb(49, 50, 68)
+3:17:1 Rgb(49, 50, 68)
+3:18:1 Rgb(49, 50, 68)
 3:19:1 Default
 3:20:1 Default
 3:21:1 Rgb(49, 50, 68)
@@ -971,11 +971,11 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 3:51:1 Rgb(49, 50, 68)
 3:52:1 Rgb(49, 50, 68)
 3:53:1 Rgb(49, 50, 68)
-3:54:1 Default
-3:55:1 Default
-3:56:1 Default
-3:57:1 Default
-3:58:1 Default
+3:54:1 Rgb(49, 50, 68)
+3:55:1 Rgb(49, 50, 68)
+3:56:1 Rgb(49, 50, 68)
+3:57:1 Rgb(49, 50, 68)
+3:58:1 Rgb(49, 50, 68)
 3:59:1 Default
 4:0:1 Default
 4:1:1 Default
@@ -1007,7 +1007,7 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 4:27:1 Rgb(49, 50, 68)
 4:28:1 Rgb(49, 50, 68)
 4:29:1 Rgb(49, 50, 68)
-4:30:1 Default
+4:30:1 Rgb(49, 50, 68)
 4:31:1 Rgb(49, 50, 68)
 4:32:1 Rgb(49, 50, 68)
 4:33:1 Rgb(49, 50, 68)
@@ -1018,15 +1018,15 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 4:38:1 Rgb(49, 50, 68)
 4:39:1 Rgb(49, 50, 68)
 4:40:1 Rgb(49, 50, 68)
-4:41:1 Default
-4:42:1 Default
-4:43:1 Default
-4:44:1 Default
-4:45:1 Default
-4:46:1 Default
-4:47:1 Default
-4:48:1 Default
-4:49:1 Default
+4:41:1 Rgb(49, 50, 68)
+4:42:1 Rgb(49, 50, 68)
+4:43:1 Rgb(49, 50, 68)
+4:44:1 Rgb(49, 50, 68)
+4:45:1 Rgb(49, 50, 68)
+4:46:1 Rgb(49, 50, 68)
+4:47:1 Rgb(49, 50, 68)
+4:48:1 Rgb(49, 50, 68)
+4:49:1 Rgb(49, 50, 68)
 4:50:1 Rgb(49, 50, 68)
 4:51:1 Rgb(49, 50, 68)
 4:52:1 Rgb(49, 50, 68)
@@ -1067,7 +1067,7 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 5:27:1 Rgb(30, 30, 46)
 5:28:1 Rgb(30, 30, 46)
 5:29:1 Rgb(30, 30, 46)
-5:30:1 Default
+5:30:1 Rgb(30, 30, 46)
 5:31:1 Rgb(30, 30, 46)
 5:32:1 Rgb(30, 30, 46)
 5:33:1 Rgb(30, 30, 46)
@@ -1078,15 +1078,15 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 5:38:1 Rgb(30, 30, 46)
 5:39:1 Rgb(30, 30, 46)
 5:40:1 Rgb(30, 30, 46)
-5:41:1 Default
-5:42:1 Default
-5:43:1 Default
-5:44:1 Default
-5:45:1 Default
-5:46:1 Default
-5:47:1 Default
-5:48:1 Default
-5:49:1 Default
+5:41:1 Rgb(30, 30, 46)
+5:42:1 Rgb(30, 30, 46)
+5:43:1 Rgb(30, 30, 46)
+5:44:1 Rgb(30, 30, 46)
+5:45:1 Rgb(30, 30, 46)
+5:46:1 Rgb(30, 30, 46)
+5:47:1 Rgb(30, 30, 46)
+5:48:1 Rgb(30, 30, 46)
+5:49:1 Rgb(30, 30, 46)
 5:50:1 Rgb(30, 30, 46)
 5:51:1 Rgb(30, 30, 46)
 5:52:1 Rgb(30, 30, 46)
@@ -1127,7 +1127,7 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 6:27:1 Rgb(30, 30, 46)
 6:28:1 Rgb(30, 30, 46)
 6:29:1 Rgb(30, 30, 46)
-6:30:1 Default
+6:30:1 Rgb(30, 30, 46)
 6:31:1 Rgb(30, 30, 46)
 6:32:1 Rgb(30, 30, 46)
 6:33:1 Rgb(30, 30, 46)
@@ -1138,15 +1138,15 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 6:38:1 Rgb(30, 30, 46)
 6:39:1 Rgb(30, 30, 46)
 6:40:1 Rgb(30, 30, 46)
-6:41:1 Default
-6:42:1 Default
-6:43:1 Default
-6:44:1 Default
-6:45:1 Default
-6:46:1 Default
-6:47:1 Default
-6:48:1 Default
-6:49:1 Default
+6:41:1 Rgb(30, 30, 46)
+6:42:1 Rgb(30, 30, 46)
+6:43:1 Rgb(30, 30, 46)
+6:44:1 Rgb(30, 30, 46)
+6:45:1 Rgb(30, 30, 46)
+6:46:1 Rgb(30, 30, 46)
+6:47:1 Rgb(30, 30, 46)
+6:48:1 Rgb(30, 30, 46)
+6:49:1 Rgb(30, 30, 46)
 6:50:1 Rgb(30, 30, 46)
 6:51:1 Rgb(30, 30, 46)
 6:52:1 Rgb(30, 30, 46)
@@ -1187,7 +1187,7 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 7:27:1 Rgb(30, 30, 46)
 7:28:1 Rgb(30, 30, 46)
 7:29:1 Rgb(30, 30, 46)
-7:30:1 Default
+7:30:1 Rgb(30, 30, 46)
 7:31:1 Rgb(30, 30, 46)
 7:32:1 Rgb(30, 30, 46)
 7:33:1 Rgb(30, 30, 46)
@@ -1198,15 +1198,15 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 7:38:1 Rgb(30, 30, 46)
 7:39:1 Rgb(30, 30, 46)
 7:40:1 Rgb(30, 30, 46)
-7:41:1 Default
-7:42:1 Default
-7:43:1 Default
-7:44:1 Default
-7:45:1 Default
-7:46:1 Default
-7:47:1 Default
-7:48:1 Default
-7:49:1 Default
+7:41:1 Rgb(30, 30, 46)
+7:42:1 Rgb(30, 30, 46)
+7:43:1 Rgb(30, 30, 46)
+7:44:1 Rgb(30, 30, 46)
+7:45:1 Rgb(30, 30, 46)
+7:46:1 Rgb(30, 30, 46)
+7:47:1 Rgb(30, 30, 46)
+7:48:1 Rgb(30, 30, 46)
+7:49:1 Rgb(30, 30, 46)
 7:50:1 Rgb(30, 30, 46)
 7:51:1 Rgb(30, 30, 46)
 7:52:1 Rgb(30, 30, 46)
@@ -1263,19 +1263,19 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 8:43:1 Rgb(49, 50, 68)
 8:44:1 Rgb(49, 50, 68)
 8:45:1 Rgb(49, 50, 68)
-8:46:1 Default
-8:47:1 Default
-8:48:1 Default
-8:49:1 Default
-8:50:1 Default
-8:51:1 Default
-8:52:1 Default
-8:53:1 Default
-8:54:1 Default
-8:55:1 Default
-8:56:1 Default
-8:57:1 Default
-8:58:1 Default
+8:46:1 Rgb(49, 50, 68)
+8:47:1 Rgb(49, 50, 68)
+8:48:1 Rgb(49, 50, 68)
+8:49:1 Rgb(49, 50, 68)
+8:50:1 Rgb(49, 50, 68)
+8:51:1 Rgb(49, 50, 68)
+8:52:1 Rgb(49, 50, 68)
+8:53:1 Rgb(49, 50, 68)
+8:54:1 Rgb(49, 50, 68)
+8:55:1 Rgb(49, 50, 68)
+8:56:1 Rgb(49, 50, 68)
+8:57:1 Rgb(49, 50, 68)
+8:58:1 Rgb(49, 50, 68)
 8:59:1 Default
 9:0:1 Default
 9:1:1 Default
@@ -1330,12 +1330,12 @@ FAIL | 3 gates | j/k findings | Tab tabs | q quit | saved re
 9:50:1 Rgb(30, 30, 46)
 9:51:1 Rgb(30, 30, 46)
 9:52:1 Rgb(30, 30, 46)
-9:53:1 Default
-9:54:1 Default
-9:55:1 Default
-9:56:1 Default
-9:57:1 Default
-9:58:1 Default
+9:53:1 Rgb(30, 30, 46)
+9:54:1 Rgb(30, 30, 46)
+9:55:1 Rgb(30, 30, 46)
+9:56:1 Rgb(30, 30, 46)
+9:57:1 Rgb(30, 30, 46)
+9:58:1 Rgb(30, 30, 46)
 9:59:1 Default
 10:0:1 Default
 10:1:1 Default
