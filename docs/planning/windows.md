@@ -131,7 +131,7 @@ The compile leaf gates those tests with `#[cfg(unix)]`. It does not delete them 
 
 ### CI
 
-`ci.yml` jobs are `ubuntu-latest` or `macos-14`. `paths-ignore` skips Markdown, so this plan PR does not run the test job. `docs.yml` does run on this PR and executes `scripts/check-docs.py`.
+`ci.yml` jobs are `ubuntu-latest` or `macos-15`. `paths-ignore` skips Markdown, so this plan PR does not run the test job. `docs.yml` does run on this PR and executes `scripts/check-docs.py`.
 
 The CI leaf adds `check-windows` on `windows-latest` with `continue-on-error: true`. Steps: fmt, clippy, `cargo test --workspace --locked`. It does not install kcov, php, or apt packages, and it does not run the bash scripts under `scripts/`. A comment in the workflow states that the job is report-only and that the PC run is the gate. Do not add the job to branch protection.
 
