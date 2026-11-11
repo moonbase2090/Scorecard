@@ -4,6 +4,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-10
+
+### Fixed
+
+- macOS release builds moved from the retired `macos-14` runner image to `macos-15`, and the macOS CI job with them. The 0.2.0 GitHub release assets were not published, because the macOS job could not start on the retired image. 0.2.1 is the first release to ship the 0.2.0 changes as published assets.
+
 ## [0.2.0] - 2026-11-10
 
 ### Changed

@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   apple:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     # Job-level permissions replace the workflow default, so checkout of this
     # private repo needs contents: read here. Artifact upload/download (v4)
