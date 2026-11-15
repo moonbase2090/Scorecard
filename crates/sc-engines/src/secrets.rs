@@ -397,10 +397,7 @@ fn credential_signal(token: &str) -> bool {
         .chars()
         .filter(|c| c.is_ascii_alphanumeric())
         .collect();
-    if core == "placeholder" || core == "example" {
-        return false;
-    }
-    true
+    !(core == "placeholder" || core == "example")
 }
 
 fn mostly_sequential(token: &str) -> bool {

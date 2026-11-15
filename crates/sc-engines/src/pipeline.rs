@@ -3913,13 +3913,13 @@ mod tests {
             .expect("first coverage run");
         assert_eq!(coverage_rate(&first, "covered"), 1.0, "{first:?}");
         assert_eq!(coverage_rate(&first, "missed"), 0.0, "{first:?}");
-        let rlib = library_rlib(&root);
+        let rlib = library_rlib(&root, &manifest);
         let inode = std::fs::metadata(&rlib).unwrap().ino();
 
         std::fs::write(root.join("tests/call.rs"), call_missed).unwrap();
         let second = run_coverage(&root, &manifest, deadline, true, "", &[], &mut runs)
             .expect("warm coverage run");
-        let warm_rlib = library_rlib(&root);
+        let warm_rlib = library_rlib(&root, &manifest);
         assert_eq!(
             warm_rlib, rlib,
             "instrumented library artifact was replaced"
@@ -3950,16 +3950,63 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn library_rlib(root: &Path) -> PathBuf {
-        let deps = root.join("target/llvm-cov-target/debug/deps");
+    fn library_rlib(root: &Path, manifest: &Path) -> PathBuf {
+        let output = Command::new("cargo")
+            .args([
+                "metadata",
+                "--format-version",
+                "1",
+                "--no-deps",
+                "--manifest-path",
+            ])
+            .arg(manifest)
+            .env("CARGO_TARGET_DIR", root.join("target/llvm-cov-target"))
+            .output()
+            .expect("run cargo metadata");
+        assert!(
+            output.status.success(),
+            "cargo metadata failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let metadata: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("parse cargo metadata");
+        let target_directory = metadata["target_directory"]
+            .as_str()
+            .expect("cargo metadata target_directory");
+        let build_directory = metadata["build_directory"]
+            .as_str()
+            .unwrap_or(target_directory);
+        let mut roots = vec![
+            PathBuf::from(target_directory),
+            PathBuf::from(build_directory),
+        ];
+        roots.sort();
+        roots.dedup();
+
         let mut found = Vec::new();
-        for entry in std::fs::read_dir(&deps).unwrap() {
-            let path = entry.unwrap().path();
-            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-                continue;
-            };
-            if name.starts_with("libcovdemo-") && name.ends_with(".rlib") {
-                found.push(path);
+        for root in roots {
+            let mut pending = vec![root];
+            while let Some(directory) = pending.pop() {
+                let Ok(entries) = std::fs::read_dir(&directory) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                        pending.push(path);
+                        continue;
+                    }
+                    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                        continue;
+                    };
+                    if name.starts_with("libcovdemo-")
+                        && name.ends_with(".rlib")
+                        && path.is_file()
+                        && !found.contains(&path)
+                    {
+                        found.push(path);
+                    }
+                }
             }
         }
         assert_eq!(found.len(), 1, "expected one covdemo rlib, found {found:?}");
