@@ -13,7 +13,7 @@ Use an isolated checkout and a dedicated Bash shell from its root. Build the che
 
 ```bash
 set -e
-cargo build --locked -p sc-cli -p sc-mcp
+cargo build --locked -p scorecard-cli -p sc-mcp
 sc_repo=$(pwd -P)
 sc_binary="$sc_repo/target/debug/sc"
 sc_mcp="$sc_repo/target/debug/sc-mcp"

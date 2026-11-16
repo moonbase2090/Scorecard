@@ -36,7 +36,7 @@ All four must pass from the repo root:
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --locked
-./target/release/sc analyze . --budget-seconds 600   # build sc first: cargo build --release -p sc-cli
+./target/release/sc analyze . --budget-seconds 600   # build sc first: cargo build --release -p scorecard-cli
 ```
 
 The full instrumented suite is slower than the default 120s wall-clock

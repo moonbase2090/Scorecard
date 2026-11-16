@@ -31,8 +31,8 @@ jobs:
       - name: Build arm64 and x86_64
         run: |
           export RUSTFLAGS="--remap-path-prefix=$HOME=/src --remap-path-prefix=$GITHUB_WORKSPACE=/src/scorecard"
-          cargo build --release --locked -p sc-cli -p sc-mcp --target aarch64-apple-darwin
-          cargo build --release --locked -p sc-cli -p sc-mcp --target x86_64-apple-darwin
+          cargo build --release --locked -p scorecard-cli -p sc-mcp --target aarch64-apple-darwin
+          cargo build --release --locked -p scorecard-cli -p sc-mcp --target x86_64-apple-darwin
       - name: Package universal disk image
         id: package
         env:
@@ -81,7 +81,7 @@ jobs:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
         run: |
           export RUSTFLAGS="--remap-path-prefix=$HOME=/src --remap-path-prefix=$GITHUB_WORKSPACE=/src/scorecard"
-          cargo build --release --locked -p sc-cli -p sc-mcp --target ${{ matrix.target }}
+          cargo build --release --locked -p scorecard-cli -p sc-mcp --target ${{ matrix.target }}
       - name: Package
         run: |
           set -eu
@@ -133,7 +133,7 @@ jobs:
           # embed C:\Users\runneradmin\.cargo and fail the release-text check.
           cargo_home="${CARGO_HOME:-$USERPROFILE/.cargo}"
           export RUSTFLAGS="--remap-path-prefix=$(cygpath -m "$cargo_home")=/cargo --remap-path-prefix=$(cygpath -w "$cargo_home")=/cargo --remap-path-prefix=$(cygpath -m "$GITHUB_WORKSPACE")=/src/scorecard --remap-path-prefix=$(cygpath -w "$GITHUB_WORKSPACE")=/src/scorecard"
-          cargo build --release --locked -p sc-cli -p sc-mcp --target x86_64-pc-windows-msvc
+          cargo build --release --locked -p scorecard-cli -p sc-mcp --target x86_64-pc-windows-msvc
       - name: Package
         shell: bash
         run: |
