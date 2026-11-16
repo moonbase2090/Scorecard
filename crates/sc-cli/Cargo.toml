@@ -1,5 +1,5 @@
 [package]
-name = "sc-cli"
+name = "scorecard-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,7 +10,10 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 publish = false
-description = "sc command line"
+description = "Scorecard (scorecard-cli) is a local code-quality gate and is not related to OpenSSF Scorecard."
+
+[lib]
+name = "sc_cli"
 
 [[bin]]
 name = "sc"

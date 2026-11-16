@@ -14,7 +14,7 @@ def main():
         child, master = pty.fork()
         if child == 0:
             os.execvp("cargo", [
-                "cargo", "test", "-p", "sc-cli", "--locked", "--features", "tui",
+                "cargo", "test", "-p", "scorecard-cli", "--locked", "--features", "tui",
                 "--release", "--lib", "tui::gates::frame_budget", "--",
                 "--exact", "--ignored", "--nocapture", "--test-threads=1",
             ])

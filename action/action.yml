@@ -1,5 +1,5 @@
-name: sc
-description: Run the sc scorecard gate and upload the report
+name: Scorecard (scorecard-cli)
+description: Scorecard (scorecard-cli) is a local code-quality gate and is not related to OpenSSF Scorecard.
 branding:
   icon: check-circle
   color: green

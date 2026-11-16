@@ -3,7 +3,7 @@
 Build Scorecard with the optional terminal browser:
 
 ```sh
-cargo build --release -p sc-cli --features tui
+cargo build --release -p scorecard-cli --features tui
 ```
 
 From your project directory, save an analysis and open it with that build:

@@ -5,7 +5,7 @@ repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 if [ -n "${SCORECARD_BIN:-}" ]; then
   sc=$SCORECARD_BIN
 else
-  cargo build --locked -p sc-cli --manifest-path "$repo_root/Cargo.toml"
+  cargo build --locked -p scorecard-cli --manifest-path "$repo_root/Cargo.toml"
   sc="$repo_root/target/debug/sc"
 fi
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/sc-agent-skills.XXXXXX")

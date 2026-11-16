@@ -1,12 +1,12 @@
 # Homebrew formula maintenance
 
-`Formula/sc.rb` in `moonbase2090/homebrew-scorecard` installs the binaries from the signed macOS and Linux release archives. Its URLs and SHA-256 values must match the assets in the GitHub release.
+`Formula/scorecard-cli.rb` in `moonbase2090/homebrew-scorecard` installs the binaries from the signed macOS and Linux release archives. Its URLs and SHA-256 values must match the assets in the GitHub release.
 
 Install using the short tap name:
 
 ```bash
 brew tap moonbase2090/scorecard
-brew install moonbase2090/scorecard/sc
+brew install moonbase2090/scorecard/scorecard-cli
 ```
 
 After publishing a signed release, `.github/workflows/release.yml` generates an updated formula from `SHA256SUMS` and opens a pull request against the default branch of `moonbase2090/homebrew-scorecard`. The update branch is named `chore/homebrew-v<version>` so a release workflow retry reuses the same branch and pull request.

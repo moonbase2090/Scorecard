@@ -6,6 +6,8 @@
 
 `sc` is a local code-quality gate. In one run it checks that a project builds, its tests pass, complex code is covered by tests ([CRAP](docs/crap.md)), no secrets are committed, the linter is clean, and every import is a declared dependency. It prints a verdict for people and a JSON scorecard for agents and CI. Ten language packs are built in. Project site: [scorecardcli.com](https://scorecardcli.com).
 
+Scorecard (scorecard-cli) is a local code-quality gate and is not related to OpenSSF Scorecard.
+
 The secrets scan checks files up to 64 MiB even when they contain NUL bytes. It skips gitignored large files. A non-ignored file over 64 MiB produces `secrets.partial`, except when the file begins with a known object format (ELF, Mach-O, PE, WebAssembly, or `ar` archive); those binaries are not scanned at any size and the report lists `secrets.skipped_object` (info) instead of matching token patterns inside the binary.
 
 The secrets gate recognizes Slack incoming webhooks, Stripe restricted live keys (`rk_live_`), and AWS provider secret keys in Terraform, alongside the existing token and key formats.
@@ -13,7 +15,7 @@ The secrets gate recognizes Slack incoming webhooks, Stripe restricted live keys
 ## Browse a saved analysis
 
 The optional `tui` Cargo feature adds `sc tui [PATH]`, a keyboard browser for
-`PATH/.sc/last-scorecard.json`. Build with `cargo build --release -p sc-cli --features tui`,
+`PATH/.sc/last-scorecard.json`. Build with `cargo build --release -p scorecard-cli --features tui`,
 run `sc analyze` in your project, then open `sc tui`. Use the gate rail, badge tabs,
 and virtualized Findings table to inspect the last completed analysis. Print a compact
 summary to scrollback or a pipe with `sc tui --inline`. See [Browse a saved analysis](docs/how-to/tui.md).
@@ -192,7 +194,7 @@ cargo install --locked --path crates/sc-cli
 cargo install --locked --path crates/sc-mcp
 ```
 
-The local binary manifests also support `cargo-binstall` from GitHub releases. Run `cargo binstall --manifest-path crates/sc-cli/Cargo.toml --dry-run --no-confirm sc-cli` to verify the CLI download without installing it. See [cargo-binstall checks](docs/how-to/cargo-binstall.md) for both binaries and all release targets. Registry publication remains disabled; `cargo install sc-cli` selects an unrelated package.
+The local binary manifests also support `cargo-binstall` from GitHub releases. Run `cargo binstall --manifest-path crates/sc-cli/Cargo.toml --dry-run --no-confirm scorecard-cli` to verify the CLI download without installing it. See [cargo-binstall checks](docs/how-to/cargo-binstall.md) for both binaries and all release targets. Registry publication remains disabled; the CLI package is named `scorecard-cli`, while its executable remains `sc`.
 
 Rust coverage needs `rustup component add llvm-tools` and `cargo install cargo-llvm-cov`. Without them `sc` still runs and reports coverage as not measured. Other packs need their own tools; see [packs](docs/packs.md).
 
