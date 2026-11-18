@@ -122,6 +122,21 @@ allocated clean macOS guest and retain its output.
 
 Run `/maintain-verification-skill` when a PR changes build commands, runtime behavior, test prerequisites, or a mapped entry point. Its source review and live pass cover every feature file. Add a feature recipe when a change introduces another user-facing path.
 
+### Offline Java fixtures
+
+Use Maven 3.9 or newer. Resolve the fixture dependencies from the checkout
+root, then run the contract and coverage tests with Maven offline.
+
+```sh
+sh scripts/prepare-java-fixtures.sh
+export MAVEN_ARGS=--offline
+cargo test --locked -p scorecard-cli --test fixtures pack_contract_passes_clean_trees_and_fails_secrets -- --exact
+cargo test --locked -p scorecard-cli --test fixtures coverage_packs_record_a_hit -- --exact
+```
+
+Require both tests to pass. The setup uses scratch copies of the fixtures so
+the analyzer generates its own test outputs and coverage reports.
+
 ### Windows process-tree cleanup
 
 For changes to Windows command containment, run on a native Windows checkout:
