@@ -54,7 +54,8 @@ jobs:
           if-no-files-found: error
 
   linux:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    container: rust:1.88-bookworm@sha256:af306cfa71d987911a781c37b59d7d67d934f49684058f96cf72079c3626bfe0
     timeout-minutes: 30
     # Job-level permissions replace the workflow default, so checkout of this
     # private repo needs contents: read here. Artifact upload/download (v4)
@@ -64,49 +65,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - x86_64-unknown-linux-gnu
-          - aarch64-unknown-linux-gnu
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          targets: ${{ matrix.target }}
-      - name: Install the arm64 linker
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
-      - name: Build
+      - name: Build and verify Linux archive
         env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-        run: |
-          export RUSTFLAGS="--remap-path-prefix=$HOME=/src --remap-path-prefix=$GITHUB_WORKSPACE=/src/scorecard"
-          cargo build --release --locked -p scorecard-cli -p sc-mcp --target ${{ matrix.target }}
-      - name: Package
-        run: |
-          set -eu
-          ver="${GITHUB_REF_NAME#v}"
-          # A prerelease tag (v0.1.0-rc.2) may ship binaries that report the
-          # base Cargo.toml version (0.1.0); a final tag must match exactly.
-          base="${ver%%-*}"
-          triple="${{ matrix.target }}"
-          src="target/${triple}/release"
-          if [ "$triple" = "x86_64-unknown-linux-gnu" ]; then
-            got=$("$src/sc" --version)
-            [ "$got" = "sc $ver" ] || [ "$got" = "sc $base" ] || { echo "error: sc --version is '$got', tag is $GITHUB_REF_NAME" >&2; exit 1; }
-            got=$("$src/sc-mcp" --version)
-            [ "$got" = "$ver" ] || [ "$got" = "$base" ] || { echo "error: sc-mcp --version is '$got', tag is $GITHUB_REF_NAME" >&2; exit 1; }
-          else
-            file "$src/sc" | grep -q 'ARM aarch64'
-            file "$src/sc-mcp" | grep -q 'ARM aarch64'
-          fi
-          tmp=$(mktemp -d)
-          bundle="sc-v${ver}-${triple}"
-          mkdir -p "$tmp/$bundle"
-          cp "$src/sc" "$src/sc-mcp" LICENSE README.md "$tmp/$bundle/"
-          mkdir -p dist
-          sh scripts/tar-release.sh "dist/${bundle}.tar.gz" "$tmp" "$bundle"
-          python3 scripts/check-archive-layout.py "dist/${bundle}.tar.gz"
+          RUSTUP_TOOLCHAIN: "1.88.0"
+        run: sh scripts/build-linux-release.sh "${GITHUB_REF_NAME#v}" ${{ matrix.target }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux-${{ matrix.target }}
