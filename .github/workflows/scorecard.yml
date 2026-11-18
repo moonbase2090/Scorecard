@@ -57,7 +57,18 @@ jobs:
           extensions: pcov
           coverage: pcov
           tools: phpunit, phpstan
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            testdata/java_pack/.sc/m2
+            testdata/java_pack_fail/.sc/m2
+            testdata/cov_java/.sc/m2
+          key: ${{ runner.os }}-${{ runner.arch }}-java-fixtures-${{ hashFiles('testdata/**/pom.xml', 'scripts/prepare-java-fixtures.sh', 'crates/sc-engines/src/toolchain_plans.rs') }}
+      - name: Resolve Java fixture dependencies
+        run: sh scripts/prepare-java-fixtures.sh
       - uses: ./action
+        env:
+          MAVEN_ARGS: --offline
         with:
           format: all
           diff: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
