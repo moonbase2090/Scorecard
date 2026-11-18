@@ -122,6 +122,24 @@ allocated clean macOS guest and retain its output.
 
 Run `/maintain-verification-skill` when a PR changes build commands, runtime behavior, test prerequisites, or a mapped entry point. Its source review and live pass cover every feature file. Add a feature recipe when a change introduces another user-facing path.
 
+### Linux release archives
+
+Run the release build from the checkout root on a native Debian 12 VM of the
+target architecture. Install Git, GCC, Python 3, tar, and Rust 1.88.0. Use
+`aarch64-unknown-linux-gnu` on ARM64 or `x86_64-unknown-linux-gnu` on x86-64.
+Pass the workspace version from `Cargo.toml`.
+
+```sh
+getconf GNU_LIBC_VERSION
+RUSTUP_TOOLCHAIN=1.88.0 sh scripts/build-linux-release.sh "$version" "$target"
+```
+
+The script checks the archive layout and runs both extracted binaries. Retain
+both version lines. Unpack the archive into a fresh directory and run its
+`sc analyze testdata/web_site --pack web --format json` from the checkout root.
+Check that the report verdict is `pass`. For a glibc compatibility fix, run
+the last published archive's two version commands on the same VM for comparison.
+
 ### Windows process-tree cleanup
 
 For changes to Windows command containment, run on a native Windows checkout:
