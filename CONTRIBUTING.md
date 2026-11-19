@@ -13,7 +13,7 @@
 
 Keep pull requests small and focused. One commit per logical change.
 
-Every PR update also runs the optional TUI checks and the `tui-perf` maximum-frame
+Every PR update also runs the TUI checks and the `tui-perf` maximum-frame
 budget. See [TUI verification](docs/how-to/tui.md) for local commands and timing scope.
 
 Every PR update runs `check-ubuntu` (fmt, clippy, the full fixture test

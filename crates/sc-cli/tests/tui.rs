@@ -41,10 +41,10 @@ impl Project {
             severity: "error".into(),
             file: "src/lib.rs".into(),
             span: None,
-            symbol: None,
-            message: "One test failed".into(),
-            evidence: serde_json::Value::Null,
-            suggested_action: None,
+            symbol: Some("demo::tests::it_adds".into()),
+            message: "One test failed\nassertion failed: left (2) equals right (3)".into(),
+            evidence: serde_json::json!({ "exit_code": 101 }),
+            suggested_action: Some("Rerun cargo test it_adds".into()),
             disposition: "fix".into(),
         });
         card.engines.engines_run = vec!["compile".into()];
@@ -114,9 +114,60 @@ fn tui_navigates_gates_tabs_and_quits() -> termlens::Result<()> {
     terminal.send(Key::Home)?;
     terminal.wait_until(|s| s.contains("Selected gate: types"))?;
     terminal.send(Key::Tab)?;
-    terminal.wait_until(|s| s.contains("tests.failed") && s.contains("1/1 | PgUp/PgDn"))?;
+    terminal.wait_until(|s| {
+        s.contains("tests.failed") && s.contains("1/1 | PgUp/PgDn") && s.contains("Enter details")
+    })?;
+    terminal.send(Key::Enter)?;
+    terminal.wait_until(|s| {
+        s.contains("Finding detail")
+            && s.contains("demo::tests::it_adds")
+            && s.contains("assertion failed: left (2) equals right (3)")
+            && s.contains("Rerun cargo test it_adds")
+            && s.contains("\"exit_code\": 101")
+    })?;
+    terminal.send(Key::Esc)?;
+    terminal.wait_until(|s| s.contains("> error") && s.contains("1/1 | PgUp/PgDn"))?;
     terminal.send(Key::Tab)?;
     terminal.wait_until(|s| s.contains("Ran: compile"))?;
+    terminal.send(Key::Char('q'))?;
+    assert!(terminal.wait_exit()?.success());
+    Ok(())
+}
+
+#[test]
+fn tui_explains_skipped_tests_in_a_passing_report() -> termlens::Result<()> {
+    let project = Project::new("tests-skipped");
+    let mut card = Scorecard::skeleton("demo", 30);
+    card.verdict = "pass".into();
+    card.engines.engines_skipped = vec!["tests".into()];
+    card.measures.gates.push(Gate {
+        id: "tests".into(),
+        pass: false,
+        enforced: false,
+        reason: Some(
+            "No Python tests in this diff. The rest of the suite was skipped. Run sc analyze without --diff to score the full suite.".into(),
+        ),
+    });
+    std::fs::write(
+        project.0.join(".sc/last-scorecard.json"),
+        serde_json::to_vec(&card).unwrap(),
+    )
+    .unwrap();
+    let mut terminal = Terminal::builder()
+        .size(60, 12)
+        .env_clear()
+        .timeout(Duration::from_secs(5))
+        .arg("tui")
+        .arg(&project.0)
+        .spawn(env!("CARGO_BIN_EXE_sc"))?;
+    terminal.wait_until(|s| {
+        s.contains("Saved analysis | PASS")
+            && s.contains("Tests were skipped.")
+            && s.contains("> SKIP tests")
+    })?;
+    assert!(!terminal.screen().contains("full suite."));
+    terminal.send(Key::PageDown)?;
+    terminal.wait_until(|s| s.contains("full suite."))?;
     terminal.send(Key::Char('q'))?;
     assert!(terminal.wait_exit()?.success());
     Ok(())
@@ -504,19 +555,39 @@ fn findings_redraw_changed_combining_graphemes() -> termlens::Result<()> {
 fn quitting_restores_terminal_modes_and_original_screen() -> termlens::Result<()> {
     let project = Project::new("restore");
     project.report();
-    // PENDIN records pending input reprocessing, not a persistent terminal mode.
+    // Darwin can set PENDIN again after stty clears it. Mask only that transient bit
+    // in the captured modes, preserving the comparison of every other flag.
+    let check_modes = r#"
+terminal_modes() {
+    modes=$(stty -g) || return
+    case "$modes" in
+        gfmt1:*:lflag=*)
+            local_flags_and_controls=${modes#*:lflag=}
+            local_flags=${local_flags_and_controls%%:*}
+            printf '%s:lflag=%x:%s\n' "${modes%%:lflag=*}" \
+                "$((0x$local_flags & ~0x20000000))" "${local_flags_and_controls#*:}"
+            ;;
+        *) printf '%s\n' "$modes" ;;
+    esac
+}
+before=$(terminal_modes) || exit 98
+"$1" tui "$2"
+code=$?
+after=$(terminal_modes) || exit 98
+if [ "$before" != "$after" ]; then
+    printf 'BEFORE:%s\nAFTER:%s\n' "$before" "$after"
+    exit 99
+fi
+printf 'RESTORED:%s\n' "$code"
+exit "$code"
+"#;
     for key in [Key::Char('q'), Key::Ctrl('c')] {
         let mut terminal = Terminal::builder()
             .size(100, 24)
             .env_clear()
             .env("PATH", "/usr/bin:/bin")
             .timeout(Duration::from_secs(5))
-            .args([
-                "-c",
-                "stty -pendin; before=$(stty -g); \"$1\" tui \"$2\"; code=$?; stty -pendin; after=$(stty -g); test \"$before\" = \"$after\" || { printf 'BEFORE:%s\\nAFTER:%s\\n' \"$before\" \"$after\"; exit 99; }; printf 'RESTORED:%s\\n' \"$code\"; exit \"$code\"",
-                "tui-restore",
-                env!("CARGO_BIN_EXE_sc"),
-            ])
+            .args(["-c", check_modes, "tui-restore", env!("CARGO_BIN_EXE_sc")])
             .arg(&project.0)
             .spawn("/bin/sh")?;
         terminal.wait_until(|s| s.contains("Selected gate: types"))?;

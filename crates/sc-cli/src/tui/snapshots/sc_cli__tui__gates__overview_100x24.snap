@@ -6,8 +6,7 @@ expression: "styled_snapshot(&grid, &clusters)"
 ┌Gates─────────────────┐┌Scorecard─────────────────────────────────────────────────────────────────┐
 │> PASS types          ││Overview Findings [40] Engines [2]                                        │
 │  FAIL tests          ││                                                                          │
-│  REPORT sca          ││Saved analysis                                                            │
-│                      ││Run sc analyze to refresh this report.                                    │
+│  REPORT sca          ││Saved analysis | FAIL                                                     │
 │                      ││                                                                          │
 │                      ││Selected gate: types                                                      │
 │                      ││Result: PASS                                                              │
@@ -25,8 +24,9 @@ expression: "styled_snapshot(&grid, &clusters)"
 │                      ││                                                                          │
 │                      ││                                                                          │
 │                      ││                                                                          │
+│                      ││                                                                          │
 └──────────────────────┘└──────────────────────────────────────────────────────────────────────────┘
-FAIL | 3 gates | j/k gates | Tab tabs | q quit | saved report                                       
+FAIL | 3 gates | j/k gates | PgUp/PgDn | Tab tabs | q quit                                          
 @fg
 0:0:1 Default
 0:1:1 Default
@@ -853,80 +853,80 @@ FAIL | 3 gates | j/k gates | Tab tabs | q quit | saved report
 8:22:1 Default
 8:23:1 Default
 8:24:1 Default
-8:25:1 Rgb(205, 214, 244)
-8:26:1 Rgb(205, 214, 244)
-8:27:1 Rgb(205, 214, 244)
-8:28:1 Rgb(205, 214, 244)
-8:29:1 Rgb(205, 214, 244)
-8:30:1 Rgb(205, 214, 244)
-8:31:1 Rgb(205, 214, 244)
-8:32:1 Rgb(205, 214, 244)
-8:33:1 Rgb(205, 214, 244)
-8:34:1 Rgb(205, 214, 244)
-8:35:1 Rgb(205, 214, 244)
-8:36:1 Rgb(205, 214, 244)
-8:37:1 Rgb(205, 214, 244)
-8:38:1 Rgb(205, 214, 244)
-8:39:1 Rgb(205, 214, 244)
-8:40:1 Rgb(205, 214, 244)
-8:41:1 Rgb(205, 214, 244)
-8:42:1 Rgb(205, 214, 244)
-8:43:1 Rgb(205, 214, 244)
-8:44:1 Rgb(205, 214, 244)
-8:45:1 Rgb(205, 214, 244)
-8:46:1 Rgb(205, 214, 244)
-8:47:1 Rgb(205, 214, 244)
-8:48:1 Rgb(205, 214, 244)
-8:49:1 Rgb(205, 214, 244)
-8:50:1 Rgb(205, 214, 244)
-8:51:1 Rgb(205, 214, 244)
-8:52:1 Rgb(205, 214, 244)
-8:53:1 Rgb(205, 214, 244)
-8:54:1 Rgb(205, 214, 244)
-8:55:1 Rgb(205, 214, 244)
-8:56:1 Rgb(205, 214, 244)
-8:57:1 Rgb(205, 214, 244)
-8:58:1 Rgb(205, 214, 244)
-8:59:1 Rgb(205, 214, 244)
-8:60:1 Rgb(205, 214, 244)
-8:61:1 Rgb(205, 214, 244)
-8:62:1 Rgb(205, 214, 244)
-8:63:1 Rgb(205, 214, 244)
-8:64:1 Rgb(205, 214, 244)
-8:65:1 Rgb(205, 214, 244)
-8:66:1 Rgb(205, 214, 244)
-8:67:1 Rgb(205, 214, 244)
-8:68:1 Rgb(205, 214, 244)
-8:69:1 Rgb(205, 214, 244)
-8:70:1 Rgb(205, 214, 244)
-8:71:1 Rgb(205, 214, 244)
-8:72:1 Rgb(205, 214, 244)
-8:73:1 Rgb(205, 214, 244)
-8:74:1 Rgb(205, 214, 244)
-8:75:1 Rgb(205, 214, 244)
-8:76:1 Rgb(205, 214, 244)
-8:77:1 Rgb(205, 214, 244)
-8:78:1 Rgb(205, 214, 244)
-8:79:1 Rgb(205, 214, 244)
-8:80:1 Rgb(205, 214, 244)
-8:81:1 Rgb(205, 214, 244)
-8:82:1 Rgb(205, 214, 244)
-8:83:1 Rgb(205, 214, 244)
-8:84:1 Rgb(205, 214, 244)
-8:85:1 Rgb(205, 214, 244)
-8:86:1 Rgb(205, 214, 244)
-8:87:1 Rgb(205, 214, 244)
-8:88:1 Rgb(205, 214, 244)
-8:89:1 Rgb(205, 214, 244)
-8:90:1 Rgb(205, 214, 244)
-8:91:1 Rgb(205, 214, 244)
-8:92:1 Rgb(205, 214, 244)
-8:93:1 Rgb(205, 214, 244)
-8:94:1 Rgb(205, 214, 244)
-8:95:1 Rgb(205, 214, 244)
-8:96:1 Rgb(205, 214, 244)
-8:97:1 Rgb(205, 214, 244)
-8:98:1 Rgb(205, 214, 244)
+8:25:1 Default
+8:26:1 Default
+8:27:1 Default
+8:28:1 Default
+8:29:1 Default
+8:30:1 Default
+8:31:1 Default
+8:32:1 Default
+8:33:1 Default
+8:34:1 Default
+8:35:1 Default
+8:36:1 Default
+8:37:1 Default
+8:38:1 Default
+8:39:1 Default
+8:40:1 Default
+8:41:1 Default
+8:42:1 Default
+8:43:1 Default
+8:44:1 Default
+8:45:1 Default
+8:46:1 Default
+8:47:1 Default
+8:48:1 Default
+8:49:1 Default
+8:50:1 Default
+8:51:1 Default
+8:52:1 Default
+8:53:1 Default
+8:54:1 Default
+8:55:1 Default
+8:56:1 Default
+8:57:1 Default
+8:58:1 Default
+8:59:1 Default
+8:60:1 Default
+8:61:1 Default
+8:62:1 Default
+8:63:1 Default
+8:64:1 Default
+8:65:1 Default
+8:66:1 Default
+8:67:1 Default
+8:68:1 Default
+8:69:1 Default
+8:70:1 Default
+8:71:1 Default
+8:72:1 Default
+8:73:1 Default
+8:74:1 Default
+8:75:1 Default
+8:76:1 Default
+8:77:1 Default
+8:78:1 Default
+8:79:1 Default
+8:80:1 Default
+8:81:1 Default
+8:82:1 Default
+8:83:1 Default
+8:84:1 Default
+8:85:1 Default
+8:86:1 Default
+8:87:1 Default
+8:88:1 Default
+8:89:1 Default
+8:90:1 Default
+8:91:1 Default
+8:92:1 Default
+8:93:1 Default
+8:94:1 Default
+8:95:1 Default
+8:96:1 Default
+8:97:1 Default
+8:98:1 Default
 8:99:1 Default
 9:0:1 Default
 9:1:1 Default
@@ -3254,80 +3254,80 @@ FAIL | 3 gates | j/k gates | Tab tabs | q quit | saved report
 8:22:1 Default
 8:23:1 Default
 8:24:1 Default
-8:25:1 Rgb(30, 30, 46)
-8:26:1 Rgb(30, 30, 46)
-8:27:1 Rgb(30, 30, 46)
-8:28:1 Rgb(30, 30, 46)
-8:29:1 Rgb(30, 30, 46)
-8:30:1 Rgb(30, 30, 46)
-8:31:1 Rgb(30, 30, 46)
-8:32:1 Rgb(30, 30, 46)
-8:33:1 Rgb(30, 30, 46)
-8:34:1 Rgb(30, 30, 46)
-8:35:1 Rgb(30, 30, 46)
-8:36:1 Rgb(30, 30, 46)
-8:37:1 Rgb(30, 30, 46)
-8:38:1 Rgb(30, 30, 46)
-8:39:1 Rgb(30, 30, 46)
-8:40:1 Rgb(30, 30, 46)
-8:41:1 Rgb(30, 30, 46)
-8:42:1 Rgb(30, 30, 46)
-8:43:1 Rgb(30, 30, 46)
-8:44:1 Rgb(30, 30, 46)
-8:45:1 Rgb(30, 30, 46)
-8:46:1 Rgb(30, 30, 46)
-8:47:1 Rgb(30, 30, 46)
-8:48:1 Rgb(30, 30, 46)
-8:49:1 Rgb(30, 30, 46)
-8:50:1 Rgb(30, 30, 46)
-8:51:1 Rgb(30, 30, 46)
-8:52:1 Rgb(30, 30, 46)
-8:53:1 Rgb(30, 30, 46)
-8:54:1 Rgb(30, 30, 46)
-8:55:1 Rgb(30, 30, 46)
-8:56:1 Rgb(30, 30, 46)
-8:57:1 Rgb(30, 30, 46)
-8:58:1 Rgb(30, 30, 46)
-8:59:1 Rgb(30, 30, 46)
-8:60:1 Rgb(30, 30, 46)
-8:61:1 Rgb(30, 30, 46)
-8:62:1 Rgb(30, 30, 46)
-8:63:1 Rgb(30, 30, 46)
-8:64:1 Rgb(30, 30, 46)
-8:65:1 Rgb(30, 30, 46)
-8:66:1 Rgb(30, 30, 46)
-8:67:1 Rgb(30, 30, 46)
-8:68:1 Rgb(30, 30, 46)
-8:69:1 Rgb(30, 30, 46)
-8:70:1 Rgb(30, 30, 46)
-8:71:1 Rgb(30, 30, 46)
-8:72:1 Rgb(30, 30, 46)
-8:73:1 Rgb(30, 30, 46)
-8:74:1 Rgb(30, 30, 46)
-8:75:1 Rgb(30, 30, 46)
-8:76:1 Rgb(30, 30, 46)
-8:77:1 Rgb(30, 30, 46)
-8:78:1 Rgb(30, 30, 46)
-8:79:1 Rgb(30, 30, 46)
-8:80:1 Rgb(30, 30, 46)
-8:81:1 Rgb(30, 30, 46)
-8:82:1 Rgb(30, 30, 46)
-8:83:1 Rgb(30, 30, 46)
-8:84:1 Rgb(30, 30, 46)
-8:85:1 Rgb(30, 30, 46)
-8:86:1 Rgb(30, 30, 46)
-8:87:1 Rgb(30, 30, 46)
-8:88:1 Rgb(30, 30, 46)
-8:89:1 Rgb(30, 30, 46)
-8:90:1 Rgb(30, 30, 46)
-8:91:1 Rgb(30, 30, 46)
-8:92:1 Rgb(30, 30, 46)
-8:93:1 Rgb(30, 30, 46)
-8:94:1 Rgb(30, 30, 46)
-8:95:1 Rgb(30, 30, 46)
-8:96:1 Rgb(30, 30, 46)
-8:97:1 Rgb(30, 30, 46)
-8:98:1 Rgb(30, 30, 46)
+8:25:1 Default
+8:26:1 Default
+8:27:1 Default
+8:28:1 Default
+8:29:1 Default
+8:30:1 Default
+8:31:1 Default
+8:32:1 Default
+8:33:1 Default
+8:34:1 Default
+8:35:1 Default
+8:36:1 Default
+8:37:1 Default
+8:38:1 Default
+8:39:1 Default
+8:40:1 Default
+8:41:1 Default
+8:42:1 Default
+8:43:1 Default
+8:44:1 Default
+8:45:1 Default
+8:46:1 Default
+8:47:1 Default
+8:48:1 Default
+8:49:1 Default
+8:50:1 Default
+8:51:1 Default
+8:52:1 Default
+8:53:1 Default
+8:54:1 Default
+8:55:1 Default
+8:56:1 Default
+8:57:1 Default
+8:58:1 Default
+8:59:1 Default
+8:60:1 Default
+8:61:1 Default
+8:62:1 Default
+8:63:1 Default
+8:64:1 Default
+8:65:1 Default
+8:66:1 Default
+8:67:1 Default
+8:68:1 Default
+8:69:1 Default
+8:70:1 Default
+8:71:1 Default
+8:72:1 Default
+8:73:1 Default
+8:74:1 Default
+8:75:1 Default
+8:76:1 Default
+8:77:1 Default
+8:78:1 Default
+8:79:1 Default
+8:80:1 Default
+8:81:1 Default
+8:82:1 Default
+8:83:1 Default
+8:84:1 Default
+8:85:1 Default
+8:86:1 Default
+8:87:1 Default
+8:88:1 Default
+8:89:1 Default
+8:90:1 Default
+8:91:1 Default
+8:92:1 Default
+8:93:1 Default
+8:94:1 Default
+8:95:1 Default
+8:96:1 Default
+8:97:1 Default
+8:98:1 Default
 8:99:1 Default
 9:0:1 Default
 9:1:1 Default

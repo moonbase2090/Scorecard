@@ -14,11 +14,11 @@ The secrets gate recognizes Slack incoming webhooks, Stripe restricted live keys
 
 ## Browse a saved analysis
 
-The optional `tui` Cargo feature adds `sc tui [PATH]`, a keyboard browser for
-`PATH/.sc/last-scorecard.json`. Build with `cargo build --release -p scorecard-cli --features tui`,
-run `sc analyze` in your project, then open `sc tui`. Use the gate rail, badge tabs,
-and virtualized Findings table to inspect the last completed analysis. Print a compact
-summary to scrollback or a pipe with `sc tui --inline`. See [Browse a saved analysis](docs/how-to/tui.md).
+Run `sc analyze` in your project, then open `sc tui` to browse the saved report.
+See why a gate failed or why tests were skipped. On the Findings tab, press Enter
+to read the selected finding's full message, suggested action, and evidence.
+Use `sc tui --inline` for a compact summary in scrollback or a pipe.
+See [Browse a saved analysis](docs/how-to/tui.md).
 
 ## Quickstart
 
