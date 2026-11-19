@@ -14,11 +14,15 @@ Select gates with Up/Down or `j`/`k`. The Overview shows the verdict and whether
 were skipped. Select the tests gate for the reason. Use PageUp and PageDown to read
 long gate explanations.
 
+![Overview of a passing diff with the skipped tests gate selected](../images/tui-tests-skipped.png)
+
 Use Tab and Shift+Tab to move between Overview, Findings, and Engines. On Findings,
 Up/Down selects a row, PageUp and PageDown move a page, and Home and End jump to the
 first and last findings. Press Enter to read the full message, location, and any
 suggested action or evidence in the saved report. Use Up/Down to scroll and Esc to
 return to the selected row. Press `q` to quit.
+
+![Finding detail showing the saved diagnostic for a missing test runner](../images/tui-finding-detail.png)
 
 Click a file-and-line link in a terminal that supports OSC 8. The target must be an existing
 file inside the project. Missing files and paths outside the project remain plain text.
