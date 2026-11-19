@@ -195,3 +195,12 @@ Every measured frame must be at most 16 ms. Review snapshot text and style chang
 individually before accepting them. See `docs/how-to/tui.md` for the measured scope.
 Record both commands and their results at the PR head; a passing default-feature
 workspace test does not cover the browser.
+
+## Verify Python uv runners
+
+After changing Python runner selection, build `sc` and run
+`python3 scripts/verify-python-uv.py target/debug/sc`. This uses real uv
+projects with `dev` and `test` groups, optional extras, and neither. Each
+pytest gate must pass, and coverage.py must produce a JSON report. Groups
+use `--group`; extras use `--extra`. A uv setup failure is reported as
+`engine.unavailable`, without claiming that pytest ran and failed.
