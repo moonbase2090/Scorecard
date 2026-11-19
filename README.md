@@ -133,7 +133,7 @@ Next:
 
 - Put `sc` on your `PATH` (the quickstart installs to `~/.local/bin`), or see [Install](#install).
 - Add `.sc/` to `.gitignore`. `sc` keeps its last report and caches there.
-- Run `sc doctor` to see which tools your language pack needs and how to install any that are missing. Python projects with a test suite require `uv` when `uv.lock` or `.venv` exists; other Python suites need pytest and, with coverage enabled, `pytest-cov` or `coverage.py`.
+- Run `sc doctor` to see which tools your language pack needs and how to install any that are missing. Python projects with a test suite require `uv` when `uv.lock` or `.venv` exists; other Python suites need pytest and, with coverage enabled, `pytest-cov` or `coverage.py`. Python uv runners select declared `dev` and `test` dependency groups with `--group` and optional extras with `--extra`. Both are included when both are declared; no extra is assumed. A uv setup error reports that pytest did not run.
 - Run `sc setup` so coding agents on this machine can use `sc` ([agents](docs/how-to/agents.md)).
 - Install just the agent instructions with `sc skills install --agent detected`; see [skill installation](docs/how-to/agents.md#install-the-skill).
 - Write a user config with `sc config init`, or put `analyzer.toml` at the project root ([configure](docs/how-to/config.md)).
