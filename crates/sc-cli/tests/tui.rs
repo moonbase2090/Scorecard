@@ -2,7 +2,15 @@
 use sc_core::{Finding, Gate, Scorecard};
 use std::process::Command;
 use std::time::Duration;
-use termlens::{Key, Terminal};
+use termlens::{Key, Terminal, TerminalBuilder};
+
+fn terminal_builder() -> TerminalBuilder {
+    let builder = Terminal::builder().env_clear();
+    match std::env::var_os("LLVM_PROFILE_FILE") {
+        Some(path) => builder.env("LLVM_PROFILE_FILE", path),
+        None => builder,
+    }
+}
 
 struct Project(std::path::PathBuf);
 impl Project {
@@ -34,6 +42,8 @@ impl Project {
             enforced: false,
             reason: Some("Advisory dependency finding".into()),
         });
+        let mut diagnostics: Vec<_> = (1..=20).map(|n| format!("Case {n}: passed")).collect();
+        diagnostics.push("Case 21: inventory update lost".into());
         card.sections.findings.push(Finding {
             id: "finding-1".into(),
             rule: "tests.failed".into(),
@@ -43,7 +53,7 @@ impl Project {
             span: None,
             symbol: Some("demo::tests::it_adds".into()),
             message: "One test failed\nassertion failed: left (2) equals right (3)".into(),
-            evidence: serde_json::json!({ "exit_code": 101 }),
+            evidence: serde_json::json!({ "exit_code": 101, "test_output": diagnostics }),
             suggested_action: Some("Rerun cargo test it_adds".into()),
             disposition: "fix".into(),
         });
@@ -93,9 +103,8 @@ fn tui_rejects_piped_output_without_escapes() {
 fn tui_navigates_gates_tabs_and_quits() -> termlens::Result<()> {
     let project = Project::new("navigation");
     project.report();
-    let mut terminal = Terminal::builder()
+    let mut terminal = terminal_builder()
         .size(100, 24)
-        .env_clear()
         .timeout(Duration::from_secs(5))
         .arg("tui")
         .arg(&project.0)
@@ -125,6 +134,11 @@ fn tui_navigates_gates_tabs_and_quits() -> termlens::Result<()> {
             && s.contains("Rerun cargo test it_adds")
             && s.contains("\"exit_code\": 101")
     })?;
+    assert!(!terminal.screen().contains("Case 21: inventory update lost"));
+    terminal.send(Key::PageDown)?;
+    terminal.wait_until(|s| s.contains("Case 21: inventory update lost"))?;
+    terminal.send(Key::Home)?;
+    terminal.wait_until(|s| s.contains("assertion failed: left (2) equals right (3)"))?;
     terminal.send(Key::Esc)?;
     terminal.wait_until(|s| s.contains("> error") && s.contains("1/1 | PgUp/PgDn"))?;
     terminal.send(Key::Tab)?;
@@ -153,9 +167,8 @@ fn tui_explains_skipped_tests_in_a_passing_report() -> termlens::Result<()> {
         serde_json::to_vec(&card).unwrap(),
     )
     .unwrap();
-    let mut terminal = Terminal::builder()
+    let mut terminal = terminal_builder()
         .size(60, 12)
-        .env_clear()
         .timeout(Duration::from_secs(5))
         .arg("tui")
         .arg(&project.0)
@@ -176,9 +189,8 @@ fn tui_explains_skipped_tests_in_a_passing_report() -> termlens::Result<()> {
 #[test]
 fn tui_missing_report_gives_recovery_command() -> termlens::Result<()> {
     let project = Project::new("missing");
-    let mut terminal = Terminal::builder()
+    let mut terminal = terminal_builder()
         .size(100, 24)
-        .env_clear()
         .timeout(Duration::from_secs(5))
         .arg("tui")
         .arg(&project.0)
@@ -199,9 +211,8 @@ fn tui_handles_empty_reports_and_backward_navigation() -> termlens::Result<()> {
         serde_json::to_vec(&card).unwrap(),
     )
     .unwrap();
-    let mut terminal = Terminal::builder()
+    let mut terminal = terminal_builder()
         .size(80, 24)
-        .env_clear()
         .timeout(Duration::from_secs(5))
         .arg("tui")
         .arg(&project.0)
@@ -222,14 +233,15 @@ fn tui_handles_empty_reports_and_backward_navigation() -> termlens::Result<()> {
 fn tui_gives_a_size_hint_in_small_terminals() -> termlens::Result<()> {
     let project = Project::new("small");
     project.report();
-    let mut terminal = Terminal::builder()
+    let mut terminal = terminal_builder()
         .size(50, 10)
-        .env_clear()
         .timeout(Duration::from_secs(5))
         .arg("tui")
         .arg(&project.0)
         .spawn(env!("CARGO_BIN_EXE_sc"))?;
     terminal.wait_until(|s| s.contains("at least 60x12"))?;
+    terminal.resize(80, 24)?;
+    terminal.wait_until(|s| s.contains("Selected gate: types") && !s.contains("at least 60x12"))?;
     terminal.send(Key::Ctrl('c'))?;
     assert!(terminal.wait_exit()?.success());
     Ok(())
@@ -239,9 +251,8 @@ fn tui_gives_a_size_hint_in_small_terminals() -> termlens::Result<()> {
 fn tui_rejects_malformed_saved_reports() -> termlens::Result<()> {
     let project = Project::new("malformed");
     std::fs::write(project.0.join(".sc/last-scorecard.json"), "{").unwrap();
-    let mut terminal = Terminal::builder()
+    let mut terminal = terminal_builder()
         .size(100, 24)
-        .env_clear()
         .timeout(Duration::from_secs(5))
         .arg("tui")
         .arg(&project.0)
@@ -267,9 +278,8 @@ fn tui_renders_report_control_characters_as_text() -> termlens::Result<()> {
         serde_json::to_vec(&card).unwrap(),
     )
     .unwrap();
-    let mut terminal = Terminal::builder()
+    let mut terminal = terminal_builder()
         .size(100, 24)
-        .env_clear()
         .timeout(Duration::from_secs(5))
         .arg("tui")
         .arg(&project.0)
@@ -342,9 +352,8 @@ fn findings_scroll_through_one_hundred_thousand_real_rows() -> termlens::Result<
     let mut card = Scorecard::skeleton("demo", 30);
     card.sections.findings = (0..100_000).map(finding).collect();
     save(&project, &card);
-    let mut terminal = Terminal::builder()
+    let mut terminal = terminal_builder()
         .size(100, 24)
-        .env_clear()
         .timeout(Duration::from_secs(5))
         .arg("tui")
         .arg(&project.0)
@@ -394,9 +403,8 @@ fn full_screen_and_inline_emit_closed_escaped_file_line_links() -> termlens::Res
     save(&project, &card);
     let suffix = "/space%20%23%25.rs#L42";
     for inline in [false, true] {
-        let mut builder = Terminal::builder()
+        let mut builder = terminal_builder()
             .size(100, 24)
-            .env_clear()
             .env("TERM", "xterm-256color")
             .timeout(Duration::from_secs(5))
             .arg("tui")
@@ -474,9 +482,8 @@ fn links_reject_outside_missing_and_control_paths_but_preserve_safe_labels() -> 
         card.sections.findings.push(item);
     }
     save(&project, &card);
-    let mut terminal = Terminal::builder()
+    let mut terminal = terminal_builder()
         .size(120, 24)
-        .env_clear()
         .timeout(Duration::from_secs(5))
         .arg("tui")
         .arg(&project.0)
@@ -532,9 +539,8 @@ fn findings_redraw_changed_combining_graphemes() -> termlens::Result<()> {
     second.message = "o\u{308}".into();
     card.sections.findings = vec![first, second];
     save(&project, &card);
-    let mut terminal = Terminal::builder()
+    let mut terminal = terminal_builder()
         .size(100, 24)
-        .env_clear()
         .timeout(Duration::from_secs(5))
         .arg("tui")
         .arg(&project.0)
@@ -582,9 +588,8 @@ printf 'RESTORED:%s\n' "$code"
 exit "$code"
 "#;
     for key in [Key::Char('q'), Key::Ctrl('c')] {
-        let mut terminal = Terminal::builder()
+        let mut terminal = terminal_builder()
             .size(100, 24)
-            .env_clear()
             .env("PATH", "/usr/bin:/bin")
             .timeout(Duration::from_secs(5))
             .args(["-c", check_modes, "tui-restore", env!("CARGO_BIN_EXE_sc")])
