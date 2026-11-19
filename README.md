@@ -23,7 +23,7 @@ summary to scrollback or a pipe with `sc tui --inline`. See [Browse a saved anal
 Download `sc` for your platform and run it on a project:
 
 ```bash doctest network
-VERSION=v0.1.14
+VERSION=v0.2.1
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64) TARGET=aarch64-apple-darwin ;;
   Darwin-x86_64) TARGET=x86_64-apple-darwin ;;
@@ -157,7 +157,7 @@ The secrets scan also finds PEM private keys split across source string literals
 
 ## Install
 
-Published release [v0.1.14](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.14). Each `.tar.gz` holds a top-level directory `sc-v<version>-<target>/` with `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md`.
+Published release [v0.2.1](https://github.com/moonbase2090/Scorecard/releases/tag/v0.2.1). Asset names use that version. Each `.tar.gz` holds a top-level directory `sc-v<version>-<target>/` with `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md`.
 
 Install `sc` and `sc-mcp` into `~/.local/bin`. The script picks the release archive for this OS and architecture and checks it against `SHA256SUMS` before copying either binary:
 
@@ -165,15 +165,16 @@ Install `sc` and `sc-mcp` into `~/.local/bin`. The script picks the release arch
 curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/moonbase2090/Scorecard/main/install.sh | sh
 ```
 
-Set `SC_VERSION=0.1.14` to pin that release. With no pin, the script installs the latest release. Linux and macOS use the `.tar.gz` assets (arm64 and x86_64). Windows x86_64 uses the `.zip` when the script runs under Git Bash or another Unix shell. The script stops before it installs anything when the checksum does not match, the platform has no asset, or neither `sha256sum` nor `shasum` is available. When `~/.local/bin` is not on `PATH`, the script prints the `export` line to add.
+Set `SC_VERSION` (for example `0.2.1`) to pin that release. With no pin, the script installs the latest release. Linux and macOS use the `.tar.gz` assets (arm64 and x86_64). Windows x86_64 uses the `.zip` when the script runs under Git Bash or another Unix shell. The script stops before it installs anything when the checksum does not match, the platform has no asset, or neither `sha256sum` nor `shasum` is available. When `~/.local/bin` is not on `PATH`, the script prints the `export` line to add.
 
 | Platform | Asset |
 |---|---|
-| macOS, Apple silicon | `sc-v0.1.14-aarch64-apple-darwin.tar.gz` |
-| macOS, Intel | `sc-v0.1.14-x86_64-apple-darwin.tar.gz` |
-| macOS installer | `sc-v0.1.14-macos.pkg`, or `sc-v0.1.14-universal-apple-darwin.dmg`. Installs `sc` and `sc-mcp` to `/usr/local/bin` |
-| Linux, arm64 | `sc-v0.1.14-aarch64-unknown-linux-gnu.tar.gz` |
-| Linux, x86_64 | `sc-v0.1.14-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS, Apple silicon | `sc-v<version>-aarch64-apple-darwin.tar.gz` |
+| macOS, Intel | `sc-v<version>-x86_64-apple-darwin.tar.gz` |
+| macOS installer | `sc-v<version>-macos.pkg`, or `sc-v<version>-universal-apple-darwin.dmg`. Installs `sc` and `sc-mcp` to `/usr/local/bin` |
+| Linux, arm64 | `sc-v<version>-aarch64-unknown-linux-gnu.tar.gz` |
+| Linux, x86_64 | `sc-v<version>-x86_64-unknown-linux-gnu.tar.gz` |
+| Windows, x86_64 | `sc-v<version>-x86_64-pc-windows-msvc.zip` |
 
 ### Homebrew
 
@@ -189,7 +190,7 @@ The formula installs `sc` and `sc-mcp` for macOS and Linux on arm64 and x86_64. 
 To check a download, fetch `SHA256SUMS` into the same directory and verify only the files you have:
 
 ```bash
-curl -fsSLO https://github.com/moonbase2090/Scorecard/releases/download/v0.1.14/SHA256SUMS
+curl -fsSLO https://github.com/moonbase2090/Scorecard/releases/latest/download/SHA256SUMS
 shasum -a 256 -c --ignore-missing SHA256SUMS   # Linux: sha256sum -c --ignore-missing SHA256SUMS
 ```
 
