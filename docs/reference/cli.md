@@ -4,7 +4,7 @@
 sc analyze [PATH] [OPTIONS]
 sc badge [--input PATH]
 sc doctor [PATH] [--pack PACK]
-sc tui [PATH] [--inline]    # requires the tui Cargo feature
+sc tui [PATH] [--inline]
 sc config path
 sc config init [--force]
 sc setup

@@ -1,27 +1,28 @@
 # Browse a saved analysis
 
-Build Scorecard with the optional terminal browser:
-
-```sh
-cargo build --release -p scorecard-cli --features tui
-```
-
-From your project directory, save an analysis and open it with that build:
+From your project directory, save an analysis and open it in the terminal browser:
 
 ```sh
 sc analyze .
 sc tui .
 ```
 
-Use `target/release/sc` from the source checkout if you have not installed your build on PATH.
-Analysis can exit 1 for failed gates and still save the report. The browser shows those
-results without rerunning tools. Run `sc analyze` again to refresh the saved report.
+Analysis can exit 1 for failed gates and still save the report. Run `sc analyze` again to
+refresh the saved report.
 
-Select gates with Up/Down or `j`/`k`. Use Tab and Shift+Tab to move between Overview,
-Findings, and Engines. The badges count saved findings and engines that ran. Press `q` to quit.
-On Findings, Up/Down selects a row and shows its message below the table. Use PageUp
-and PageDown to scroll a page, or Home and End to jump to the first and last findings.
-The browser formats only visible rows, even for reports with 100,000 findings.
+Select gates with Up/Down or `j`/`k`. The Overview shows the verdict and whether tests
+were skipped. Select the tests gate for the reason. Use PageUp and PageDown to read
+long gate explanations.
+
+![Overview of a passing diff with the skipped tests gate selected](../images/tui-tests-skipped.png)
+
+Use Tab and Shift+Tab to move between Overview, Findings, and Engines. On Findings,
+Up/Down selects a row, PageUp and PageDown move a page, and Home and End jump to the
+first and last findings. Press Enter to read the full message, location, and any
+suggested action or evidence in the saved report. Use Up/Down to scroll and Esc to
+return to the selected row. Press `q` to quit.
+
+![Finding detail showing the saved diagnostic for a missing test runner](../images/tui-finding-detail.png)
 
 Click a file-and-line link in a terminal that supports OSC 8. The target must be an existing
 file inside the project. Missing files and paths outside the project remain plain text.
@@ -36,8 +37,8 @@ sc tui . --inline
 Inline mode shows up to eight gates and five findings, then counts the rest. It reads no
 input and leaves the terminal screen intact. Redirected inline output contains no terminal escapes.
 
-Use an interactive terminal of at least 60 columns and 12 rows. Reopen the browser after
-resizing. For redirected output, use `sc analyze --format json`.
+Use an interactive terminal of at least 60 columns and 12 rows. For redirected output,
+use `sc analyze --format json`.
 
 To verify the browser from the source checkout, run:
 
@@ -72,5 +73,5 @@ production and PTY delivery, not terminal-emulator painting or key-to-screen lat
 CI saves the maximum and byte count for every case as the `tui-perf` artifact.
 The 8 ms dedicated-machine target is separate from the 16 ms shared-runner gate.
 
-TUI remains an optional build feature. These checks do not enable it in release
-artifacts or authorize a version bump or release.
+Source builds include the browser by default. To build a CLI without it, run
+`cargo build --release -p scorecard-cli --no-default-features`.
