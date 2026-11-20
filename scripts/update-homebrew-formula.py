@@ -53,7 +53,7 @@ def formula(version: str, checksums: dict[str, str]) -> str:
         "class ScorecardCli < Formula\n"
         "  desc \"Scorecard (scorecard-cli), local code-quality gate; not OpenSSF Scorecard\"\n"
         "  homepage \"https://github.com/moonbase2090/Scorecard\"\n"
-        '  license any_of: ["Apache-2.0", "MIT"]\n\n'
+        '  license "MIT"\n\n'
         + "\n\n".join(sections)
         + "\n\n"
         "  def install\n"

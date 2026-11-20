@@ -25,7 +25,7 @@ See [Browse a saved analysis](docs/how-to/tui.md).
 Download `sc` for your platform and run it on a project:
 
 ```bash doctest network
-VERSION=v0.1.14
+VERSION=v0.2.1
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64) TARGET=aarch64-apple-darwin ;;
   Darwin-x86_64) TARGET=x86_64-apple-darwin ;;
@@ -159,15 +159,18 @@ The secrets scan also finds PEM private keys split across source string literals
 
 ## Install
 
-Published release [v0.1.14](https://github.com/moonbase2090/Scorecard/releases/tag/v0.1.14). Each `.tar.gz` holds a top-level directory `sc-v<version>-<target>/` with `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md`.
+Published release [v0.2.1](https://github.com/moonbase2090/Scorecard/releases/tag/v0.2.1). Each `.tar.gz` holds a top-level directory `sc-v<version>-<target>/` with `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md`.
 
 | Platform | Asset |
 |---|---|
-| macOS, Apple silicon | `sc-v0.1.14-aarch64-apple-darwin.tar.gz` |
-| macOS, Intel | `sc-v0.1.14-x86_64-apple-darwin.tar.gz` |
-| macOS installer | `sc-v0.1.14-macos.pkg`, or `sc-v0.1.14-universal-apple-darwin.dmg`. Installs `sc` and `sc-mcp` to `/usr/local/bin` |
-| Linux, arm64 | `sc-v0.1.14-aarch64-unknown-linux-gnu.tar.gz` |
-| Linux, x86_64 | `sc-v0.1.14-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS, Apple silicon | `sc-v0.2.1-aarch64-apple-darwin.tar.gz` |
+| macOS, Intel | `sc-v0.2.1-x86_64-apple-darwin.tar.gz` |
+| macOS installer | `sc-v0.2.1-macos.pkg`, or `sc-v0.2.1-universal-apple-darwin.dmg`. Installs `sc` and `sc-mcp` to `/usr/local/bin` |
+| Linux, arm64 | `sc-v0.2.1-aarch64-unknown-linux-gnu.tar.gz` |
+| Linux, x86_64 | `sc-v0.2.1-x86_64-unknown-linux-gnu.tar.gz` |
+| Windows, x86_64 | `sc-v0.2.1-x86_64-pc-windows-msvc.zip` |
+
+The v0.2.1 Linux binaries require glibc 2.39 or newer.
 
 ### Homebrew
 
@@ -175,7 +178,8 @@ Install the formula from the `moonbase2090/homebrew-scorecard` tap:
 
 ```bash
 brew tap moonbase2090/scorecard
-brew install moonbase2090/scorecard/sc
+brew install moonbase2090/scorecard/scorecard-cli
+sc --version
 ```
 
 The formula installs `sc` and `sc-mcp` for macOS and Linux on arm64 and x86_64. The release workflow opens a formula update pull request after each signed release. See [Homebrew formula maintenance](docs/homebrew.md) for workflow setup.
@@ -183,7 +187,7 @@ The formula installs `sc` and `sc-mcp` for macOS and Linux on arm64 and x86_64. 
 To check a download, fetch `SHA256SUMS` into the same directory and verify only the files you have:
 
 ```bash
-curl -fsSLO https://github.com/moonbase2090/Scorecard/releases/download/v0.1.14/SHA256SUMS
+curl -fsSLO https://github.com/moonbase2090/Scorecard/releases/download/v0.2.1/SHA256SUMS
 shasum -a 256 -c --ignore-missing SHA256SUMS   # Linux: sha256sum -c --ignore-missing SHA256SUMS
 ```
 
