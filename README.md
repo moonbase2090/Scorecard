@@ -6,17 +6,19 @@
 
 `sc` is a local code-quality gate. In one run it checks that a project builds, its tests pass, complex code is covered by tests ([CRAP](docs/crap.md)), no secrets are committed, the linter is clean, and every import is a declared dependency. It prints a verdict for people and a JSON scorecard for agents and CI. Ten language packs are built in. Project site: [scorecardcli.com](https://scorecardcli.com).
 
+Scorecard (scorecard-cli) is a local code-quality gate and is not related to OpenSSF Scorecard.
+
 The secrets scan checks files up to 64 MiB even when they contain NUL bytes. It skips gitignored large files. A non-ignored file over 64 MiB produces `secrets.partial`, except when the file begins with a known object format (ELF, Mach-O, PE, WebAssembly, or `ar` archive); those binaries are not scanned at any size and the report lists `secrets.skipped_object` (info) instead of matching token patterns inside the binary.
 
 The secrets gate recognizes Slack incoming webhooks, Stripe restricted live keys (`rk_live_`), and AWS provider secret keys in Terraform, alongside the existing token and key formats.
 
 ## Browse a saved analysis
 
-The optional `tui` Cargo feature adds `sc tui [PATH]`, a keyboard browser for
-`PATH/.sc/last-scorecard.json`. Build with `cargo build --release -p sc-cli --features tui`,
-run `sc analyze` in your project, then open `sc tui`. Use the gate rail, badge tabs,
-and virtualized Findings table to inspect the last completed analysis. Print a compact
-summary to scrollback or a pipe with `sc tui --inline`. See [Browse a saved analysis](docs/how-to/tui.md).
+Run `sc analyze` in your project, then open `sc tui` to browse the saved report.
+See why a gate failed or why tests were skipped. On the Findings tab, press Enter
+to read the selected finding's full message, suggested action, and evidence.
+Use `sc tui --inline` for a compact summary in scrollback or a pipe.
+See [Browse a saved analysis](docs/how-to/tui.md).
 
 ## Quickstart
 
@@ -64,7 +66,7 @@ Export a saved report to Waypoint with `sc export --waypoint --project PROJECT`.
 In a terminal the report looks like this (from `testdata/good_crate`):
 
 ```text
-sc 0.2.1  testdata/good_crate  rust  5ac851c clean  scope tree
+sc 0.2.2  testdata/good_crate  rust  5ac851c clean  scope tree
 
 PASS
 
@@ -131,7 +133,7 @@ Next:
 
 - Put `sc` on your `PATH` (the quickstart installs to `~/.local/bin`), or see [Install](#install).
 - Add `.sc/` to `.gitignore`. `sc` keeps its last report and caches there.
-- Run `sc doctor` to see which tools your language pack needs and how to install any that are missing. Python projects with a test suite require `uv` when `uv.lock` or `.venv` exists; other Python suites need pytest and, with coverage enabled, `pytest-cov` or `coverage.py`.
+- Run `sc doctor` to see which tools your language pack needs and how to install any that are missing. Python projects with a test suite require `uv` when `uv.lock` or `.venv` exists; other Python suites need pytest and, with coverage enabled, `pytest-cov` or `coverage.py`. Python uv runners select declared `dev` and `test` dependency groups with `--group` and optional extras with `--extra`. Both are included when both are declared; no extra is assumed. A uv setup error reports that pytest did not run.
 - Run `sc setup` so coding agents on this machine can use `sc` ([agents](docs/how-to/agents.md)).
 - Install just the agent instructions with `sc skills install --agent detected`; see [skill installation](docs/how-to/agents.md#install-the-skill).
 - Write a user config with `sc config init`, or put `analyzer.toml` at the project root ([configure](docs/how-to/config.md)).
@@ -176,13 +178,16 @@ Set `SC_VERSION` (for example `0.2.1`) to pin that release. With no pin, the scr
 | Linux, x86_64 | `sc-v<version>-x86_64-unknown-linux-gnu.tar.gz` |
 | Windows, x86_64 | `sc-v<version>-x86_64-pc-windows-msvc.zip` |
 
+The v0.2.1 Linux binaries require glibc 2.39 or newer.
+
 ### Homebrew
 
 Install the formula from the `moonbase2090/homebrew-scorecard` tap:
 
 ```bash
 brew tap moonbase2090/scorecard
-brew install moonbase2090/scorecard/sc
+brew install moonbase2090/scorecard/scorecard-cli
+sc --version
 ```
 
 The formula installs `sc` and `sc-mcp` for macOS and Linux on arm64 and x86_64. The release workflow opens a formula update pull request after each signed release. See [Homebrew formula maintenance](docs/homebrew.md) for workflow setup.
@@ -221,7 +226,7 @@ cargo install --locked --path crates/sc-cli
 cargo install --locked --path crates/sc-mcp
 ```
 
-The local binary manifests also support `cargo-binstall` from GitHub releases. Run `cargo binstall --manifest-path crates/sc-cli/Cargo.toml --dry-run --no-confirm sc-cli` to verify the CLI download without installing it. See [cargo-binstall checks](docs/how-to/cargo-binstall.md) for both binaries and all release targets. Registry publication remains disabled; `cargo install sc-cli` selects an unrelated package.
+The local binary manifests also support `cargo-binstall` from GitHub releases. Run `cargo binstall --manifest-path crates/sc-cli/Cargo.toml --dry-run --no-confirm scorecard-cli` to verify the CLI download without installing it. See [cargo-binstall checks](docs/how-to/cargo-binstall.md) for both binaries and all release targets. Registry publication remains disabled; the CLI package is named `scorecard-cli`, while its executable remains `sc`.
 
 Rust coverage needs `rustup component add llvm-tools` and `cargo install cargo-llvm-cov`. Without them `sc` still runs and reports coverage as not measured. Other packs need their own tools; see [packs](docs/packs.md).
 

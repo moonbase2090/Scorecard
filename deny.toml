@@ -22,6 +22,12 @@ allow = [
   "Unlicense",
   "Unicode-3.0",
 ]
+exceptions = [
+  # The pinned widget crate's raster dependency uses arrayref.
+  { crate = "arrayref@0.3.9", allow = ["BSD-2-Clause"] },
+  # The crate declares the font license even when its bigtext feature is disabled.
+  { crate = "lunatui-widgets@0.1.32", allow = ["OFL-1.1"] },
+]
 confidence-threshold = 0.8
 
 [licenses.private]

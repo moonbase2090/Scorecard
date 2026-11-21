@@ -20,7 +20,7 @@ if not froms[-1].startswith("FROM debian:bookworm-slim"):
 if "rust:" in froms[-1]:
     raise SystemExit("runtime stage uses the Rust toolchain image")
 for required in (
-    "cargo build --release --locked -p sc-cli -p sc-mcp",
+    "cargo build --release --locked -p scorecard-cli -p sc-mcp",
     "COPY --from=build",
     "/usr/local/bin/",
     "ca-certificates git",

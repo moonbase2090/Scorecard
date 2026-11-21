@@ -36,7 +36,7 @@ def main() -> int:
         )
     )
     packages = {p["name"]: p for p in metadata["packages"]}
-    for name in ("sc-cli", "sc-mcp"):
+    for name in ("scorecard-cli", "sc-mcp"):
         package = packages[name]
         disabled = package["metadata"]["binstall"].get("disabled-strategies", [])
         if not {"quick-install", "compile"}.issubset(disabled):

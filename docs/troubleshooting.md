@@ -4,11 +4,9 @@ Each section starts with what the report says. For a tool that is not installed,
 
 ## `tests: pytest is not installed`
 
-When the project has `uv.lock` or a `.venv` directory, `sc` runs `uv run --extra dev --with pytest-cov pytest`. If `uv` itself is not installed, the finding says `uv is not installed`. Run `sc doctor` to check the runner. If uv is missing, install it with `python3 -m pip install uv`, then create the environment once:
+When the project has `uv.lock` or a `.venv` directory, `sc` runs `uv run --with pytest-cov pytest -q`. It adds `--group dev` or `--group test` for declared dependency groups, and `--extra dev` or `--extra test` for declared optional extras. Both are included when both are declared. No extra is assumed.
 
-```bash
-uv venv && uv pip install -e ".[dev]"
-```
+If `uv` itself is not installed, the finding says `uv is not installed`. Run `sc doctor` to check the runner. Install uv with `python3 -m pip install uv`, then run `sc analyze` again. uv creates the environment and installs the selected dependencies. If environment setup fails, `sc` reports that pytest did not run; fix the uv error before rerunning.
 
 For projects without `uv.lock` or `.venv`, install pytest with `python3 -m pip install pytest`.
 

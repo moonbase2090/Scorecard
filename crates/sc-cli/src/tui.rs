@@ -4,11 +4,11 @@
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
-use lunatui_core::{clip_display_prefix, ClusterTable, Grid, Rect, Style, UnderlineStyle};
+use lunatui_core::{clip_display_prefix, ClusterTable, Grid, Rect, Size, Style, UnderlineStyle};
 use lunatui_runtime::{is_quit, App, ControlFlow, Input};
 use lunatui_term::{ColorMode, Encoder, Event, KeyCode, KeyKind, Session};
 use lunatui_theme::{Theme, Token, Variant};
-use lunatui_widgets::{Block, RenderCx, StatusBar, Tabs, Widget};
+use lunatui_widgets::{Block, Paragraph, RenderCx, StatusBar, Tabs, TextWrap, Widget};
 use sc_core::{Finding, Scorecard};
 
 mod output;
@@ -73,6 +73,9 @@ fn browse(mut browser: Browser, width: u16, height: u16) -> io::Result<()> {
             return Ok(());
         };
         for event in events {
+            if let Event::Resize(width, height) = event {
+                frame.resize(width, height);
+            }
             if browser.update(&event) == ControlFlow::Break {
                 return Ok(());
             }
@@ -85,6 +88,7 @@ struct Frame {
     encoder: Encoder,
     previous_links: Vec<Link>,
     clusters: ClusterTable,
+    repaint: bool,
 }
 
 impl Frame {
@@ -94,6 +98,18 @@ impl Frame {
             encoder: Encoder::new(),
             previous_links: Vec::new(),
             clusters: ClusterTable::new(),
+            repaint: false,
+        }
+    }
+
+    fn resize(&mut self, width: u16, height: u16) {
+        if width != 0
+            && height != 0
+            && (width, height) != (self.previous.width(), self.previous.height())
+        {
+            self.previous = Grid::new(width, height);
+            self.previous_links.clear();
+            self.repaint = true;
         }
     }
 
@@ -111,18 +127,21 @@ impl Frame {
         for link in &self.previous_links {
             link.append_plain_to(&mut bytes);
         }
-        bytes.extend_from_slice(self.encoder.encode_diff(
-            &self.previous,
-            &grid,
-            &self.clusters,
-            ColorMode::TrueColor,
-        ));
+        let contents = if self.repaint {
+            self.encoder
+                .encode_full(&grid, &self.clusters, ColorMode::TrueColor)
+        } else {
+            self.encoder
+                .encode_diff(&self.previous, &grid, &self.clusters, ColorMode::TrueColor)
+        };
+        bytes.extend_from_slice(contents);
         for link in &browser.links {
             link.append_to(&mut bytes);
         }
         session.present_frame(&bytes)?;
         self.previous = grid;
         self.previous_links = std::mem::take(&mut browser.links);
+        self.repaint = false;
         Ok(())
     }
 }
@@ -134,6 +153,9 @@ struct Browser {
     theme: Theme,
     finding: usize,
     page_size: usize,
+    detail: Option<String>,
+    body_scroll: u16,
+    body_height: u16,
     root: PathBuf,
     links: Vec<Link>,
 }
@@ -150,6 +172,9 @@ impl Browser {
             gate: 0,
             finding: 0,
             page_size: 1,
+            detail: None,
+            body_scroll: 0,
+            body_height: 1,
             root,
             links: Vec::new(),
             tab: 0,
@@ -157,33 +182,95 @@ impl Browser {
         }
     }
 
-    fn body(&self) -> Vec<String> {
+    fn verdict(&self) -> String {
+        if self.card.analyzer_error {
+            "ERROR".into()
+        } else {
+            clean(&self.card.verdict).to_uppercase()
+        }
+    }
+
+    fn tests_skipped(&self) -> bool {
+        self.card
+            .engines
+            .engines_skipped
+            .iter()
+            .any(|e| e == "tests")
+    }
+
+    fn tests_ran(&self) -> bool {
+        self.card.engines.engines_run.iter().any(|e| e == "tests")
+    }
+
+    fn gate_state(&self, gate: &sc_core::Gate) -> &'static str {
+        if gate.id == "tests"
+            && (gate.pass || !gate.enforced)
+            && self.tests_skipped()
+            && !self.tests_ran()
+        {
+            return "SKIP";
+        }
+        gate_state(gate)
+    }
+
+    fn body(&self) -> String {
         match self.tab {
             0 => {
-                let mut lines = vec![
-                    "Saved analysis".into(),
-                    "Run sc analyze to refresh this report.".into(),
-                    String::new(),
-                ];
+                let mut lines = vec![format!("Saved analysis | {}", self.verdict())];
+                if self.card.analyzer_error {
+                    lines.push("Analysis could not finish. See Findings for details.".into());
+                }
+                if self.tests_skipped() {
+                    let message = if self.tests_ran() {
+                        "Tests were skipped in some packs. See the tests gate."
+                    } else {
+                        "Tests were skipped. See the tests gate for the reason."
+                    };
+                    lines.push(message.into());
+                }
+                lines.push(String::new());
                 if let Some(gate) = self.card.measures.gates.get(self.gate) {
-                    lines.push(format!("Selected gate: {}", gate.id));
-                    lines.push(format!("Result: {}", gate_state(gate)));
+                    lines.push(format!("Selected gate: {}", clean(&gate.id)));
+                    lines.push(format!("Result: {}", self.gate_state(gate)));
                     lines.push(format!(
                         "Enforced: {}",
                         if gate.enforced { "yes" } else { "no" }
                     ));
                     if let Some(reason) = &gate.reason {
-                        lines.push(reason.clone());
+                        lines.push(clean(reason));
                     }
                 } else {
                     lines.push("No gates in this report".into());
                 }
-                lines
+                lines.join("\n")
             }
-            _ => vec![
-                format!("Ran: {}", list(&self.card.engines.engines_run)),
-                format!("Skipped: {}", list(&self.card.engines.engines_skipped)),
-            ],
+            _ => format!(
+                "Ran: {}\nSkipped: {}",
+                list(&self.card.engines.engines_run),
+                list(&self.card.engines.engines_skipped)
+            ),
+        }
+    }
+
+    fn update_detail(&mut self, code: KeyCode) {
+        match code {
+            KeyCode::Esc => {
+                self.detail = None;
+                self.body_scroll = 0;
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.body_scroll = self.body_scroll.saturating_add(1)
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.body_scroll = self.body_scroll.saturating_sub(1)
+            }
+            KeyCode::PageDown => {
+                self.body_scroll = self.body_scroll.saturating_add(self.body_height)
+            }
+            KeyCode::PageUp => self.body_scroll = self.body_scroll.saturating_sub(self.body_height),
+            KeyCode::Home => self.body_scroll = 0,
+            KeyCode::End => self.body_scroll = u16::MAX,
+            _ => {}
         }
     }
 }
@@ -196,7 +283,7 @@ fn list(items: &[String]) -> String {
     if items.is_empty() {
         "none".into()
     } else {
-        items.join(", ")
+        clean(&items.join(", "))
     }
 }
 
@@ -206,6 +293,57 @@ fn gate_state(gate: &sc_core::Gate) -> &'static str {
         (false, true) => "FAIL",
         (false, false) => "REPORT",
     }
+}
+
+fn finding_detail(finding: &Finding) -> String {
+    let mut rows = vec![
+        format!("{} | {}", clean(&finding.rule), clean(&finding.severity)),
+        format!("Location: {}", location_label(finding)),
+    ];
+    if let Some(symbol) = &finding.symbol {
+        rows.push(format!("Symbol: {}", clean(symbol)));
+    }
+    rows.extend([String::new(), clean_multiline(&finding.message)]);
+    if let Some(action) = &finding.suggested_action {
+        rows.push(format!("\nNext step\n{}", clean_multiline(action)));
+    }
+    if !finding.evidence.is_null() && finding.evidence.as_object().is_none_or(|e| !e.is_empty()) {
+        let evidence = match finding.evidence.as_str() {
+            Some(text) => clean_multiline(text),
+            None => serde_json::to_string_pretty(&finding.evidence)
+                .unwrap_or_else(|_| finding.evidence.to_string()),
+        };
+        rows.push(format!("\nEvidence\n{evidence}"));
+    }
+    rows.join("\n")
+}
+
+fn clean_multiline(text: &str) -> String {
+    text.lines().map(clean).collect::<Vec<_>>().join("\n")
+}
+
+fn render_body(
+    text: impl Into<String>,
+    scroll: &mut u16,
+    area: Rect,
+    style: Style,
+    cx: &mut RenderCx<'_>,
+) {
+    let paragraph = Paragraph::new(text)
+        .wrap(TextWrap { trim: true })
+        .style(style);
+    let rows = paragraph.measure(Size::new(area.width, u16::MAX)).height;
+    *scroll = (*scroll).min(rows.saturating_sub(area.height));
+    cx.set_style(
+        Rect::new(
+            area.x,
+            area.y,
+            area.width,
+            rows.saturating_sub(*scroll).min(area.height),
+        ),
+        style,
+    );
+    paragraph.scroll((*scroll, 0)).render(area, cx);
 }
 
 impl App for Browser {
@@ -219,11 +357,17 @@ impl App for Browser {
         if is_quit(event) || (key.code == KeyCode::Char('c') && key.modifiers.is_control()) {
             return ControlFlow::Break;
         }
+        if self.detail.is_some() {
+            self.update_detail(key.code);
+            return ControlFlow::Continue;
+        }
+        let previous_tab = self.tab;
         let (selected, len) = if self.tab == 1 {
             (&mut self.finding, self.card.sections.findings.len())
         } else {
             (&mut self.gate, self.card.measures.gates.len())
         };
+        let previous_selection = *selected;
         let last = len.saturating_sub(1);
         match key.code {
             KeyCode::Down | KeyCode::Char('j') => *selected = selected.saturating_add(1).min(last),
@@ -232,12 +376,27 @@ impl App for Browser {
                 *selected = selected.saturating_add(self.page_size).min(last)
             }
             KeyCode::PageUp if self.tab == 1 => *selected = selected.saturating_sub(self.page_size),
+            KeyCode::PageDown => {
+                self.body_scroll = self.body_scroll.saturating_add(self.body_height)
+            }
+            KeyCode::PageUp => self.body_scroll = self.body_scroll.saturating_sub(self.body_height),
             KeyCode::Home => *selected = 0,
             KeyCode::End => *selected = last,
+            KeyCode::Enter if self.tab == 1 => {
+                self.detail = self
+                    .card
+                    .sections
+                    .findings
+                    .get(*selected)
+                    .map(finding_detail);
+            }
             KeyCode::Tab if key.modifiers.is_shift() => self.tab = (self.tab + 2) % 3,
             KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => self.tab = (self.tab + 1) % 3,
             KeyCode::Left | KeyCode::Char('h') => self.tab = (self.tab + 2) % 3,
             _ => {}
+        }
+        if self.tab != previous_tab || *selected != previous_selection {
+            self.body_scroll = 0;
         }
         ControlFlow::Continue
     }
@@ -258,11 +417,24 @@ impl App for Browser {
                 .render(area, &mut cx);
             return;
         }
-        // Blocks style their entire areas; only the footer retains the base background.
-        cx.set_style(
-            Rect::new(area.x, area.y + area.height - 1, area.width, 1),
-            base,
-        );
+        let footer = Rect::new(area.x, area.y + area.height - 1, area.width, 1);
+        cx.set_style(footer, base);
+        if let Some(detail) = &self.detail {
+            let block = Block::bordered()
+                .title("Finding detail")
+                .style(base)
+                .border_style(base)
+                .title_style(accent);
+            let panel = Rect::new(area.x, area.y, area.width, area.height - 1);
+            block.render(panel, &mut cx);
+            let body = block.inner(panel);
+            self.body_height = body.height;
+            render_body(detail.as_str(), &mut self.body_scroll, body, base, &mut cx);
+            line("Esc back | j/k scroll | PgUp/PgDn | q quit")
+                .style(accent)
+                .render(footer, &mut cx);
+            return;
+        }
         let rail_width = 24.min(area.width / 3);
         let rail = Rect::new(area.x, area.y, rail_width, area.height - 1);
         let panel = Rect::new(
@@ -288,7 +460,7 @@ impl App for Browser {
             let label = format!(
                 "{} {} {}",
                 if offset + row == self.gate { ">" } else { " " },
-                gate_state(gate),
+                self.gate_state(gate),
                 gate.id
             );
             line(label)
@@ -320,6 +492,7 @@ impl App for Browser {
             content.width,
             content.height.saturating_sub(2),
         );
+        self.body_height = body_area.height;
         if self.tab == 1 {
             self.page_size = usize::from(body_area.height.saturating_sub(3)).max(1);
             render_findings(
@@ -332,28 +505,19 @@ impl App for Browser {
                 &mut cx,
             );
         } else {
-            for (row, body_line) in self
-                .body()
-                .into_iter()
-                .take(usize::from(body_area.height))
-                .enumerate()
-            {
-                line(body_line).style(base).render(
-                    Rect::new(body_area.x, body_area.y + row as u16, body_area.width, 1),
-                    &mut cx,
-                );
-            }
+            render_body(self.body(), &mut self.body_scroll, body_area, base, &mut cx);
         }
         let status = format!(
-            "{} | {} gates | j/k {} | Tab tabs | q quit | saved report",
-            self.card.verdict.to_uppercase(),
+            "{} | {} gates | {} | Tab tabs | q quit",
+            self.verdict(),
             self.card.measures.gates.len(),
-            if self.tab == 1 { "findings" } else { "gates" }
+            if self.tab == 1 {
+                "Enter details"
+            } else {
+                "j/k gates | PgUp/PgDn"
+            }
         );
-        line(status).style(accent).render(
-            Rect::new(area.x, area.y + area.height - 1, area.width, 1),
-            &mut cx,
-        );
+        line(status).style(accent).render(footer, &mut cx);
     }
 }
 
