@@ -51,7 +51,7 @@ windows-sys = { version = "0.61", features = [
 [dev-dependencies]
 insta = { version = "1.43", default-features = false }
 lunatui-test = { git = "https://github.com/moonbase2090/lunatui", tag = "v0.1.32" }
-termlens = { version = "=0.11.8", default-features = false }
+termlens = { version = "=0.11.10", default-features = false }
 
 [[test]]
 name = "tui"
