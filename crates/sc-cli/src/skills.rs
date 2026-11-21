@@ -376,7 +376,7 @@ fn install_muse(
     }
 
     let temp_root = std::env::temp_dir().join(format!(
-        "sc-muse-skill-{}-{}",
+        "sc-skill-install-{}-{}",
         std::process::id(),
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
