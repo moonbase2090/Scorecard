@@ -25,7 +25,7 @@ See [Browse a saved analysis](docs/how-to/tui.md).
 Download `sc` for your platform and run it on a project:
 
 ```bash doctest network
-VERSION=v0.2.1
+VERSION=v0.2.2
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64) TARGET=aarch64-apple-darwin ;;
   Darwin-x86_64) TARGET=x86_64-apple-darwin ;;
@@ -159,7 +159,7 @@ The secrets scan also finds PEM private keys split across source string literals
 
 ## Install
 
-Published release [v0.2.1](https://github.com/moonbase2090/Scorecard/releases/tag/v0.2.1). Asset names use that version. Each `.tar.gz` holds a top-level directory `sc-v<version>-<target>/` with `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md`.
+Published release [v0.2.2](https://github.com/moonbase2090/Scorecard/releases/tag/v0.2.2). Asset names use that version. Each `.tar.gz` holds a top-level directory `sc-v<version>-<target>/` with `sc`, `sc-mcp` (the MCP server), `LICENSE`, and `README.md`.
 
 Install `sc` and `sc-mcp` into `~/.local/bin`. The script picks the release archive for this OS and architecture and checks it against `SHA256SUMS` before copying either binary:
 
@@ -167,7 +167,7 @@ Install `sc` and `sc-mcp` into `~/.local/bin`. The script picks the release arch
 curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/moonbase2090/Scorecard/main/install.sh | sh
 ```
 
-Set `SC_VERSION` (for example `0.2.1`) to pin that release. With no pin, the script installs the latest release. Linux and macOS use the `.tar.gz` assets (arm64 and x86_64). Windows x86_64 uses the `.zip` when the script runs under Git Bash or another Unix shell. The script stops before it installs anything when the checksum does not match, the platform has no asset, or neither `sha256sum` nor `shasum` is available. When `~/.local/bin` is not on `PATH`, the script prints the `export` line to add.
+Set `SC_VERSION` (for example `0.2.2`) to pin that release. With no pin, the script installs the latest release. Linux and macOS use the `.tar.gz` assets (arm64 and x86_64). Windows x86_64 uses the `.zip` when the script runs under Git Bash or another Unix shell. The script stops before it installs anything when the checksum does not match, the platform has no asset, or neither `sha256sum` nor `shasum` is available. When `~/.local/bin` is not on `PATH`, the script prints the `export` line to add.
 
 | Platform | Asset |
 |---|---|
@@ -178,7 +178,7 @@ Set `SC_VERSION` (for example `0.2.1`) to pin that release. With no pin, the scr
 | Linux, x86_64 | `sc-v<version>-x86_64-unknown-linux-gnu.tar.gz` |
 | Windows, x86_64 | `sc-v<version>-x86_64-pc-windows-msvc.zip` |
 
-The v0.2.1 Linux binaries require glibc 2.39 or newer.
+The v0.2.2 Linux binaries support glibc 2.36 and newer.
 
 ### Homebrew
 

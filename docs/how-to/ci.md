@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0     # --diff needs the base commit
-      - uses: moonbase2090/Scorecard/action@v0.2.1
+      - uses: moonbase2090/Scorecard/action@v0.2.2
         with:
           diff: origin/${{ github.base_ref }}
 ```
@@ -31,7 +31,7 @@ Every run generates JSON, Markdown, SARIF, and HTML reports, emits finding annot
 | `format` | `sarif` | Upload selection: `sarif` uploads code scanning results on public repositories; `html` uploads all reports as an artifact; `all` does both; `json` and `md` skip uploads. Every selection generates all reports, annotations, and the job summary. |
 | `spec` | `""` | Path for `--spec` |
 | `mutation` | `off` | `off`, `diff`, or `full` |
-| `version` | the action's tag | `sc` release to install, such as `0.1.10` |
+| `version` | the action's tag | `sc` release to install, such as `0.2.2` |
 | `budget-seconds` | empty | Passed as `--budget-seconds` when set. Empty uses `budget_seconds` in the project's `analyzer.toml`, or 120 when that key is unset. |
 
 The runner needs the tools your pack uses (a Rust toolchain, Python with pytest, and so on); see [packs](../packs.md). A missing coverage tool does not fail the job, and the report says coverage was not measured.
@@ -43,7 +43,7 @@ Do not extract a release tarball inside your repository checkout. The archive co
 Download and install outside the checkout (example uses `$RUNNER_TEMP` on GitHub Actions):
 
 ```bash doctest network
-VER=0.2.1
+VER=0.2.2
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64) TRIPLE=aarch64-apple-darwin ;;
   Darwin-x86_64) TRIPLE=x86_64-apple-darwin ;;
