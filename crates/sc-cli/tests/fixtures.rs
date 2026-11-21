@@ -1013,7 +1013,7 @@ fn require_on_path(tool: &str) {
         .unwrap_or(false);
     assert!(
         found,
-        "this test analyzes a Node project and needs `{tool}` on PATH. Install Node (which provides node and npm) and rerun `cargo test -p sc-cli --test fixtures`."
+        "this test analyzes a Node project and needs `{tool}` on PATH. Install Node (which provides node and npm) and rerun `cargo test -p scorecard-cli --test fixtures`."
     );
 }
 

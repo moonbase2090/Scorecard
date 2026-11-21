@@ -6,15 +6,15 @@ expression: "styled_snapshot(&grid, &clusters)"
 ┌Gates─────────────┐┌Scorecard─────────────────────────────┐
 │> PASS types      ││Overview Findings [40] Engines [2]    │
 │  FAIL tests      ││                                      │
-│  REPORT sca      ││Saved analysis                        │
-│                  ││Run sc analyze to refresh this report.│
+│  REPORT sca      ││Saved analysis | FAIL                 │
 │                  ││                                      │
 │                  ││Selected gate: types                  │
 │                  ││Result: PASS                          │
 │                  ││Enforced: yes                         │
 │                  ││                                      │
+│                  ││                                      │
 └──────────────────┘└──────────────────────────────────────┘
-FAIL | 3 gates | j/k gates | Tab tabs | q quit | saved repor
+FAIL | 3 gates | j/k gates | PgUp/PgDn | Tab tabs | q quit  
 @fg
 0:0:1 Default
 0:1:1 Default
@@ -517,44 +517,44 @@ FAIL | 3 gates | j/k gates | Tab tabs | q quit | saved repor
 8:18:1 Default
 8:19:1 Default
 8:20:1 Default
-8:21:1 Rgb(205, 214, 244)
-8:22:1 Rgb(205, 214, 244)
-8:23:1 Rgb(205, 214, 244)
-8:24:1 Rgb(205, 214, 244)
-8:25:1 Rgb(205, 214, 244)
-8:26:1 Rgb(205, 214, 244)
-8:27:1 Rgb(205, 214, 244)
-8:28:1 Rgb(205, 214, 244)
-8:29:1 Rgb(205, 214, 244)
-8:30:1 Rgb(205, 214, 244)
-8:31:1 Rgb(205, 214, 244)
-8:32:1 Rgb(205, 214, 244)
-8:33:1 Rgb(205, 214, 244)
-8:34:1 Rgb(205, 214, 244)
-8:35:1 Rgb(205, 214, 244)
-8:36:1 Rgb(205, 214, 244)
-8:37:1 Rgb(205, 214, 244)
-8:38:1 Rgb(205, 214, 244)
-8:39:1 Rgb(205, 214, 244)
-8:40:1 Rgb(205, 214, 244)
-8:41:1 Rgb(205, 214, 244)
-8:42:1 Rgb(205, 214, 244)
-8:43:1 Rgb(205, 214, 244)
-8:44:1 Rgb(205, 214, 244)
-8:45:1 Rgb(205, 214, 244)
-8:46:1 Rgb(205, 214, 244)
-8:47:1 Rgb(205, 214, 244)
-8:48:1 Rgb(205, 214, 244)
-8:49:1 Rgb(205, 214, 244)
-8:50:1 Rgb(205, 214, 244)
-8:51:1 Rgb(205, 214, 244)
-8:52:1 Rgb(205, 214, 244)
-8:53:1 Rgb(205, 214, 244)
-8:54:1 Rgb(205, 214, 244)
-8:55:1 Rgb(205, 214, 244)
-8:56:1 Rgb(205, 214, 244)
-8:57:1 Rgb(205, 214, 244)
-8:58:1 Rgb(205, 214, 244)
+8:21:1 Default
+8:22:1 Default
+8:23:1 Default
+8:24:1 Default
+8:25:1 Default
+8:26:1 Default
+8:27:1 Default
+8:28:1 Default
+8:29:1 Default
+8:30:1 Default
+8:31:1 Default
+8:32:1 Default
+8:33:1 Default
+8:34:1 Default
+8:35:1 Default
+8:36:1 Default
+8:37:1 Default
+8:38:1 Default
+8:39:1 Default
+8:40:1 Default
+8:41:1 Default
+8:42:1 Default
+8:43:1 Default
+8:44:1 Default
+8:45:1 Default
+8:46:1 Default
+8:47:1 Default
+8:48:1 Default
+8:49:1 Default
+8:50:1 Default
+8:51:1 Default
+8:52:1 Default
+8:53:1 Default
+8:54:1 Default
+8:55:1 Default
+8:56:1 Default
+8:57:1 Default
+8:58:1 Default
 8:59:1 Default
 9:0:1 Default
 9:1:1 Default
@@ -1238,44 +1238,44 @@ FAIL | 3 gates | j/k gates | Tab tabs | q quit | saved repor
 8:18:1 Default
 8:19:1 Default
 8:20:1 Default
-8:21:1 Rgb(30, 30, 46)
-8:22:1 Rgb(30, 30, 46)
-8:23:1 Rgb(30, 30, 46)
-8:24:1 Rgb(30, 30, 46)
-8:25:1 Rgb(30, 30, 46)
-8:26:1 Rgb(30, 30, 46)
-8:27:1 Rgb(30, 30, 46)
-8:28:1 Rgb(30, 30, 46)
-8:29:1 Rgb(30, 30, 46)
-8:30:1 Rgb(30, 30, 46)
-8:31:1 Rgb(30, 30, 46)
-8:32:1 Rgb(30, 30, 46)
-8:33:1 Rgb(30, 30, 46)
-8:34:1 Rgb(30, 30, 46)
-8:35:1 Rgb(30, 30, 46)
-8:36:1 Rgb(30, 30, 46)
-8:37:1 Rgb(30, 30, 46)
-8:38:1 Rgb(30, 30, 46)
-8:39:1 Rgb(30, 30, 46)
-8:40:1 Rgb(30, 30, 46)
-8:41:1 Rgb(30, 30, 46)
-8:42:1 Rgb(30, 30, 46)
-8:43:1 Rgb(30, 30, 46)
-8:44:1 Rgb(30, 30, 46)
-8:45:1 Rgb(30, 30, 46)
-8:46:1 Rgb(30, 30, 46)
-8:47:1 Rgb(30, 30, 46)
-8:48:1 Rgb(30, 30, 46)
-8:49:1 Rgb(30, 30, 46)
-8:50:1 Rgb(30, 30, 46)
-8:51:1 Rgb(30, 30, 46)
-8:52:1 Rgb(30, 30, 46)
-8:53:1 Rgb(30, 30, 46)
-8:54:1 Rgb(30, 30, 46)
-8:55:1 Rgb(30, 30, 46)
-8:56:1 Rgb(30, 30, 46)
-8:57:1 Rgb(30, 30, 46)
-8:58:1 Rgb(30, 30, 46)
+8:21:1 Default
+8:22:1 Default
+8:23:1 Default
+8:24:1 Default
+8:25:1 Default
+8:26:1 Default
+8:27:1 Default
+8:28:1 Default
+8:29:1 Default
+8:30:1 Default
+8:31:1 Default
+8:32:1 Default
+8:33:1 Default
+8:34:1 Default
+8:35:1 Default
+8:36:1 Default
+8:37:1 Default
+8:38:1 Default
+8:39:1 Default
+8:40:1 Default
+8:41:1 Default
+8:42:1 Default
+8:43:1 Default
+8:44:1 Default
+8:45:1 Default
+8:46:1 Default
+8:47:1 Default
+8:48:1 Default
+8:49:1 Default
+8:50:1 Default
+8:51:1 Default
+8:52:1 Default
+8:53:1 Default
+8:54:1 Default
+8:55:1 Default
+8:56:1 Default
+8:57:1 Default
+8:58:1 Default
 8:59:1 Default
 9:0:1 Default
 9:1:1 Default

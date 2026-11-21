@@ -54,7 +54,7 @@ Command flags override matching config settings. Every run writes `.sc/last-scor
 
 Read saved dimension scores from `PATH` (default `.sc/last-scorecard.json`) and print Shields.io endpoint JSON without scanning or network access. The overall score equally averages all five dimensions, rounds to 0 to 100, and grades A at 90, B at 80, C at 70, D at 60, and F below 60. This summarizes findings; skipped engines can leave dimensions unpenalized. Gates still decide the verdict. When the report has `analyzer_error` set, the badge message is `error` and there is no letter grade, even if the dimension scores are perfect. Exit 2 means the report is missing or invalid, no engines ran, or a dimension is outside 0 to 1. An analyzer error still exits 0: the badge shows `error`.
 
-Verify changes to overall scoring with `cargo test -p sc-core --lib overall` and `cargo test -p sc-cli --test overall`. Then analyze a real project with `--overall-score --format all --out REPORT`, check the JSON `overall` against the displayed rows, and run `sc badge --input REPORT.json` to inspect the badge.
+Verify changes to overall scoring with `cargo test -p sc-core --lib overall` and `cargo test -p scorecard-cli --test overall`. Then analyze a real project with `--overall-score --format all --out REPORT`, check the JSON `overall` against the displayed rows, and run `sc badge --input REPORT.json` to inspect the badge.
 
 ### `sc config`
 
@@ -195,3 +195,12 @@ Every measured frame must be at most 16 ms. Review snapshot text and style chang
 individually before accepting them. See `docs/how-to/tui.md` for the measured scope.
 Record both commands and their results at the PR head; a passing default-feature
 workspace test does not cover the browser.
+
+## Verify Python uv runners
+
+After changing Python runner selection, build `sc` and run
+`python3 scripts/verify-python-uv.py target/debug/sc`. This uses real uv
+projects with `dev` and `test` groups, optional extras, and neither. Each
+pytest gate must pass, and coverage.py must produce a JSON report. Groups
+use `--group`; extras use `--extra`. A uv setup failure is reported as
+`engine.unavailable`, without claiming that pytest ran and failed.

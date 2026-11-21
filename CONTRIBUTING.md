@@ -13,7 +13,7 @@
 
 Keep pull requests small and focused. One commit per logical change.
 
-Every PR update also runs the optional TUI checks and the `tui-perf` maximum-frame
+Every PR update also runs the TUI checks and the `tui-perf` maximum-frame
 budget. See [TUI verification](docs/how-to/tui.md) for local commands and timing scope.
 
 Every PR update runs `check-ubuntu` (fmt, clippy, the full fixture test
@@ -36,7 +36,7 @@ All four must pass from the repo root:
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --locked
-./target/release/sc analyze . --budget-seconds 600   # build sc first: cargo build --release -p sc-cli
+./target/release/sc analyze . --budget-seconds 600   # build sc first: cargo build --release -p scorecard-cli
 ```
 
 The full instrumented suite is slower than the default 120s wall-clock

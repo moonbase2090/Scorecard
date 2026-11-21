@@ -139,7 +139,7 @@ The CI leaf adds `check-windows` on `windows-latest` with `continue-on-error: tr
 
 `release.yml` builds a universal Apple disk image and two Linux `.tar.gz` archives (`x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`). `publish` runs only when the Apple job reports `signed=true`.
 
-The release leaf adds a Windows job that builds `--target x86_64-pc-windows-msvc` for `sc-cli` and `sc-mcp` and writes:
+The release leaf adds a Windows job that builds `--target x86_64-pc-windows-msvc` for `scorecard-cli` and `sc-mcp` and writes:
 
 `sc-v<version>-x86_64-pc-windows-msvc.zip`
 

@@ -30,8 +30,8 @@ else
   git -C "$tmp/tap" checkout -b "$branch" "origin/$base"
 fi
 
-python3 scripts/update-homebrew-formula.py "$version" "$2" "$tmp/tap/Formula/sc.rb"
-git -C "$tmp/tap" add Formula/sc.rb
+python3 scripts/update-homebrew-formula.py "$version" "$2" "$tmp/tap/Formula/scorecard-cli.rb"
+git -C "$tmp/tap" add Formula/scorecard-cli.rb
 if ! git -C "$tmp/tap" diff --cached --quiet; then
   git -C "$tmp/tap" config user.name "MB2090"
   git -C "$tmp/tap" config user.email "322824348+mb2090@users.noreply.github.com"
@@ -42,13 +42,13 @@ fi
 existing_pr=$(gh pr list --repo "$tap_repo" --base "$base" --head "$branch" --json url --jq '.[0].url // empty')
 if [ -n "$existing_pr" ]; then
   echo "Updated Homebrew formula PR: $existing_pr"
-elif git -C "$tmp/tap" diff "origin/$base" --quiet -- Formula/sc.rb; then
+elif git -C "$tmp/tap" diff "origin/$base" --quiet -- Formula/scorecard-cli.rb; then
   echo "Homebrew formula already matches v$version; no PR is needed."
 else
   gh pr create --repo "$tap_repo" --base "$base" --head "$branch" \
     --title "Update Homebrew formula to $version" \
     --body "## What
-Updates the Homebrew formula to Scorecard v$version.
+Updates the scorecard-cli Homebrew formula to Scorecard v$version.
 
 ## Class
 Leaf; this updates the formula for a published release.

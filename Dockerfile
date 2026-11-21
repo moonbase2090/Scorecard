@@ -13,7 +13,7 @@ COPY crates ./crates
 COPY skills ./skills
 COPY analyzer.toml.example ./
 
-RUN cargo build --release --locked -p sc-cli -p sc-mcp
+RUN cargo build --release --locked -p scorecard-cli -p sc-mcp
 
 FROM debian:bookworm-slim
 

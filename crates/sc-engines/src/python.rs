@@ -450,6 +450,33 @@ fn coverage_tests_skip_reason(
     }
 }
 
+/// Select only declared test/development dependencies. Groups and extras can
+/// coexist, and neither namespace implies that the other contains the name.
+fn uv_run(root: &Path) -> String {
+    let manifest = std::fs::read_to_string(root.join("pyproject.toml"))
+        .ok()
+        .and_then(|text| text.parse::<toml::Value>().ok());
+    let mut command = "uv run".to_string();
+    if let Some(manifest) = manifest {
+        let groups = manifest
+            .get("dependency-groups")
+            .and_then(toml::Value::as_table);
+        let extras = manifest
+            .get("project")
+            .and_then(|project| project.get("optional-dependencies"))
+            .and_then(toml::Value::as_table);
+        for name in ["dev", "test"] {
+            if groups.is_some_and(|groups| groups.contains_key(name)) {
+                command.push_str(&format!(" --group {name}"));
+            }
+            if extras.is_some_and(|extras| extras.contains_key(name)) {
+                command.push_str(&format!(" --extra {name}"));
+            }
+        }
+    }
+    command
+}
+
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
 fn run_pytest(
@@ -480,7 +507,7 @@ fn run_pytest(
         return (false, true, NO_PYTEST_SUITE.into());
     }
     let base = if root.join("uv.lock").is_file() || root.join(".venv").is_dir() {
-        "uv run --extra dev --with pytest-cov pytest -q".to_string()
+        format!("{} --with pytest-cov pytest -q", uv_run(root))
     } else {
         "python3 -m pytest -q".to_string()
     };
@@ -500,6 +527,7 @@ fn run_pytest(
     let captured = match shell(root, &command, deadline) {
         Ok(captured)
             if !captured.status.success()
+                && !uv_setup_failed(&command, &captured.stderr)
                 && (tool_missing(&captured.stderr, &captured.stdout)
                     || captured.stderr.contains("unrecognized arguments")
                     || captured.stderr.contains("pytest-cov")) =>
@@ -527,6 +555,13 @@ fn run_pytest(
     }
 }
 
+fn uv_setup_failed(command: &str, stderr: &str) -> bool {
+    (command.starts_with("uv ") || command.contains(" uv run "))
+        && stderr.lines().any(|line| {
+            line.starts_with("error:") || line.trim_start().starts_with("× No solution found")
+        })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn record_pytest_output(
     findings: &mut Vec<Finding>,
@@ -550,6 +585,16 @@ fn record_pytest_output(
         skipped.push("tests".into());
         findings.push(missing_tool("tests", message));
         return (true, false, message.into());
+    }
+    if uv_setup_failed(command, stderr) {
+        skipped.push("tests".into());
+        let message = format!("uv setup failed; pytest did not run: {}", brief(stderr));
+        let mut finding = unavailable("tests", &message);
+        finding.suggested_action = Some(format!(
+            "Fix the uv environment error, then run `{executed}` and re-run `sc analyze`"
+        ));
+        findings.push(finding);
+        return (true, false, "uv setup failed; pytest did not run".into());
     }
     ran.push("tests".into());
     let detail = brief(&format!("{stdout}\n{stderr}"));
@@ -679,8 +724,9 @@ fn coverage_fallback_command(
         tests.push_str(&crate::command::shell_quote_arg(target));
     }
     if root.join("uv.lock").is_file() || root.join(".venv").is_dir() {
+        let runner = uv_run(root);
         format!(
-            "{pythonpath}uv run --extra dev --with coverage coverage run {source_flags} -m pytest -q{tests} && uv run --extra dev --with coverage coverage json -o {output}"
+            "{pythonpath}{runner} --with coverage coverage run {source_flags} -m pytest -q{tests} && {runner} --with coverage coverage json -o {output}"
         )
     } else {
         format!(
@@ -1387,6 +1433,81 @@ fn error_finding(id: &str, rule: &str, engine: &str, message: String, action: &s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn uv_runner_selects_declared_groups_and_extras() {
+        let dir = scratch("uv-dependencies");
+        for (manifest, expected) in [
+            ("[dependency-groups]\ndev = []\n", "uv run --group dev"),
+            ("[dependency-groups]\ntest = []\n", "uv run --group test"),
+            ("[project.optional-dependencies]\ndev = []\n", "uv run --extra dev"),
+            ("[project.optional-dependencies]\ntest = []\n", "uv run --extra test"),
+            ("[dependency-groups]\ndev = []\ntest = []\n[project.optional-dependencies]\ndev = []\ntest = []\n", "uv run --group dev --extra dev --group test --extra test"),
+            ("[dependency-groups]\ndocs = []\n[project.optional-dependencies]\nweb = []\n", "uv run"),
+            ("[tool.uv]\ndev-dependencies = []\n", "uv run"),
+            ("invalid TOML [", "uv run"),
+        ] {
+            std::fs::write(dir.join("pyproject.toml"), manifest).unwrap();
+            assert_eq!(uv_run(&dir), expected, "{manifest}");
+            std::fs::write(dir.join("uv.lock"), "").unwrap();
+            let command = coverage_fallback_command(&dir, Path::new("coverage.json"), &[".".into()], &[]);
+            assert_eq!(command, format!("{expected} --with coverage coverage run --source='.' -m pytest -q && {expected} --with coverage coverage json -o coverage.json"));
+        }
+        std::fs::remove_file(dir.join("pyproject.toml")).unwrap();
+        assert_eq!(uv_run(&dir), "uv run");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn uv_setup_errors_are_unavailable_but_pytest_errors_are_test_failures() {
+        for (stderr, rule, expected_ran, expected_skipped, reason) in [
+            (
+                "error: Extra `dev` is not defined",
+                "engine.unavailable",
+                vec![],
+                vec!["tests"],
+                "uv setup failed; pytest did not run",
+            ),
+            (
+                "  × No solution found when resolving dependencies",
+                "engine.unavailable",
+                vec![],
+                vec!["tests"],
+                "uv setup failed; pytest did not run",
+            ),
+            (
+                "ERROR collecting tests/test_app.py",
+                "test.failed",
+                vec!["tests"],
+                vec![],
+                "pytest failed",
+            ),
+        ] {
+            let mut findings = Vec::new();
+            let mut runs = Vec::new();
+            let mut ran = Vec::new();
+            let mut skipped = Vec::new();
+            let outcome = record_pytest_output(
+                &mut findings,
+                &mut runs,
+                &mut ran,
+                &mut skipped,
+                "uv run --with pytest-cov pytest -q",
+                "uv run --with pytest-cov pytest -q",
+                false,
+                Some(2),
+                "",
+                stderr,
+                Duration::ZERO,
+            );
+            assert_eq!(outcome, (true, false, reason.into()));
+            assert_eq!(findings.len(), 1);
+            assert_eq!(findings[0].rule, rule);
+            assert_eq!(ran, expected_ran);
+            assert_eq!(skipped, expected_skipped);
+            assert_eq!(runs[0].exit_code, Some(2));
+        }
+    }
 
     #[test]
     fn pytest_command_omits_cov_flags_when_coverage_is_disabled() {
@@ -2121,10 +2242,10 @@ dev = ["pytest>=8"]
         std::fs::create_dir(dir.join(".venv")).unwrap();
         let venv = coverage_fallback_command(&dir, &cov_file, &sources, &[]);
         assert!(venv.starts_with(
-            "PYTHONPATH='src'${PYTHONPATH:+:\"$PYTHONPATH\"} uv run --extra dev --with coverage coverage run --source='src' --source='.' -m pytest -q && "
+            "PYTHONPATH='src'${PYTHONPATH:+:\"$PYTHONPATH\"} uv run --with coverage coverage run --source='src' --source='.' -m pytest -q && "
         ));
         assert!(venv.contains(&format!(
-            "uv run --extra dev --with coverage coverage json -o {}",
+            "uv run --with coverage coverage json -o {}",
             cov_file.display()
         )));
         let _ = std::fs::remove_dir(dir.join(".venv"));

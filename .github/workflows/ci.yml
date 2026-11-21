@@ -40,11 +40,11 @@ jobs:
           targets: x86_64-pc-windows-msvc
       - name: Build
         shell: bash
-        run: cargo build --release --locked -p sc-cli -p sc-mcp --target x86_64-pc-windows-msvc
+        run: cargo build --release --locked -p scorecard-cli -p sc-mcp --target x86_64-pc-windows-msvc
       - name: Package and verify
         shell: bash
         run: |
-          version="$(cargo pkgid -p sc-cli | sed 's/.*[#@]//')"
+          version="$(cargo pkgid -p scorecard-cli | sed 's/.*[#@]//')"
           bash scripts/package-windows-release.sh "$version"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -313,7 +313,7 @@ jobs:
           coverage: pcov
           tools: phpunit, phpstan
       - name: Build sc
-        run: cargo build --release --locked -p sc-cli
+        run: cargo build --release --locked -p scorecard-cli
       # The full instrumented suite is slower on runners than on a dev
       # Mac; the 120s per-command default starves cargo test and clippy.
       - name: Analyze self
