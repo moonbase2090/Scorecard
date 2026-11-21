@@ -1339,7 +1339,7 @@ dependencies = [
 
 [[package]]
 name = "sc-core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "criterion",
  "serde",
@@ -1351,7 +1351,7 @@ dependencies = [
 
 [[package]]
 name = "sc-engines"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "html5ever",
  "rustc-demangle",
@@ -1368,7 +1368,7 @@ dependencies = [
 
 [[package]]
 name = "sc-graph"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "ignore",
  "proc-macro2",
@@ -1379,7 +1379,7 @@ dependencies = [
 
 [[package]]
 name = "sc-llm"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -1388,7 +1388,7 @@ dependencies = [
 
 [[package]]
 name = "sc-mcp"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "sc-core",
  "sc-engines",
@@ -1397,11 +1397,11 @@ dependencies = [
 
 [[package]]
 name = "sc-mutation"
-version = "0.2.1"
+version = "0.2.2"
 
 [[package]]
 name = "sc-sarif"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "sc-core",
  "serde_json",
@@ -1415,7 +1415,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "scorecard-cli"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anstyle",
  "clap",

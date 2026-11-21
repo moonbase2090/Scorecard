@@ -4,6 +4,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-21
+
+### Added
+
+- `sc tui` is included in default builds. The saved report shows skipped-test reasons and opens scrollable finding details with the complete message, suggested action, and evidence.
+
+### Fixed
+
+- Python analysis selects the `dev` and `test` groups and extras declared in the project manifest when running tests with uv. A uv setup failure now reports that pytest did not run.
+- Linux release archives are built on Debian 12 for arm64 and x86_64, with support for glibc 2.36.
+- The install guide uses the canonical Homebrew formula name and shows how to check the installed version.
+
+### Changed
+
+- Source installs and binary package metadata use the Cargo package name `scorecard-cli`. The installed command remains `sc`.
+- Updated `clap` and `termlens` dependencies.
+
 ## [0.2.1] - 2026-11-10
 
 ### Fixed
