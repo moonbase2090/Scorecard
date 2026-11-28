@@ -28,7 +28,7 @@ lunatui-core = { git = "https://github.com/moonbase2090/lunatui", tag = "v0.1.32
 lunatui-runtime = { git = "https://github.com/moonbase2090/lunatui", tag = "v0.1.32", optional = true, features = ["app"] }
 lunatui-term = { git = "https://github.com/moonbase2090/lunatui", tag = "v0.1.32", optional = true }
 lunatui-theme = { git = "https://github.com/moonbase2090/lunatui", tag = "v0.1.32", optional = true }
-lunatui-widgets = { git = "https://github.com/moonbase2090/lunatui", tag = "v0.1.32", optional = true }
+lunatui-widgets = { git = "https://github.com/moonbase2090/lunatui", tag = "v0.1.40", optional = true }
 url = "2"
 terminal_size = { version = "0.4", optional = true }
 sc-core = { path = "../sc-core" }
