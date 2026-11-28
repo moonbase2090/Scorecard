@@ -24,7 +24,7 @@ default = ["tui"]
 tui = ["dep:lunatui-core", "dep:lunatui-runtime", "dep:lunatui-term", "dep:lunatui-theme", "dep:lunatui-widgets", "dep:terminal_size"]
 
 [dependencies]
-lunatui-core = { git = "https://github.com/moonbase2090/lunatui", tag = "v0.1.32", optional = true }
+lunatui-core = { git = "https://github.com/moonbase2090/lunatui", tag = "v0.1.40", optional = true }
 lunatui-runtime = { git = "https://github.com/moonbase2090/lunatui", tag = "v0.1.32", optional = true, features = ["app"] }
 lunatui-term = { git = "https://github.com/moonbase2090/lunatui", tag = "v0.1.32", optional = true }
 lunatui-theme = { git = "https://github.com/moonbase2090/lunatui", tag = "v0.1.32", optional = true }
