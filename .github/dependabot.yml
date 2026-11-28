@@ -7,6 +7,10 @@ updates:
     target-branch: develop
     open-pull-requests-limit: 5
     groups:
+      # These crates share a Git tag and pass types across crate boundaries.
+      lunatui:
+        patterns:
+          - "lunatui-*"
       minor-patch:
         applies-to: version-updates
         patterns:

@@ -257,6 +257,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "core_maths"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77745e017f5edba1a9c1d854f6f3a52dac8a12dd5af5d2f54aecf61e43d80d30"
+dependencies = [
+ "libm",
+]
+
+[[package]]
 name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -494,6 +503,15 @@ dependencies = [
  "crc32fast",
  "miniz_oxide 0.9.1",
  "zlib-rs",
+]
+
+[[package]]
+name = "fontdue"
+version = "0.9.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e796cb6894e6418daacea84b28dd4f98d3b32c74d5bb452ba1ecfbf5ad8e84ca"
+dependencies = [
+ "ttf-parser",
 ]
 
 [[package]]
@@ -829,6 +847,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
+name = "libm"
+version = "0.2.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -863,24 +887,29 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "lunatui-core"
-version = "0.1.32"
-source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.32#473b050d18203797895367735b7a9a452c09ee76"
+version = "0.1.45"
+source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.45#46c17f15f4d6e7c673e5e7b772b6e35f929b11c7"
 dependencies = [
  "unicode-segmentation",
 ]
 
 [[package]]
+name = "lunatui-fonts"
+version = "0.1.45"
+source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.45#46c17f15f4d6e7c673e5e7b772b6e35f929b11c7"
+
+[[package]]
 name = "lunatui-image"
-version = "0.1.32"
-source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.32#473b050d18203797895367735b7a9a452c09ee76"
+version = "0.1.45"
+source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.45#46c17f15f4d6e7c673e5e7b772b6e35f929b11c7"
 dependencies = [
  "lunatui-core",
 ]
 
 [[package]]
 name = "lunatui-layout"
-version = "0.1.32"
-source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.32#473b050d18203797895367735b7a9a452c09ee76"
+version = "0.1.45"
+source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.45#46c17f15f4d6e7c673e5e7b772b6e35f929b11c7"
 dependencies = [
  "lunatui-core",
  "num-bigint",
@@ -889,8 +918,8 @@ dependencies = [
 
 [[package]]
 name = "lunatui-runtime"
-version = "0.1.32"
-source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.32#473b050d18203797895367735b7a9a452c09ee76"
+version = "0.1.45"
+source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.45#46c17f15f4d6e7c673e5e7b772b6e35f929b11c7"
 dependencies = [
  "lunatui-core",
  "lunatui-image",
@@ -899,8 +928,8 @@ dependencies = [
 
 [[package]]
 name = "lunatui-term"
-version = "0.1.32"
-source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.32#473b050d18203797895367735b7a9a452c09ee76"
+version = "0.1.45"
+source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.45#46c17f15f4d6e7c673e5e7b772b6e35f929b11c7"
 dependencies = [
  "crossterm",
  "libc",
@@ -912,8 +941,8 @@ dependencies = [
 
 [[package]]
 name = "lunatui-test"
-version = "0.1.32"
-source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.32#473b050d18203797895367735b7a9a452c09ee76"
+version = "0.1.45"
+source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.45#46c17f15f4d6e7c673e5e7b772b6e35f929b11c7"
 dependencies = [
  "lunatui-core",
  "lunatui-term",
@@ -922,8 +951,8 @@ dependencies = [
 
 [[package]]
 name = "lunatui-text"
-version = "0.1.32"
-source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.32#473b050d18203797895367735b7a9a452c09ee76"
+version = "0.1.45"
+source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.45#46c17f15f4d6e7c673e5e7b772b6e35f929b11c7"
 dependencies = [
  "lunatui-core",
  "unicode-segmentation",
@@ -931,8 +960,8 @@ dependencies = [
 
 [[package]]
 name = "lunatui-theme"
-version = "0.1.32"
-source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.32#473b050d18203797895367735b7a9a452c09ee76"
+version = "0.1.45"
+source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.45#46c17f15f4d6e7c673e5e7b772b6e35f929b11c7"
 dependencies = [
  "lunatui-core",
  "serde",
@@ -942,10 +971,12 @@ dependencies = [
 
 [[package]]
 name = "lunatui-widgets"
-version = "0.1.32"
-source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.32#473b050d18203797895367735b7a9a452c09ee76"
+version = "0.1.45"
+source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.45#46c17f15f4d6e7c673e5e7b772b6e35f929b11c7"
 dependencies = [
+ "fontdue",
  "lunatui-core",
+ "lunatui-fonts",
  "lunatui-image",
  "lunatui-layout",
  "lunatui-runtime",
@@ -1861,6 +1892,15 @@ name = "toml_write"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
+
+[[package]]
+name = "ttf-parser"
+version = "0.25.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
+dependencies = [
+ "core_maths",
+]
 
 [[package]]
 name = "typenum"

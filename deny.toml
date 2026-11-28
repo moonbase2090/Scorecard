@@ -25,8 +25,9 @@ allow = [
 exceptions = [
   # The pinned widget crate's raster dependency uses arrayref.
   { crate = "arrayref@0.3.9", allow = ["BSD-2-Clause"] },
-  # The crate declares the font license even when its bigtext feature is disabled.
-  { crate = "lunatui-widgets@0.1.32", allow = ["OFL-1.1"] },
+  # The widgets and their bundled fonts declare MIT AND OFL-1.1.
+  { crate = "lunatui-widgets@0.1.45", allow = ["OFL-1.1"] },
+  { crate = "lunatui-fonts@0.1.45", allow = ["OFL-1.1"] },
 ]
 confidence-threshold = 0.8
 

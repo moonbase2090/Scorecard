@@ -24,11 +24,11 @@ default = ["tui"]
 tui = ["dep:lunatui-core", "dep:lunatui-runtime", "dep:lunatui-term", "dep:lunatui-theme", "dep:lunatui-widgets", "dep:terminal_size"]
 
 [dependencies]
-lunatui-core = { git = "https://github.com/moonbase2090/lunatui", tag = "v0.1.32", optional = true }
-lunatui-runtime = { git = "https://github.com/moonbase2090/lunatui", tag = "v0.1.32", optional = true, features = ["app"] }
-lunatui-term = { git = "https://github.com/moonbase2090/lunatui", tag = "v0.1.32", optional = true }
-lunatui-theme = { git = "https://github.com/moonbase2090/lunatui", tag = "v0.1.32", optional = true }
-lunatui-widgets = { git = "https://github.com/moonbase2090/lunatui", tag = "v0.1.32", optional = true }
+lunatui-core = { git = "https://github.com/moonbase2090/lunatui", tag = "v0.1.45", optional = true }
+lunatui-runtime = { git = "https://github.com/moonbase2090/lunatui", tag = "v0.1.45", optional = true, features = ["app"] }
+lunatui-term = { git = "https://github.com/moonbase2090/lunatui", tag = "v0.1.45", optional = true }
+lunatui-theme = { git = "https://github.com/moonbase2090/lunatui", tag = "v0.1.45", optional = true }
+lunatui-widgets = { git = "https://github.com/moonbase2090/lunatui", tag = "v0.1.45", optional = true }
 url = "2"
 terminal_size = { version = "0.4", optional = true }
 sc-core = { path = "../sc-core" }
@@ -50,7 +50,7 @@ windows-sys = { version = "0.61", features = [
 
 [dev-dependencies]
 insta = { version = "1.43", default-features = false }
-lunatui-test = { git = "https://github.com/moonbase2090/lunatui", tag = "v0.1.32" }
+lunatui-test = { git = "https://github.com/moonbase2090/lunatui", tag = "v0.1.45" }
 termlens = { version = "=0.11.11", default-features = false }
 
 [[test]]
