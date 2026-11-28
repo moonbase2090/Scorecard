@@ -450,7 +450,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -870,11 +870,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "lunatui-core"
+version = "0.1.40"
+source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.40#9a722cf04ce9da97349e7448565bcccaa4c805b0"
+dependencies = [
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "lunatui-image"
 version = "0.1.32"
 source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.32#473b050d18203797895367735b7a9a452c09ee76"
 dependencies = [
- "lunatui-core",
+ "lunatui-core 0.1.32",
 ]
 
 [[package]]
@@ -882,7 +890,7 @@ name = "lunatui-layout"
 version = "0.1.32"
 source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.32#473b050d18203797895367735b7a9a452c09ee76"
 dependencies = [
- "lunatui-core",
+ "lunatui-core 0.1.32",
  "num-bigint",
  "num-traits",
 ]
@@ -892,9 +900,9 @@ name = "lunatui-runtime"
 version = "0.1.32"
 source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.32#473b050d18203797895367735b7a9a452c09ee76"
 dependencies = [
- "lunatui-core",
+ "lunatui-core 0.1.32",
  "lunatui-image",
- "lunatui-term",
+ "lunatui-term 0.1.32",
 ]
 
 [[package]]
@@ -904,19 +912,30 @@ source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.32#473b050d182037
 dependencies = [
  "crossterm",
  "libc",
- "lunatui-core",
+ "lunatui-core 0.1.32",
  "lunatui-image",
  "png",
  "rustix",
 ]
 
 [[package]]
-name = "lunatui-test"
-version = "0.1.32"
-source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.32#473b050d18203797895367735b7a9a452c09ee76"
+name = "lunatui-term"
+version = "0.1.40"
+source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.40#9a722cf04ce9da97349e7448565bcccaa4c805b0"
 dependencies = [
- "lunatui-core",
- "lunatui-term",
+ "crossterm",
+ "libc",
+ "lunatui-core 0.1.40",
+ "rustix",
+]
+
+[[package]]
+name = "lunatui-test"
+version = "0.1.40"
+source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.40#9a722cf04ce9da97349e7448565bcccaa4c805b0"
+dependencies = [
+ "lunatui-core 0.1.40",
+ "lunatui-term 0.1.40",
  "vt100 0.16.2",
 ]
 
@@ -925,7 +944,7 @@ name = "lunatui-text"
 version = "0.1.32"
 source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.32#473b050d18203797895367735b7a9a452c09ee76"
 dependencies = [
- "lunatui-core",
+ "lunatui-core 0.1.32",
  "unicode-segmentation",
 ]
 
@@ -934,7 +953,7 @@ name = "lunatui-theme"
 version = "0.1.32"
 source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.32#473b050d18203797895367735b7a9a452c09ee76"
 dependencies = [
- "lunatui-core",
+ "lunatui-core 0.1.32",
  "serde",
  "serde_json",
  "toml",
@@ -945,11 +964,11 @@ name = "lunatui-widgets"
 version = "0.1.32"
 source = "git+https://github.com/moonbase2090/lunatui?tag=v0.1.32#473b050d18203797895367735b7a9a452c09ee76"
 dependencies = [
- "lunatui-core",
+ "lunatui-core 0.1.32",
  "lunatui-image",
  "lunatui-layout",
  "lunatui-runtime",
- "lunatui-term",
+ "lunatui-term 0.1.32",
  "lunatui-text",
  "lunatui-theme",
  "tiny-skia",
@@ -1284,7 +1303,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1421,9 +1440,9 @@ dependencies = [
  "clap",
  "insta",
  "libc",
- "lunatui-core",
+ "lunatui-core 0.1.32",
  "lunatui-runtime",
- "lunatui-term",
+ "lunatui-term 0.1.32",
  "lunatui-test",
  "lunatui-theme",
  "lunatui-widgets",
@@ -1694,7 +1713,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2110,7 +2129,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
